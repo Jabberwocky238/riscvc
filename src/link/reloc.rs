@@ -13,6 +13,10 @@ impl Linker {
                     continue;
                 }
                 for r in sec.relocs.clone() {
+                    // 松弛提示（`R_RISCV_RELAX` / `R_RISCV_ALIGN`，带的是 0 号空符号）与 NONE：⛔ 不做松弛，空操作（同 lld --no-relax）
+                    if matches!(r.r_type, elf::R_RISCV_NONE | elf::R_RISCV_RELAX | elf::R_RISCV_ALIGN) {
+                        continue;
+                    }
                     let p = base + r.offset;
                     let at = usize::try_from(p - self.outs[out].addr).unwrap_or_default();
                     let target = self.target(o, r.sym)?;

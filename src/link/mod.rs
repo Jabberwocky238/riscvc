@@ -59,6 +59,8 @@ pub struct Out {
     pub ty: u32,
     pub flags: u64,
     pub align: u64,
+    /// 项长：输入节的都一样就沿用，否则 0（同 lld）。
+    pub entsize: u64,
     pub addr: u64,
     pub lma: u64,
     pub size: u64,
@@ -73,7 +75,7 @@ pub struct Out {
 
 impl Out {
     fn new(name: &str, script: Option<OutSec>) -> Self {
-        Self { name: String::from(name), ty: elf::SHT_PROGBITS, flags: 0, align: 1, addr: 0, lma: 0, size: 0, pieces: Vec::new(), script, data: Vec::new(), rank: 0, inputs: false }
+        Self { name: String::from(name), ty: elf::SHT_PROGBITS, flags: 0, align: 1, entsize: 0, addr: 0, lma: 0, size: 0, pieces: Vec::new(), script, data: Vec::new(), rank: 0, inputs: false }
     }
 
     /// 同 lld 的 `getSectionRank`（RISC-V、无 `-Ttext` 一类、`-z relro`）：位越高的类别越靠后。
@@ -233,7 +235,7 @@ impl Linker {
             let Some(Def::Obj(so, si)) = self.globals.get(name).copied() else { continue };
             let s = &self.objs[so].syms[si];
             let Place::Common(align) = s.place else { continue };
-            obj.sections.push(Some(InSec { name: String::from("COMMON"), ty: elf::SHT_NOBITS, flags: u64::from(elf::SHF_ALLOC | elf::SHF_WRITE), align: align.max(1), data: Vec::new(), size: s.size, relocs: Vec::new() }));
+            obj.sections.push(Some(InSec { name: String::from("COMMON"), ty: elf::SHT_NOBITS, flags: u64::from(elf::SHF_ALLOC | elf::SHF_WRITE), align: align.max(1), entsize: 0, data: Vec::new(), size: s.size, relocs: Vec::new() }));
             obj.syms.push(InSym { name: name.clone(), place: Place::Section(obj.sections.len() - 1), value: 0, size: s.size, bind: elf::STB_GLOBAL, ty: elf::STT_OBJECT, other: s.other });
             self.globals.insert(name.clone(), Def::Obj(o, obj.syms.len() - 1));
         }
@@ -284,17 +286,19 @@ impl Linker {
                 self.slots.push(Slot::Out(self.outs.len() - 1));
             }
         }
-        // 孤儿：按名字归并（同 lld 的 getOutputSectionName），按出现次序
+        // 孤儿：按名字归并（同 lld 的 getOutputSectionName + findByName：有 SECTIONS 时不改名，
+        // 与脚本里同名的输出节也算），按出现次序
         let first_orphan = self.outs.len();
+        let has_sections = self.script.cmds.iter().any(|c| matches!(c, Cmd::Section(_)));
         for (o, obj) in self.objs.iter().enumerate() {
             for (i, s) in obj.sections.iter().enumerate() {
                 let Some(s) = s else { continue };
                 if taken.contains_key(&(o, i)) || s.ty == elf::SHT_RISCV_ATTRIBUTES || (!s.alloc() && s.size == 0) {
                     continue;
                 }
-                let name = Self::orphan_name(&s.name);
-                let at = match self.outs[first_orphan..].iter().position(|out| out.name == name) {
-                    Some(at) => first_orphan + at,
+                let name = Self::orphan_name(&s.name, has_sections);
+                let at = match self.outs.iter().position(|out| out.name == name) {
+                    Some(at) => at,
                     None => {
                         self.outs.push(Out::new(name, None));
                         self.outs.len() - 1
@@ -309,13 +313,16 @@ impl Linker {
         let mut dropped = Vec::new();
         for idx in order {
             let (mut ty, mut flags, mut align, mut inputs) = (elf::SHT_NOBITS, 0u64, 1u64, false);
+            let mut entsize: Option<u64> = None;
             for p in &self.outs[idx].pieces {
                 match p {
                     Piece::Input(o, i) => {
                         let s = self.objs[*o].sections[*i].as_ref().expect("放进来的都有");
                         inputs = true;
-                        flags |= s.flags & !u64::from(elf::SHF_GROUP | elf::SHF_MERGE | elf::SHF_STRINGS | elf::SHF_LINK_ORDER);
+                        // 同 lld 的 commitSection：输入的标志全或起来（SHF_MERGE / SHF_STRINGS 也带上），只去掉组
+                        flags |= s.flags & !u64::from(elf::SHF_GROUP);
                         align = align.max(s.align);
+                        entsize = Some(if entsize.is_none_or(|e| e == s.entsize) { s.entsize } else { 0 });
                         if s.ty != elf::SHT_NOBITS && (ty == elf::SHT_NOBITS || s.ty != elf::SHT_PROGBITS) {
                             ty = s.ty;
                         }
@@ -344,6 +351,7 @@ impl Linker {
             out.ty = ty;
             out.flags = flags;
             out.align = align;
+            out.entsize = entsize.unwrap_or(0);
             out.inputs = inputs;
             out.rank = out.rank();
         }
@@ -418,8 +426,14 @@ impl Linker {
         i
     }
 
-    /// 同 lld 的 `getOutputSectionName`：`.text.foo` ⇒ `.text` 等。
-    fn orphan_name(name: &str) -> &str {
+    /// 同 lld 的 `getOutputSectionName`：`COMMON` ⇒ `.bss`；有 SECTIONS 时原名；否则 `.text.foo` ⇒ `.text` 等。
+    fn orphan_name(name: &str, has_sections: bool) -> &str {
+        if name == "COMMON" {
+            return ".bss";
+        }
+        if has_sections {
+            return name;
+        }
         const PREFIXES: &[&str] = &[".text", ".rodata", ".data.rel.ro", ".data", ".bss.rel.ro", ".bss", ".sdata", ".sbss", ".srodata", ".init_array", ".fini_array", ".tbss", ".tdata"];
         PREFIXES.iter().find(|p| name == **p || name.starts_with(&format!("{p}."))).map_or(name, |p| p)
     }

@@ -9,7 +9,7 @@
 //! 没有对照用的 LLVM（llc、ld.lld）就 SKIP。
 mod llvm;
 use object::{Object, ObjectSymbol};
-use riscvc::isa::Ext;
+use riscvc::feature::Target as Ext;
 use riscvc::sim::{Cpu, Stop};
 use std::path::Path;
 

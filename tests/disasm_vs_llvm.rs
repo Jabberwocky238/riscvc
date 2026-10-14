@@ -30,7 +30,7 @@ fn compare(style: Style, args: &[&str]) {
     obj.append_section_data(text, &words.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>(), 4);
     let dir = std::env::temp_dir().join(format!("riscvc-disasm-{}-{}", std::process::id(), args.join("")));
     std::fs::write(&dir, obj.write().unwrap()).unwrap();
-    let mattr = format!("--mattr={}", riscvc::isa::Ext::mattr());
+    let mattr = format!("--mattr={}", riscvc::feature::Target::mattr());
     let mut cmd = vec!["-d", "--no-show-raw-insn", mattr.as_str()];
     cmd.extend(args);
     cmd.push(dir.to_str().unwrap());

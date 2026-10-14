@@ -1,4 +1,5 @@
-//! 可执行 ELF32：头、程序头（同 lld：权限一变或遇到 `AT` 就另起一个 `PT_LOAD`）、各节、符号表、节表。
+//! 可执行 ELF32：头、程序头（同 lld：权限一变、RELRO 与否一变或遇到 `AT` 就另起一个 `PT_LOAD`，0 字节的节不起段；
+//! 有 RELRO 节就出 `PT_GNU_RELRO`）、各节、符号表、节表。
 use super::input::Place;
 use super::{Error, Linker, Out};
 use object::elf;
@@ -71,7 +72,7 @@ impl Linker {
             .slots
             .iter()
             .filter_map(|s| if let super::Slot::Out(i) = s { Some(&self.outs[*i]) } else { None })
-            .map(|o: &Out| Sec { name: o.name.clone(), ty: o.ty, flags: o.flags, addr: o.addr, offset: 0, size: o.size, align: o.align, link: 0, info: 0, entsize: 0, data: o.data.clone() })
+            .map(|o: &Out| Sec { name: o.name.clone(), ty: o.ty, flags: o.flags, addr: o.addr, offset: 0, size: o.size, align: o.align, link: 0, info: 0, entsize: o.entsize, data: o.data.clone() })
             .collect();
         // 非 ALLOC 的排在后面（同 lld）
         secs.sort_by_key(|s| s.flags & u64::from(elf::SHF_ALLOC) == 0);
@@ -85,12 +86,16 @@ impl Linker {
         for &i in &alloc {
             let lma_starts = self.outs.iter().find(|o| o.name == secs[i].name).and_then(|o| o.script.as_ref()).is_some_and(|s| s.lma.is_some());
             match loads.last_mut() {
-                Some(seg) if perm(&secs[seg[0]]) == perm(&secs[i]) && !lma_starts && secs[i].addr >= secs[*seg.last().expect("非空")].addr => seg.push(i),
+                // 0 字节的节不另起段（同 lld 删掉空的 PT_LOAD）
+                Some(seg) if secs[i].size == 0 && !lma_starts => seg.push(i),
+                // 同权限、不回头、RELRO 与否一样 ⇒ 接着放；RELRO 与非 RELRO 之间另起段（同 lld）
+                Some(seg) if perm(&secs[seg[0]]) == perm(&secs[i]) && !lma_starts && secs[i].addr >= secs[*seg.last().expect("非空")].addr && Self::relro(&secs[seg[0]]) == Self::relro(&secs[i]) => seg.push(i),
                 _ => loads.push(vec![i]),
             }
         }
         let has_attrs = secs.iter().any(|s| s.ty == elf::SHT_RISCV_ATTRIBUTES);
-        let nphdr = loads.len() + 1 + usize::from(has_attrs);
+        let has_relro = alloc.iter().any(|&i| Self::relro(&secs[i]));
+        let nphdr = loads.len() + 1 + usize::from(has_attrs) + usize::from(has_relro);
         // 文件偏移
         let mut off = 52 + 32 * nphdr as u64;
         for seg in &loads {
@@ -200,9 +205,18 @@ impl Linker {
             let lma = self.outs.iter().find(|o| o.name == first.name).map_or(first.addr, |o| o.lma);
             b.u32(u64::from(elf::PT_LOAD)).u32(first.offset).u32(first.addr).u32(lma).u32(last_file - first.offset).u32(last_mem - first.addr).u32(u64::from(perm(first))).u32(PAGE);
         }
+        // PT_GNU_RELRO：盖住全部 RELRO 节（同 lld 的 -z relro，缺省开）
+        if has_relro {
+            let rel: Vec<&Sec> = alloc.iter().map(|&i| &secs[i]).filter(|s| Self::relro(s)).collect();
+            let (first, last) = (rel[0], rel[rel.len() - 1]);
+            let end_file = rel.iter().filter(|s| s.ty != elf::SHT_NOBITS).map(|s| s.offset + s.size).max().unwrap_or(first.offset);
+            let lma = self.outs.iter().find(|o| o.name == first.name).map_or(first.addr, |o| o.lma);
+            b.u32(u64::from(elf::PT_GNU_RELRO)).u32(first.offset).u32(first.addr).u32(lma).u32(end_file - first.offset).u32(last.addr + last.size - first.addr).u32(u64::from(elf::PF_R)).u32(1);
+        }
         b.u32(u64::from(elf::PT_GNU_STACK)).u32(0).u32(0).u32(0).u32(0).u32(0).u32(u64::from(elf::PF_R | elf::PF_W)).u32(0);
+        // PT_RISCV_ATTRIBUTES：memsz = filesz（同 lld）
         if let Some(a) = secs.iter().find(|s| s.ty == elf::SHT_RISCV_ATTRIBUTES) {
-            b.u32(u64::from(0x7000_0003u32)).u32(a.offset).u32(0).u32(0).u32(a.size).u32(0).u32(u64::from(elf::PF_R)).u32(1);
+            b.u32(u64::from(0x7000_0003u32)).u32(a.offset).u32(0).u32(0).u32(a.size).u32(a.size).u32(u64::from(elf::PF_R)).u32(1);
         }
         for s in &secs {
             if s.ty != elf::SHT_NOBITS && !s.data.is_empty() {
@@ -229,6 +243,15 @@ impl Linker {
     }
 
     /// 各输入的 `e_flags` 取并（浮点 ABI 要一致）。
+    /// lld 的 isRelroSection：可写的可装载节里，TLS、init / fini 数组与这几个名字的（`.ctors` …）装完就只读。
+    fn relro(s: &Sec) -> bool {
+        let aw = u64::from(elf::SHF_ALLOC | elf::SHF_WRITE);
+        s.flags & aw == aw
+            && (s.flags & u64::from(elf::SHF_TLS) != 0
+                || matches!(s.ty, elf::SHT_INIT_ARRAY | elf::SHT_FINI_ARRAY | elf::SHT_PREINIT_ARRAY)
+                || matches!(s.name.as_str(), ".data.rel.ro" | ".bss.rel.ro" | ".ctors" | ".dtors" | ".jcr" | ".eh_frame" | ".fini_array" | ".init_array" | ".preinit_array" | ".got" | ".openbsd.randomdata"))
+    }
+
     fn e_flags(&self) -> u32 {
         self.objs.iter().filter(|o| !o.name.starts_with('<')).map(|o| o.e_flags).fold(0, |a, f| a | f)
     }

@@ -49,6 +49,8 @@ pub struct InSec {
     pub ty: u32,
     pub flags: u64,
     pub align: u64,
+    /// 项长（SHF_MERGE 的节有）。
+    pub entsize: u64,
     pub data: Vec<u8>,
     pub size: u64,
     pub relocs: Vec<InReloc>,
@@ -91,7 +93,7 @@ impl TryFrom<(&str, &[u8])> for Obj {
             }
             let name = String::from_utf8_lossy(table.section_name(e, s).map_err(|e| bad(e.to_string()))?).into_owned();
             let data = if ty == elf::SHT_NOBITS { Vec::new() } else { s.data(e, bytes).map_err(|e| bad(e.to_string()))?.to_vec() };
-            sections.push(Some(InSec { name, ty, flags: u64::from(s.sh_flags(e)), align: u64::from(s.sh_addralign(e)).max(1), data, size: u64::from(s.sh_size(e)), relocs: Vec::new() }));
+            sections.push(Some(InSec { name, ty, flags: u64::from(s.sh_flags(e)), align: u64::from(s.sh_addralign(e)).max(1), entsize: u64::from(s.sh_entsize(e)), data, size: u64::from(s.sh_size(e)), relocs: Vec::new() }));
         }
         // 重定位：RELA 节挂到它的目标节上
         for s in table.iter() {

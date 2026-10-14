@@ -129,11 +129,12 @@ cargo test --release     # 没有语料或 LLVM 的测试说 SKIP 并照过
 | --- | --- |
 | 译码 / 打印 | 20 万随机字 × 三种风格，与 llvm-objdump 逐条相同 |
 | 汇编器 | compiler-rt 334 份（O0 / O2，`-mno-relax`）与 llvm-mc 节字节、重定位、全局符号全同；docc 的 crt 与 clang -c 相同 |
-| 链接器 | compiler-rt 167 个目标文件 × docc 的两种脚本，与 ld.lld 的可装载节、入口、全局符号全同；libdope `LoadedElf` 接受 |
+| 链接器 | compiler-rt 167 个目标文件 × docc 的两种脚本，与 ld.lld 的可装载节（含 0 字节的；类型、标志、项长、字节）、程序头（含 `PT_GNU_RELRO`、`PT_RISCV_ATTRIBUTES`）、入口、全局符号全同；libdope `LoadedElf` 接受。llvm-mc `+relax` 出的目标文件能链（`R_RISCV_RELAX` / `R_RISCV_ALIGN` 当空操作），但与 lld 字节不同：见「未做」 |
 | MLIR 解析 | 334 份通用形式 `.mlir` 全部解析、转成内部 IR |
 | 代码生成 | 334 份全部编过；O0 / O2 各 97 个标量签名的函数、各 4656 次调用，与 llc 的结果全同（C 源里的未定义行为不比） |
 | 端到端 ELF | builtins 单元测试 163 个：除 fp128 的 2 个（范围外，跳过），O0 / O2 全部与 llvm 一致 |
 | MC fixture | 279 份里 272 份与 llvm-mc 一致；差的是长分支松弛（`.fill` 撑开的条件分支）、子节（`.text 1`）、不带符号的 `.reloc`、跨节 `.uleb128` 的 SET/SUB_ULEB128 |
 
-未做：linker relaxation；返回值放不进寄存器（sret 降级）、栈上传参的被测覆盖、`cmpxchg`、i128 / fp128、向量运算；
+未做：linker relaxation（`call` ⇒ `jal`、按 `R_RISCV_ALIGN` 删多余的 nop；lld 即使 `--no-relax` 也删 nop）、
+`SHF_MERGE` 节的去重（lld 会合并重复的串 / 常量）；返回值放不进寄存器（sret 降级）、栈上传参的被测覆盖、`cmpxchg`、i128 / fp128、向量运算；
 代码质量（窥孔、跳转表、常量复用）还没和 llc 比过；没上过板。
