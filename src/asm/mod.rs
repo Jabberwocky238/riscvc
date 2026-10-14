@@ -14,6 +14,7 @@ mod expr;
 mod fixup;
 mod inst;
 mod lex;
+mod reloc;
 mod source;
 
 pub use expr::{Expr, Modifier};
@@ -41,7 +42,7 @@ impl Error {
 /// 汇编选项（对应 llvm-mc / clang 的开关）。
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// `-mabi=ilp32f` ⇒ `e_flags` 带 `EF_RISCV_FLOAT_ABI_SINGLE`。
+    /// `-mabi=ilp32f` ⇒ `e_flags` 带 `EF_RISCV_FLOAT_ABI_SINGLE`（缺省跟 `f` feature）。
     pub float_abi: bool,
     /// `.S`：先做 C 预处理（只认简单的 `#if` / `#ifdef` / `#define`）。
     pub preprocess: bool,
@@ -55,7 +56,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { float_abi: true, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None }
+        Self { float_abi: riscv::Ext::F.enabled(), preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None }
     }
 }
 
@@ -137,6 +138,14 @@ pub struct Assembler {
     attributes: Vec<(u64, Result<u64, String>)>,
     /// 当前行（报错用）。
     line: usize,
+    /// `.option exact`：条件分支不扩成长跳转。
+    exact: bool,
+    /// `.option pic`：`la` 走 GOT。
+    pic: bool,
+    /// `.option push` 存的（exact, pic）。
+    options: Vec<(bool, bool)>,
+    /// `.reloc 位置, 类型, 目标`（行号报错用）。
+    directs: Vec<(Expr, u32, Expr, usize)>,
 }
 
 /// 表达式里局部标号与 `.` 的命名（借汇编器状态）。
@@ -171,6 +180,10 @@ impl Assembler {
             labels: HashSet::new(),
             attributes: Vec::new(),
             line: 0,
+            exact: false,
+            pic: false,
+            options: Vec::new(),
+            directs: Vec::new(),
         };
         // llvm-mc 一开始就有这三个节
         for name in [".text", ".data", ".bss"] {
@@ -186,14 +199,51 @@ impl Assembler {
         let source = Source { defines: self.opts.defines.clone(), preprocess: self.opts.preprocess };
         let lines = source.lines(text)?;
         self.prescan(&lines);
+        // 条件汇编栈：（本分支生效, 这一组已有分支生效过）
+        let mut conds: Vec<(bool, bool)> = Vec::new();
         for line in &lines {
             self.line = line.no;
-            self.statement(&line.text).map_err(|e| match e {
+            let at = |e: Error| match e {
                 Error::Syntax(msg) => Error::at(line.no, &format!("{msg}（`{}`）", line.text)),
                 e => e,
-            })?;
+            };
+            let (word, rest) = line.text.split_once(char::is_whitespace).unwrap_or((&line.text, ""));
+            let word = word.to_ascii_lowercase();
+            let live = conds.iter().all(|(on, _)| *on);
+            match word.as_str() {
+                ".if" | ".ifdef" | ".ifndef" | ".ifeq" | ".ifne" => {
+                    let on = live && self.condition(&word, rest.trim()).map_err(at)?;
+                    conds.push((on, on));
+                }
+                ".elseif" | ".else" => {
+                    let (_, taken) = conds.pop().ok_or_else(|| at(Error::Syntax(format!("{word} 没有配对的 .if"))))?;
+                    let parent = conds.iter().all(|(on, _)| *on);
+                    let on = parent && !taken && (word == ".else" || self.condition(".if", rest.trim()).map_err(at)?);
+                    conds.push((on, taken || on));
+                }
+                ".endif" => {
+                    conds.pop().ok_or_else(|| at(Error::Syntax(String::from(".endif 没有配对的 .if"))))?;
+                }
+                _ if !live => {}
+                _ => self.statement(&line.text).map_err(at)?,
+            }
         }
         self.finish()
+    }
+
+    /// `.if 表达式` / `.ifeq` / `.ifne` / `.ifdef 符号` / `.ifndef 符号`。
+    fn condition(&mut self, word: &str, rest: &str) -> Result<bool, Error> {
+        if let Some(neg) = match word {
+            ".ifdef" => Some(false),
+            ".ifndef" => Some(true),
+            _ => None,
+        } {
+            let defined = self.symbols.get(rest).is_some_and(|s| !matches!(s.def, Def::Undef));
+            return Ok(defined != neg);
+        }
+        let e = Toks::try_from(rest)?.expr(self)?;
+        let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 要常数")))?;
+        Ok(if word == ".ifeq" { k == 0 } else { k != 0 })
     }
 
     /// 先扫一遍：哪些名字会是全局 / 弱的，哪些名字在本文件里有标号（分支能不能就地解析要用）。
@@ -277,7 +327,11 @@ impl Assembler {
         let prefixed = |p: &str| name == p || name.starts_with(&format!("{p}."));
         let (dty, dflags) = if prefixed(".text") {
             (SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR)
-        } else if prefixed(".bss") || prefixed(".sbss") || prefixed(".tbss") {
+        } else if prefixed(".tbss") {
+            (SHT_NOBITS, SHF_ALLOC | SHF_WRITE | object::elf::SHF_TLS)
+        } else if prefixed(".tdata") {
+            (SHT_PROGBITS, SHF_ALLOC | SHF_WRITE | object::elf::SHF_TLS)
+        } else if prefixed(".bss") || prefixed(".sbss") {
             (SHT_NOBITS, SHF_ALLOC | SHF_WRITE)
         } else if prefixed(".data") || prefixed(".sdata") {
             (SHT_PROGBITS, SHF_ALLOC | SHF_WRITE)
@@ -312,17 +366,47 @@ impl Assembler {
         Ok(())
     }
 
-    /// 编一条指令（字段已齐）。
+    /// 编一条指令（字段已齐）。没开的扩展的指令（含伪指令展开出来的）报错。
     fn emit(&mut self, i: riscv::Inst) -> Result<(), Error> {
+        if !i.op.enabled() {
+            return Err(Error::Syntax(format!("`{}` 要 {:?} 扩展（feature 没开）", i.op, i.op.ext())));
+        }
         self.bytes(&u32::from(i).to_le_bytes())
+    }
+
+    /// 原样出一个 32 位字（`.insn`）。
+    fn word(&mut self, w: u32) -> Result<(), Error> {
+        self.bytes(&w.to_le_bytes())
     }
 
     /// 编一条指令，并在它身上记一个修补点。
     fn emit_fix(&mut self, i: riscv::Inst, kind: fixup::Fix, e: Expr) -> Result<(), Error> {
+        self.note(kind, e);
+        self.emit(i)
+    }
+
+    /// 表达式里此刻已是常数的 `.set` / `.equ` 符号换成值（它们可以重定义：同 llvm-mc，用的是使用处的值）。
+    pub(crate) fn pin(&self, e: &Expr) -> Expr {
+        match e {
+            Expr::Sym(n) if matches!(self.symbols.get(n).map(|s| &s.def), Some(Def::Equ(_))) => match self.eval(e, 0).ok().and_then(|v| v.constant()) {
+                Some(k) => Expr::Num(k),
+                None => e.clone(),
+            },
+            Expr::Neg(a) => Expr::Neg(Box::new(self.pin(a))),
+            Expr::Not(a) => Expr::Not(Box::new(self.pin(a))),
+            Expr::LNot(a) => Expr::LNot(Box::new(self.pin(a))),
+            Expr::Bin(op, a, b) => Expr::Bin(*op, Box::new(self.pin(a)), Box::new(self.pin(b))),
+            Expr::Mod(m, a) => Expr::Mod(*m, Box::new(self.pin(a))),
+            _ => e.clone(),
+        }
+    }
+
+    /// 在当前位置记一个修补点（不出字节；同一条指令上的第二个重定位）。
+    fn note(&mut self, kind: fixup::Fix, e: Expr) {
+        let e = self.pin(&e);
         let offset = self.here();
         let line = self.line;
         self.sections[self.cur].fixups.push(fixup::Fixup { offset, kind, expr: e, line });
-        self.emit(i)
     }
 
     /// 新的 `.Lpcrel_hiN` 标号，定义在当前位置。

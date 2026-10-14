@@ -31,10 +31,40 @@ crt.S        ─ riscvc as  ─▶ crt.o ─────────────
 | `src/llvm/` | `llvm` 方言插件：`mlirformat tblgen` 从 LLVMOps.td / LLVMIntrinsicOps.td 生成的 op 结构体 + 手写的类型参数钩子 |
 | `src/ir/` | 内部 IR（块参数、常量即 op）：从 mlirformat 的模块转来；类型与 RV32 布局 |
 | `src/codegen/` | 指令选择（值拆 32 位部件；i64 / double 软实现）、`regalloc2`、栈帧、出汇编、全局数据 |
+| `src/plugin/` | 插件接口（照 MLIR 的 Dialect / Pass）：方言注册语法并把本方言的 op 下降成内部 IR，pass 在内部 IR 上变换 |
 | `src/sim/` | RV32IMF 解释器（对拍用） |
 | `src/cli/` | 命令行：一条子命令一个目录（`as` / `ld` / `objdump` / `llc`） |
 
 第三方：`mlirformat`（MLIR 文本）、`object`（ELF 读写）、`regalloc2`（Cranelift 的寄存器分配器）、`clap`、`thiserror`，都是纯 Rust。
+
+## 插件
+
+照 MLIR 的 Dialect / DialectRegistry / Pass / PassManager，⛔ 静态注册（编进二进制，不加载 `.so`）：
+
+```rust
+struct Demo;                                   // `demo.mac a, b, c` = a × b + c
+impl Dialect for Demo {
+    fn namespace(&self) -> &str { "demo" }
+    fn lower(&self, cx: &mut Lowering<'_, '_>) -> Result<(), Error> {
+        let [a, b, c] = cx.operands()?[..] else { … };
+        let [r] = cx.results()?[..] else { … };
+        let t = cx.temp(cx.type_of(a));
+        cx.emit(Some(t), Op::Bin(BinOp::Mul, a, b));
+        cx.emit(Some(r), Op::Bin(BinOp::Add, t, c));
+        Ok(())
+    }
+}
+let mut reg = Registry::default();             // 内置：llvm 方言、dce
+reg.dialect(&Demo).pass(&MyPass);
+let mut m = reg.parse(text)?;                  // 函数体里的 op 按命名空间交给方言
+reg.run(&mut m, &["dce"])?;                    // 按名字跑 pass
+let asm = m.compile()?;
+```
+
+- 方言：`register` 向 mlirformat 注册自定义形式（缺省只认通用形式），`lower` 出内部指令（可多条、可开临时值）。
+  只管函数体里的 op；顶层（函数、全局）仍是 `llvm` 方言的。
+- 命令行：`riscvc llc x.mlir --pass dce -o x.o`；`riscvc llc --list-plugins` 列出注册的方言与 pass。
+- 例子见 `tests/plugin.rs`。
 
 ## 判据
 
@@ -51,7 +81,23 @@ LLVM（`jw238/docc/llvm-project/build/bin`）只当**对照**，⛔ 不是依赖
 ```bash
 cargo build --release
 cargo test
+cargo build --release --no-default-features --features "m,f,asm,link,cli"   # 按需裁剪
 ```
+
+一个 feature = 一个编译选项（`Cargo.toml`），`default` 全开：
+
+| feature | 是什么 | 关掉之后 |
+| --- | --- | --- |
+| `m` | M 扩展（蕴含 `zmmul`） | 汇编器不认 `div` / `rem*`、译码印 `<unknown>`；代码生成调 `__divsi3` 一类 |
+| `zmmul` | 只有乘法 | 同上，`mul` / `mulh*` 调 `__mulsi3` / `__muldi3` |
+| `f` | F 扩展 + ilp32f（蕴含 `zicsr`） | 汇编器 / 译码不认浮点指令，`e_flags` 不带单精度 ABI；⚠ 代码生成的软浮点还没做（遇到 float 会报错） |
+| `zicsr` | CSR 指令 | 不认 `csr*` 与 `frcsr` 一类伪指令 |
+| `asm` / `link` / `objdump` / `sim` | 汇编器 / 链接器 / 反汇编 / 解释器 | 不编这个组件（与命令行的子命令） |
+| `mlir` | llvm 方言、内部 IR、插件接口 | — |
+| `codegen` | 代码生成（蕴含 `mlir`） | 没有 `riscvc llc` |
+| `cli` | 命令行 `riscvc` | 只有库 |
+
+`.riscv.attributes` 的架构串（`Ext::march()`）与对照用的 `-mattr`（`Ext::mattr()`）都从开了的扩展推出来。
 
 ## 测试与语料
 
@@ -80,8 +126,8 @@ cargo test --release     # 没有语料或 LLVM 的测试说 SKIP 并照过
 | 链接器 | compiler-rt 167 个目标文件 × docc 的两种脚本，与 ld.lld 的可装载节、入口、全局符号全同；libdope `LoadedElf` 接受 |
 | MLIR 解析 | 334 份通用形式 `.mlir` 全部解析、转成内部 IR |
 | 代码生成 | 334 份全部编过；O0 / O2 各 97 个标量签名的函数、各 4656 次调用，与 llc 的结果全同（C 源里的未定义行为不比） |
-| 端到端 ELF | builtins 单元测试 163 个：O2 160 个、O0 161 个与 llvm 一致；差的是 fp128 常量（`powitf2` / `powixf2`）与 `atomic_test` O2 的块次序 |
-| MC fixture | 281 份里 172 份与 llvm-mc 一致；差的是 TLS / GOT / PLT 重定位、`.reloc`、`.fill` / `.org` / `.uleb128` / `.if*`、`.insn`、寄存器名作符号、`li` 的 `addi + slli` 序列等 |
+| 端到端 ELF | builtins 单元测试 163 个：除 fp128 的 2 个（范围外，跳过），O0 / O2 全部与 llvm 一致 |
+| MC fixture | 279 份里 272 份与 llvm-mc 一致；差的是长分支松弛（`.fill` 撑开的条件分支）、子节（`.text 1`）、不带符号的 `.reloc`、跨节 `.uleb128` 的 SET/SUB_ULEB128 |
 
-未做：linker relaxation；返回值放不进寄存器（sret 降级）、栈上传参的被测覆盖、`cmpxchg`、i128、向量运算；
+未做：linker relaxation；返回值放不进寄存器（sret 降级）、栈上传参的被测覆盖、`cmpxchg`、i128 / fp128、向量运算；
 代码质量（窥孔、跳转表、常量复用）还没和 llc 比过；没上过板。

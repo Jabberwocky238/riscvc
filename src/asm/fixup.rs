@@ -26,6 +26,10 @@ pub enum Fix {
     Call,
     /// `.byte` / `.half` / `.word` / `.quad`：字节数。
     Data(u8),
+    /// 一定出这种重定位（TLS、`%pltpcrel` 一类：汇编时解析不了）。
+    Reloc(u32),
+    /// `auipc` 的 GOT / TLS 高位（一定出重定位；`%pcrel_lo` 可以配它）。
+    PcHi(u32),
 }
 
 pub struct Fixup {
@@ -83,8 +87,9 @@ impl Assembler {
         let constant = |v: Value, what: &str| v.constant().ok_or_else(|| Error::Syntax(format!("{what} 的操作数要是常数")));
         let v = match e {
             Expr::Num(k) => Value { syms: Vec::new(), k: *k },
-            Expr::Sym(name) => match self.symbols.get(name).map(|s| &s.def) {
-                Some(Def::Equ(inner)) => self.eval(inner, depth + 1)?,
+            Expr::Sym(name) => match self.symbols.get(name).map(|s| (&s.def, s.kind)) {
+                // ifunc 的别名不展开：重定位指向别名自己（同 llvm-mc）
+                Some((Def::Equ(inner), kind)) if kind != elf::STT_GNU_IFUNC => self.eval(inner, depth + 1)?,
                 _ => Value { syms: vec![(name.clone(), 1)], k: 0 },
             },
             Expr::Neg(a) => self.eval(a, depth + 1)?.scale(-1),
@@ -101,6 +106,12 @@ impl Assembler {
                     }
                     _ => Value { syms: Vec::new(), k: op.apply(constant(a, "运算")?, constant(b, "运算")?)? },
                 }
+            }
+            // 常数上的 %hi / %lo 现在就折
+            Expr::Mod(m @ (super::Modifier::Hi | super::Modifier::Lo), a) if let Some(k) = self.eval(a, depth + 1)?.constant() => {
+                let v = k as i32;
+                let lo = (v << 20) >> 20;
+                Value { syms: Vec::new(), k: i64::from(if *m == super::Modifier::Lo { lo } else { (v.wrapping_sub(lo) >> 12) & 0xf_ffff }) }
             }
             Expr::Mod(..) => return Err(Error::Syntax(String::from("修饰符只能出现在操作数最外层"))),
         };
@@ -136,8 +147,10 @@ impl Assembler {
 
     /// 已定义的标号 ⇒ （节, 偏移）。
     pub(crate) fn label(&self, name: &str) -> Option<(usize, u64)> {
-        match self.symbols.get(name)?.def {
-            Def::Label(s, o) => Some((s, o)),
+        match self.symbols.get(name).map(|s| &s.def) {
+            Some(Def::Label(s, o)) => Some((*s, *o)),
+            // 没定义成别的的节名 = 节首（同 llvm-mc 的节符号）
+            None | Some(Def::Undef) => self.sections.iter().position(|s| s.name == name).map(|s| (s, 0)),
             _ => None,
         }
     }
@@ -167,8 +180,27 @@ impl Assembler {
             }
             self.sections[section].fixups = fixups;
         }
+        // `.reloc`：位置是「标号 + 常数」（定了节），目标是「符号 + 常数」
+        for (at, r_type, target, line) in core::mem::take(&mut self.directs) {
+            let bad = |msg: &str| Error::at(line, msg);
+            let v = self.eval(&at, 0)?;
+            let (section, offset) = match v.single().and_then(|(n, k)| Some((self.label(n)?, k))) {
+                Some(((sec, off), k)) => (sec, off.wrapping_add_signed(k)),
+                None => return Err(bad(".reloc 的位置要是「标号 + 常数」")),
+            };
+            let t = self.eval(&target, 0)?;
+            let (symbol, addend) = t.single().ok_or_else(|| bad(".reloc 的目标要是「符号 + 常数」（常数目标的不带符号重定位没做）"))?;
+            relocs.push(Reloc { section, offset, r_type, symbol: String::from(symbol), addend });
+        }
         for r in &relocs {
-            self.symbol(&r.symbol).used = true;
+            let sym = self.symbol(&r.symbol);
+            sym.used = true;
+            // TLS 重定位引用的符号是 TLS 的（同 llvm-mc）
+            if sym.kind == elf::STT_NOTYPE
+                && matches!(r.r_type, elf::R_RISCV_TPREL_HI20 | elf::R_RISCV_TPREL_LO12_I | elf::R_RISCV_TPREL_LO12_S | elf::R_RISCV_TPREL_ADD | elf::R_RISCV_TLS_GOT_HI20 | elf::R_RISCV_TLS_GD_HI20 | elf::R_RISCV_TLSDESC_HI20)
+            {
+                sym.kind = elf::STT_TLS;
+            }
         }
         Ok(relocs)
     }
@@ -183,13 +215,13 @@ impl Assembler {
         let need_const = |v: &Value| v.constant().ok_or_else(|| Error::Syntax(format!("{:?} 要常数，见 {:?}", f.kind, v)));
         match f.kind {
             Fix::Imm12 | Fix::Store12 | Fix::Shamt | Fix::U20 => {
-                let k = need_const(&v)?;
                 let form = match f.kind {
                     Fix::Imm12 => Form::Imm,
                     Fix::Store12 => Form::Store,
                     Fix::Shamt => Form::Shift,
                     _ => Form::U,
                 };
+                let k = Self::rv32(form, need_const(&v)?);
                 if !Inst::fits(form, k) {
                     return Err(Error::Syntax(format!("立即数 {k} 超出 {form:?} 的范围")));
                 }
@@ -206,6 +238,16 @@ impl Assembler {
                     &v,
                 )?),
             },
+            Fix::Reloc(t) | Fix::PcHi(t) => relocs.push(reloc(t, &v)?),
+            // 常数目标 = 偏移（同 llvm-mc：`jal 2046`、`beq a0, a1, 102`）
+            Fix::Branch | Fix::Jal if let Some(d) = v.constant() => {
+                let form = if f.kind == Fix::Branch { Form::Branch } else { Form::J };
+                let d = Self::rv32(form, d);
+                if !Inst::fits(form, d) {
+                    return Err(Error::Syntax(format!("跳转距离 {d} 超出 {form:?} 的范围")));
+                }
+                self.patch(section, pc, Inst::scatter(form, i32::try_from(d).unwrap_or_default()));
+            }
             Fix::Branch | Fix::Jal | Fix::Call | Fix::PcrelHi20 => match self.local_target(section, &v) {
                 Some(target) => {
                     let d = target.cast_signed() - pc.cast_signed();
@@ -238,12 +280,13 @@ impl Assembler {
                 // 操作数是 auipc 那条的标号；目标取 auipc 那个修补点的
                 let (label, _) = v.single().ok_or_else(|| Error::Syntax(String::from("%pcrel_lo 的操作数要是一个标号")))?;
                 let (s, at) = self.label(label).ok_or_else(|| Error::Syntax(format!("%pcrel_lo 的标号 `{label}` 没定义")))?;
-                let hi = all
-                    .iter()
-                    .find(|h| s == section && h.offset == at && matches!(h.kind, Fix::PcrelHi20))
-                    .ok_or_else(|| Error::Syntax(format!("`{label}` 处没有 %pcrel_hi")))?;
-                let hv = self.eval(&hi.expr, 0)?;
-                match self.local_target(section, &hv) {
+                // auipc 在别的节、或是 GOT / TLS 的高位 ⇒ 只能出重定位（链接器配对）
+                let hi = all.iter().find(|h| s == section && h.offset == at && matches!(h.kind, Fix::PcrelHi20));
+                let target = match hi {
+                    Some(hi) => self.local_target(section, &self.eval(&hi.expr, 0)?),
+                    None => None,
+                };
+                match target {
                     Some(target) => {
                         let d = target.cast_signed() - at.cast_signed();
                         self.patch(section, pc, Self::hi_lo(if f.kind == Fix::PcrelLo12I { Fix::Lo12I } else { Fix::Lo12S }, d));

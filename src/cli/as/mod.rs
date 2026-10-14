@@ -17,7 +17,7 @@ pub struct As {
     /// 当 `.S` 处理（缺省按扩展名：大写 S 才预处理）。
     #[arg(long)]
     preprocess: bool,
-    /// `-mabi=ilp32`（缺省 ilp32f）。
+    /// `-mabi=ilp32`（缺省：开了 `f` feature 是 ilp32f）。
     #[arg(long)]
     soft_float: bool,
     /// 写 `.riscv.attributes`（同 clang -c；值是架构串）。
@@ -36,7 +36,7 @@ impl As {
         let mut include = self.include.clone();
         include.extend(self.input.parent().map(PathBuf::from));
         let opts = crate::asm::Options {
-            float_abi: !self.soft_float,
+            float_abi: crate::isa::Ext::F.enabled() && !self.soft_float,
             preprocess: self.preprocess || self.input.extension().is_some_and(|e| e == "S"),
             defines,
             include,

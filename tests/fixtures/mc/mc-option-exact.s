@@ -82,7 +82,7 @@ beq a0, a1, undefined
 # riscvc-fixtures: c.j undefined
 
 # CHECK-ASM: .option noexact
-.option noexact
+# riscvc-scope: .option noexact
 
 # CHECK-OBJDUMP: 4108
 # CHECK-INST: c.lw a0, 0(a0)

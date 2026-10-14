@@ -8,7 +8,7 @@ impl Assembler {
     pub(super) fn directive(&mut self, word: &str, rest: &str) -> Result<(), Error> {
         let args = || Toks::try_from(rest).map(Toks::split_commas);
         match word {
-            ".text" | ".data" | ".bss" => self.switch(word, None, None, None),
+            ".text" | ".data" | ".bss" | ".rodata" | ".sdata" | ".sbss" | ".tdata" | ".tbss" => self.switch(word, None, None, None),
             ".section" | ".pushsection" => {
                 if word == ".pushsection" {
                     self.stack.push((self.cur, self.prev));
@@ -71,19 +71,70 @@ impl Assembler {
                 let e = Toks::try_from(value)?.expr(self)?;
                 self.symbol(name.trim()).def = Def::Equ(e);
             }
-            ".byte" | ".half" | ".2byte" | ".short" | ".word" | ".4byte" | ".long" | ".int" | ".quad" | ".8byte" | ".dword" => {
+            ".byte" | ".half" | ".hword" | ".2byte" | ".short" | ".word" | ".4byte" | ".long" | ".int" | ".quad" | ".8byte" | ".dword" => {
                 let n: u8 = match word {
                     ".byte" => 1,
-                    ".half" | ".2byte" | ".short" => 2,
+                    ".half" | ".hword" | ".2byte" | ".short" => 2,
                     ".word" | ".4byte" | ".long" | ".int" => 4,
                     _ => 8,
                 };
                 for mut a in args()? {
                     let e = a.expr(self)?;
-                    let offset = self.here();
-                    let line = self.line;
-                    self.sections[self.cur].fixups.push(super::fixup::Fixup { offset, kind: Fix::Data(n), expr: e, line });
+                    // `.word %pltpcrel(f)` / `.word %gotpcrel(f)`：一定出重定位
+                    let (kind, e) = match e.modifier() {
+                        Some((super::Modifier::Pltpcrel, inner)) if n == 4 => (Fix::Reloc(elf::R_RISCV_PLT32), inner.clone()),
+                        Some((super::Modifier::Gotpcrel, inner)) if n == 4 => (Fix::Reloc(elf::R_RISCV_GOT32_PCREL), inner.clone()),
+                        _ => (Fix::Data(n), e),
+                    };
+                    self.note(kind, e);
                     self.bytes(&vec![0; usize::from(n)])?;
+                }
+            }
+            ".single" | ".float" | ".double" => {
+                for v in rest.split(',').map(str::trim).filter(|v| !v.is_empty()) {
+                    let x: f64 = v.parse().map_err(|_| Error::Syntax(format!("{word} 的数 `{v}`")))?;
+                    #[allow(clippy::cast_possible_truncation, reason = ".single 本来就是 f32")]
+                    let bytes = if word == ".double" { x.to_le_bytes().to_vec() } else { (x as f32).to_le_bytes().to_vec() };
+                    self.bytes(&bytes)?;
+                }
+            }
+            ".insn" => self.insn(rest)?,
+            ".fill" => {
+                let a = args()?;
+                let repeat = self.constant_arg(a.first(), "次数")?;
+                let size = if a.len() > 1 { self.constant_arg(a.get(1), "大小")? } else { 1 };
+                let value = if a.len() > 2 { self.constant_arg(a.get(2), "值")? } else { 0 };
+                let size = usize::try_from(size.clamp(0, 8)).unwrap_or_default();
+                let one = &value.to_le_bytes()[..size];
+                self.bytes(&one.repeat(usize::try_from(repeat).map_err(|_| Error::Syntax(String::from(".fill 次数为负")))?))?;
+            }
+            ".org" => {
+                let a = args()?;
+                let mut t = a.first().cloned().ok_or_else(|| Error::Syntax(String::from(".org 要位置")))?;
+                let e = t.expr(self)?;
+                let v = self.eval(&e, 0)?;
+                // 常数 = 节内偏移；`标号 + k` = 那个标号（本节）之后 k
+                let target = match (v.constant(), v.syms.as_slice()) {
+                    (Some(k), _) => k,
+                    (None, [(name, 1)]) if let Some((sec, off)) = self.label(name).filter(|(sec, _)| *sec == self.cur) => {
+                        let _ = sec;
+                        off.cast_signed() + v.k
+                    }
+                    _ => return Err(Error::Syntax(String::from(".org 的位置要是本节内的常数"))),
+                };
+                let here = self.here().cast_signed();
+                if target < here {
+                    return Err(Error::Syntax(String::from(".org 不能往回")));
+                }
+                let fill = if a.len() > 1 { self.constant_arg(a.get(1), "填充值")? } else { 0 };
+                self.bytes(&vec![u8::try_from(fill & 0xff).unwrap_or_default(); usize::try_from(target - here).unwrap_or_default()])?;
+            }
+            ".uleb128" | ".sleb128" => {
+                for mut a in args()? {
+                    let e = a.expr(self)?;
+                    let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 只做常数（跨节的差要 SET_ULEB128 重定位，没做）")))?;
+                    let bytes = if word == ".uleb128" { Self::uleb(k.cast_unsigned()) } else { Self::sleb(k) };
+                    self.bytes(&bytes)?;
                 }
             }
             ".zero" | ".space" | ".skip" => {
@@ -169,12 +220,38 @@ impl Assembler {
                 self.attributes.push((tag, value));
             }
             ".option" => match rest.split(',').next().map(str::trim) {
-                Some("push" | "pop" | "relax" | "norelax" | "norvc" | "nopic" | "pic" | "exact" | "noexact" | "arch") => {}
+                Some("push") => self.options.push((self.exact, self.pic)),
+                Some("pop") => (self.exact, self.pic) = self.options.pop().ok_or_else(|| Error::Syntax(String::from(".option pop 没有配对的 push")))?,
+                Some("exact") => self.exact = true,
+                Some("noexact") => self.exact = false,
+                Some("pic") => self.pic = true,
+                Some("nopic") => self.pic = false,
                 Some("rvc") => return Err(Error::Syntax(String::from("不做压缩指令（.option rvc）"))),
-                o => return Err(Error::Syntax(format!("不认识的 .option {o:?}"))),
+                // relax / norelax / norvc / arch 与认不出的：llvm-mc 也只是告警
+                _ => {}
             },
             // 只影响调试信息 / 展开表 / 链接器提示的：认了就跳过
-            ".file" | ".ident" | ".loc" | ".addrsig" | ".addrsig_sym" | ".variant_cc" | ".globaltype" | ".end" | ".reloc" => {}
+            // 变体调用约定：st_other 的 STO_RISCV_VARIANT_CC
+            ".variant_cc" => {
+                let name = rest.trim();
+                self.symbol(name).vis |= 0x80;
+            }
+            ".reloc" => {
+                let mut a = args()?;
+                if a.len() < 2 {
+                    return Err(Error::Syntax(String::from(".reloc 位置, 类型[, 表达式]")));
+                }
+                let at = a[0].expr(self)?;
+                let name = a[1].ident()?;
+                let super::reloc::RType(r_type) = name.as_str().try_into().map_err(|()| Error::Syntax(format!("不认识的重定位 `{name}`")))?;
+                let target = match a.get_mut(2) {
+                    Some(t) => t.expr(self)?,
+                    None => super::Expr::Num(0),
+                };
+                let line = self.line;
+                self.directs.push((at, r_type, target, line));
+            }
+            ".file" | ".ident" | ".loc" | ".addrsig" | ".addrsig_sym" | ".globaltype" | ".end" => {}
             w if w.starts_with(".cfi_") => {}
             _ => return Err(Error::Syntax(format!("不认识的伪操作 `{word}`"))),
         }
@@ -209,6 +286,8 @@ impl Assembler {
             Some("fini_array") => Some(elf::SHT_FINI_ARRAY),
             Some("preinit_array") => Some(elf::SHT_PREINIT_ARRAY),
             Some("llvm_addrsig") => Some(0x6fff_4c03),
+            // 直接给数（`@0x70000003` = SHT_RISCV_ATTRIBUTES）
+            Some(t) if let Ok(k) = Self::const_text(t) => Some(u32::try_from(k).map_err(|_| Error::Syntax(format!("节类型 `{t}`")))?),
             Some(t) => return Err(Error::Syntax(format!("不认识的节类型 `{t}`"))),
             None => None,
         };
@@ -228,8 +307,13 @@ impl Assembler {
         }
         let mut bytes = Vec::new();
         if s.code() && fill.is_none() {
-            // 先补到 4 字节，再一条条 nop
-            bytes.resize(usize::try_from(pad % 4).unwrap_or_default(), 0);
+            // 同 llvm-mc：奇数先补一个 0，再差 2 字节补 `c.nop`（不开 C 也补），其余一条条 nop
+            if pad % 2 == 1 {
+                bytes.push(0);
+            }
+            if pad % 4 >= 2 {
+                bytes.extend_from_slice(&[0x01, 0x00]);
+            }
             for _ in 0..pad / 4 {
                 bytes.extend_from_slice(&0x13u32.to_le_bytes());
             }
@@ -244,6 +328,34 @@ impl Assembler {
         let mut toks = toks.ok_or_else(|| Error::Syntax(format!("缺{what}")))?.clone();
         let e = toks.expr(self)?;
         self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{what}要是常数")))
+    }
+}
+
+impl Assembler {
+    fn uleb(mut v: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let b = u8::try_from(v & 0x7f).unwrap_or_default();
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return out;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn sleb(mut v: i64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let b = u8::try_from(v & 0x7f).unwrap_or_default();
+            v >>= 7;
+            if (v == 0 && b & 0x40 == 0) || (v == -1 && b & 0x40 != 0) {
+                out.push(b);
+                return out;
+            }
+            out.push(b | 0x80);
+        }
     }
 }
 

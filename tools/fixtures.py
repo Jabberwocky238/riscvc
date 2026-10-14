@@ -15,8 +15,8 @@ OUT = os.path.join(ROOT, 'tests/fixtures/mc')
 MC = [f'{B}/llvm-mc', '-triple=riscv32', '-mattr=+m,+f,+zicsr,-relax', '-target-abi=ilp32f', '-filetype=obj', '-', '-o', os.devnull]
 ERR = re.compile(r'^<stdin>:(\d+):\d+: error:', re.M)
 # 范围外：压缩指令 / 别的扩展（.option rvc / arch）、linker relaxation（.option relax）、
-# CFI（不出 .eh_frame）、.attribute arch 的规范化（要 LLVM 的整张扩展表）
-SCOPE = re.compile(r'^\s*(\.option\s+(rvc|arch|relax)\b|\.cfi_|\.attribute\s+(arch|5|Tag_RISCV_arch)\b)')
+# CFI（不出 .eh_frame）、.attribute arch 的规范化（要 LLVM 的整张扩展表）、H 扩展（llvm-mc 不查扩展也收的 hfence）、厂商的 `.insn qc.*`
+SCOPE = re.compile(r'^\s*(\.insn\s+qc\.|hfence\.|hinval\.|\.option\s+(rvc|arch|relax|noexact)\b|\.cfi_|\.attribute\s+(arch|5|Tag_RISCV_arch)\b)')
 
 
 def clean(text):

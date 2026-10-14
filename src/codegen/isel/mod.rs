@@ -66,6 +66,10 @@ pub struct Isel<'m> {
     frame: Vec<FrameObj>,
     /// IR 块 ⇒ 机器块。
     bmap: Vec<usize>,
+    /// 各 IR 块出的机器块（本块 + 处理它时新切的），布局按 IR 块的原次序拼。
+    groups: Vec<Vec<usize>>,
+    /// 正在处理的 IR 块。
+    group: usize,
     /// IR 块的前驱个数。
     preds: Vec<u32>,
     /// 各 IR 值被用了几次。
@@ -99,6 +103,8 @@ impl<'m> Isel<'m> {
             derived: HashMap::new(),
             frame: Vec::new(),
             bmap: (0..n).collect(),
+            groups: vec![Vec::new(); n],
+            group: 0,
             preds: vec![0; n],
             uses: vec![0; f.vals.len()],
             fused: HashMap::new(),
@@ -109,7 +115,8 @@ impl<'m> Isel<'m> {
             dynamic_sp: false,
             sret: None,
         };
-        s.count();
+        let order = f.rpo();
+        s.count(&order);
         // 非入口块的块参数 ⇒ 机器块参数
         for (b, blk) in f.blocks.iter().enumerate().skip(1) {
             for &p in &blk.params {
@@ -118,9 +125,18 @@ impl<'m> Isel<'m> {
                 s.vals[p.0 as usize] = Some(parts);
             }
         }
-        for (b, blk) in f.blocks.iter().enumerate() {
+        // 按逆后序选（定义先于使用）；从入口走不到的块只留一条 Unreachable（⛔ 不进布局，同 llc 删掉）
+        for b in 0..n {
+            if !order.contains(&b) {
+                s.cur = s.bmap[b];
+                s.emit(MOp::Unreachable, Vec::new(), Vec::new());
+            }
+        }
+        for &b in &order {
+            let blk = &f.blocks[b];
             s.cur = s.bmap[b];
-            s.layout.push(s.cur);
+            s.group = b;
+            s.groups[b].push(s.cur);
             if b == 0 {
                 s.entry(blk)?;
             }
@@ -131,6 +147,7 @@ impl<'m> Isel<'m> {
                 })?;
             }
         }
+        s.layout = core::mem::take(&mut s.groups).concat();
         Ok(Selected {
             blocks: s.blocks,
             layout: s.layout,
@@ -143,14 +160,14 @@ impl<'m> Isel<'m> {
         })
     }
 
-    /// 前驱数、用到次数；能并进跳转的比较。
-    fn count(&mut self) {
-        for blk in &self.f.blocks {
+    /// 前驱数、用到次数；能并进跳转的比较（只算走得到的块）。
+    fn count(&mut self, order: &[usize]) {
+        for blk in order.iter().map(|&b| &self.f.blocks[b]) {
             for inst in &blk.insts {
                 for t in inst.op.targets() {
                     self.preds[t.block.0 as usize] += 1;
                 }
-                Self::operands(&inst.op, |v| self.uses[v.0 as usize] += 1);
+                inst.op.operands().into_iter().for_each(|v| self.uses[v.0 as usize] += 1);
             }
         }
         for blk in &self.f.blocks {
@@ -167,37 +184,6 @@ impl<'m> Isel<'m> {
                 }
             }
         }
-    }
-
-    /// 一条 IR 指令用到的值。
-    fn operands(op: &Op, mut f: impl FnMut(ValId)) {
-        let mut vals: Vec<ValId> = Vec::new();
-        for t in op.targets() {
-            vals.extend(&t.args);
-        }
-        match op {
-            Op::CondBr(c, ..) | Op::Switch(c, ..) => vals.push(*c),
-            Op::Ret(v) => vals.extend(v),
-            Op::Bin(_, a, b) | Op::ICmp(_, a, b) | Op::FCmp(_, a, b) | Op::InsertValue(a, b, _) | Op::AtomicRmw(_, a, b, _) => vals.extend([*a, *b]),
-            Op::FNeg(a) | Op::Cast(_, a) | Op::Freeze(a) | Op::ExtractValue(a, _) => vals.push(*a),
-            Op::Alloca { count, .. } => vals.push(*count),
-            Op::Load { ptr, .. } => vals.push(*ptr),
-            Op::Store { val, ptr, .. } => vals.extend([*val, *ptr]),
-            Op::Gep { base, indices, .. } => {
-                vals.push(*base);
-                vals.extend(indices.iter().filter_map(|i| if let crate::ir::Index::Dyn(v) = i { Some(*v) } else { None }));
-            }
-            Op::Select(a, b, c) | Op::CmpXchg(a, b, c) => vals.extend([*a, *b, *c]),
-            Op::Call { callee, args, .. } => {
-                if let crate::ir::Callee::Indirect(v) = callee {
-                    vals.push(*v);
-                }
-                vals.extend(args.iter().map(|(v, _)| *v));
-            }
-            Op::Intr(_, args) => vals.extend(args),
-            Op::Const(_) | Op::Unreachable | Op::Fence | Op::Br(_) => {}
-        }
-        vals.into_iter().for_each(&mut f);
     }
 
     // ---- 小工具 -------------------------------------------------------------------------
@@ -262,10 +248,35 @@ impl<'m> Isel<'m> {
     }
 
     /// `op rd, a, b`，rd 是新整数寄存器。
+    /// `op rd, a, b`。M / Zmmul 没开（feature）的乘除改调 compiler-rt（同 llc 的 libcall 降级）。
     fn rr(&mut self, op: IOp, a: R, b: R) -> R {
+        if !op.enabled() {
+            return self.soft_muldiv(op, a, b);
+        }
         let d = self.xr();
         self.emit(MOp::Reg(op, 7), vec![d], vec![a, b]);
         d
+    }
+
+    /// 没有 M / Zmmul 时的乘除：`mul` / `div*` / `rem*` 各一个 libcall；`mulh*` 把两边扩成 64 位调 `__muldi3` 取高半。
+    fn soft_muldiv(&mut self, op: IOp, a: R, b: R) -> R {
+        let x = |r: R| (vec![r], vec![Part::X]);
+        let call = |s: &mut Self, name: &str, args: &[(Vec<R>, Vec<Part>)], ret: &[Part]| s.libcall(name, args, ret).expect("纯整数部件的 libcall 不会失败");
+        let name = match op {
+            IOp::Mul => "__mulsi3",
+            IOp::Div => "__divsi3",
+            IOp::Divu => "__udivsi3",
+            IOp::Rem => "__modsi3",
+            IOp::Remu => "__umodsi3",
+            IOp::Mulh | IOp::Mulhu | IOp::Mulhsu => {
+                let hi = |s: &mut Self, r: R, signed: bool| if signed { s.ri(IOp::Srai, r, 31) } else { R::ZERO };
+                let (ah, bh) = (hi(self, a, op != IOp::Mulhu), hi(self, b, op == IOp::Mulh));
+                let pair = vec![Part::Lo, Part::Hi];
+                return call(self, "__muldi3", &[(vec![a, ah], pair.clone()), (vec![b, bh], pair.clone())], &pair)[1];
+            }
+            _ => unreachable!("只有 M / Zmmul 的指令会没开"),
+        };
+        call(self, name, &[x(a), x(b)], &[Part::X])[0]
     }
 
     /// `op rd, a, imm`
@@ -499,7 +510,7 @@ impl<'m> Isel<'m> {
     fn new_block(&mut self) -> usize {
         self.blocks.push(MBlock::default());
         let b = self.blocks.len() - 1;
-        self.layout.push(b);
+        self.groups[self.group].push(b);
         b
     }
 

@@ -85,7 +85,7 @@ same_section_extern:
 # riscvc-fixtures: qc.e.bgeui s2, 24, same_section
 
 ## Enable compression/relaxation to check how symbols are handled.
-.option noexact
+# riscvc-scope: .option noexact
 
 # ASM: qc.bnei t1, 10, undef
 # OBJ: qc.beqi t1, 0xa, 0x42 <same_section_extern+0x16>

@@ -93,7 +93,7 @@ same_section_extern:
 # riscvc-fixtures: qc.e.jal same_section
 
 ## Enable compression/relaxation to check how symbols are handled.
-.option noexact
+# riscvc-scope: .option noexact
 
 # riscvc-fixtures: qc.e.j undef
 # ASM: j undef

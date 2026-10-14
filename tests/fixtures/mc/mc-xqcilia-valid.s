@@ -87,7 +87,7 @@
 
 # Check that compress patterns work as expected
 
-.option noexact
+# riscvc-scope: .option noexact
 
 # CHECK-ALIAS: addi t0, t0, 20
 # CHECK-NOALIAS: c.addi t0, 20

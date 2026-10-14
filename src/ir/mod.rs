@@ -5,6 +5,7 @@
 mod convert;
 mod types;
 
+pub use convert::Lowering;
 pub use types::{Kind, Ty, Types};
 
 #[derive(Debug, thiserror::Error)]
@@ -173,6 +174,44 @@ pub enum Op {
 }
 
 impl Op {
+    /// 用到的值（含跳转实参）。
+    #[must_use]
+    pub fn operands(&self) -> Vec<ValId> {
+        let mut vals: Vec<ValId> = self.targets().into_iter().flat_map(|t| t.args.iter().copied()).collect();
+        match self {
+            Self::CondBr(c, ..) | Self::Switch(c, ..) => vals.push(*c),
+            Self::Ret(v) => vals.extend(v),
+            Self::Bin(_, a, b) | Self::ICmp(_, a, b) | Self::FCmp(_, a, b) | Self::InsertValue(a, b, _) | Self::AtomicRmw(_, a, b, _) => vals.extend([*a, *b]),
+            Self::FNeg(a) | Self::Cast(_, a) | Self::Freeze(a) | Self::ExtractValue(a, _) => vals.push(*a),
+            Self::Alloca { count, .. } => vals.push(*count),
+            Self::Load { ptr, .. } => vals.push(*ptr),
+            Self::Store { val, ptr, .. } => vals.extend([*val, *ptr]),
+            Self::Gep { base, indices, .. } => {
+                vals.push(*base);
+                vals.extend(indices.iter().filter_map(|i| if let Index::Dyn(v) = i { Some(*v) } else { None }));
+            }
+            Self::Select(a, b, c) | Self::CmpXchg(a, b, c) => vals.extend([*a, *b, *c]),
+            Self::Call { callee, args, .. } => {
+                if let Callee::Indirect(v) = callee {
+                    vals.push(*v);
+                }
+                vals.extend(args.iter().map(|(v, _)| *v));
+            }
+            Self::Intr(_, args) => vals.extend(args),
+            Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
+        }
+        vals
+    }
+
+    /// 没有副作用：结果没人用就能删。
+    #[must_use]
+    pub const fn pure(&self) -> bool {
+        matches!(
+            self,
+            Self::Const(_) | Self::Bin(..) | Self::FNeg(_) | Self::ICmp(..) | Self::FCmp(..) | Self::Gep { .. } | Self::Cast(..) | Self::Select(..) | Self::ExtractValue(..) | Self::InsertValue(..) | Self::Freeze(_)
+        )
+    }
+
     /// 终结指令的各出口。
     #[must_use]
     pub fn targets(&self) -> Vec<&Target> {
@@ -244,6 +283,38 @@ pub struct Function {
     pub blocks: Vec<Block>,
     /// 每个 SSA 值的类型（`ValId` 下标）。
     pub vals: Vec<Ty>,
+}
+
+impl Function {
+    /// 从入口走得到的块，逆后序（每个块排在它的支配者之后）。
+    #[must_use]
+    pub fn rpo(&self) -> Vec<usize> {
+        let n = self.blocks.len();
+        let mut seen = vec![false; n];
+        let mut post = Vec::with_capacity(n);
+        // 显式栈：（块, 下一个要看的后继）
+        let mut stack = Vec::new();
+        if n > 0 {
+            seen[0] = true;
+            stack.push((0usize, 0usize));
+        }
+        while let Some((b, k)) = stack.last_mut() {
+            let succs = self.blocks[*b].insts.last().map(|i| i.op.targets()).unwrap_or_default();
+            if let Some(t) = succs.get(*k) {
+                *k += 1;
+                let t = t.block.0 as usize;
+                if !seen[t] {
+                    seen[t] = true;
+                    stack.push((t, 0));
+                }
+            } else {
+                post.push(*b);
+                stack.pop();
+            }
+        }
+        post.reverse();
+        post
+    }
 }
 
 #[derive(Clone, Debug)]

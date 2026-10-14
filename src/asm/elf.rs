@@ -16,7 +16,10 @@ impl Assembler {
             .sections
             .iter()
             .map(|s| {
+                let tls = s.flags & u64::from(elf::SHF_TLS) != 0;
                 let kind = match s.ty {
+                    elf::SHT_NOBITS if tls => SectionKind::UninitializedTls,
+                    elf::SHT_PROGBITS if tls => SectionKind::Tls,
                     elf::SHT_NOBITS => SectionKind::UninitializedData,
                     elf::SHT_PROGBITS if s.flags & u64::from(elf::SHF_EXECINSTR) != 0 => SectionKind::Text,
                     elf::SHT_PROGBITS if s.flags & u64::from(elf::SHF_WRITE) != 0 => SectionKind::Data,
@@ -76,6 +79,8 @@ impl Assembler {
             };
             let bind = match (s.bind, &s.def) {
                 (Bind::Weak, _) => elf::STB_WEAK,
+                // 显式 `.local` 的未定义符号保持局部（同 llvm-mc）
+                (Bind::Local, Def::Undef) if s.declared => elf::STB_LOCAL,
                 (Bind::Global, _) | (_, Def::Undef | Def::Common(..)) => elf::STB_GLOBAL,
                 (Bind::Local, _) => elf::STB_LOCAL,
             };
@@ -85,7 +90,12 @@ impl Assembler {
                 elf::STT_TLS => SymbolKind::Tls,
                 _ => SymbolKind::Unknown,
             };
-            let st_type = if matches!(s.def, Def::Common(..)) { elf::STT_OBJECT } else { s.kind };
+            let st_type = match s.def {
+                Def::Common(..) => elf::STT_OBJECT,
+                // TLS 节里定义的、没写类型的 ⇒ STT_TLS（同 llvm-mc）
+                Def::Label(sec, _) if s.kind == elf::STT_NOTYPE && self.sections[sec].flags & u64::from(elf::SHF_TLS) != 0 => elf::STT_TLS,
+                _ => s.kind,
+            };
             let id = obj.add_symbol(Symbol {
                 name: name.clone().into_bytes(),
                 value,
@@ -99,7 +109,12 @@ impl Assembler {
             syms.insert(name, id);
         }
         for r in relocs {
-            let symbol = *syms.get(&r.symbol).ok_or_else(|| Error::Syntax(format!("重定位引用的 `{}` 没进符号表", r.symbol)))?;
+            // 节名当符号用的 ⇒ 节符号
+            let symbol = match (syms.get(&r.symbol), self.sections.iter().position(|s| s.name == r.symbol)) {
+                (Some(&id), _) => id,
+                (None, Some(sec)) => obj.section_symbol(ids[sec]),
+                (None, None) => return Err(Error::Syntax(format!("重定位引用的 `{}` 没进符号表", r.symbol))),
+            };
             obj.add_relocation(ids[r.section], Relocation { offset: r.offset, symbol, addend: r.addend, flags: RelocationFlags::Elf { r_type: r.r_type } })
                 .map_err(|e| Error::Syntax(e.to_string()))?;
         }

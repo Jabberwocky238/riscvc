@@ -5,5 +5,5 @@ mod inst;
 mod reg;
 
 pub use csr::Csr;
-pub use inst::{Form, Inst, Op, Style};
+pub use inst::{Ext, Form, Inst, Op, Style};
 pub use reg::{F, Rm, X};

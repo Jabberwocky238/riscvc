@@ -1,4 +1,5 @@
-//! mlirformat 解析出的 `llvm` 方言模块 ⇒ 内部 IR。
+//! mlirformat 解析出的模块 ⇒ 内部 IR。函数体里的 op 按命名空间交给注册的方言插件（[`crate::plugin`]）下降，
+//! `llvm` 方言是内置的那个（[`Module::op`]）。
 //!
 //! 带操作数分段的 op（`cond_br` / `switch` / `call` / `func` / `mlir.global` …）走 `ops.gen.rs` 的类型化结构体；
 //! 二元运算、转换、intrinsic 这类只有操作数与一两个属性的，按名字查表读通用 `Operation`。
@@ -6,15 +7,23 @@ use super::{
     Alias, ArgAttrs, BinOp, Block, BlockId, Callee, CastOp, Const, Error, FPred, Function, Global, IPred, Index, Inst, Intr, Kind, Linkage, Module, Op, Param, RmwOp, Target, Ty, Types, ValId,
 };
 use crate::llvm::{self, Llvm, LlvmType};
+use crate::plugin::Registry;
 use mlirformat::{Attribute, FloatKind, Item, NamedAttr, Operation, Region, ShapedKind, Type, Value};
 use std::collections::HashMap;
 
 impl TryFrom<&str> for Module {
     type Error = Error;
 
-    /// ⭐ MLIR 文本（`llvm` 方言，通用形式；注册了的自定义形式也认）⇒ 内部 IR。
+    /// ⭐ MLIR 文本（`llvm` 方言，通用形式；注册了的自定义形式也认）⇒ 内部 IR。只有内置方言。
     fn try_from(text: &str) -> Result<Self, Error> {
-        let opt = Llvm::opt();
+        Registry::default().parse(text)
+    }
+}
+
+impl Module {
+    /// MLIR 文本 ⇒ 内部 IR，op 交给 `reg` 里注册的方言。
+    pub(crate) fn parse_with(text: &str, reg: &Registry<'_>) -> Result<Self, Error> {
+        let opt = reg.opt();
         let parsed = opt.parse(text).map_err(|e| Error::Parse(e.to_string()))?;
         let mut m = Self::default();
         for item in &parsed.items {
@@ -24,15 +33,83 @@ impl TryFrom<&str> for Module {
                 for r in &op.regions {
                     for b in &r.blocks {
                         for o in &b.ops {
-                            m.top(o)?;
+                            m.top(o, reg)?;
                         }
                     }
                 }
             } else {
-                m.top(op)?;
+                m.top(op, reg)?;
             }
         }
         Ok(m)
+    }
+}
+
+/// ⭐ 方言插件下降一条 op 时的上下文：读操作数 / 结果、转类型、开临时值、往当前块里出指令。
+pub struct Lowering<'x, 'a> {
+    module: &'x mut Module,
+    body: &'x mut Body,
+    op: &'x Operation<'a>,
+    insts: &'x mut Vec<Inst>,
+}
+
+impl<'a> Lowering<'_, 'a> {
+    /// 正在下降的 op。
+    #[must_use]
+    pub const fn op(&self) -> &Operation<'a> {
+        self.op
+    }
+
+    /// 操作数的值。
+    pub fn operands(&self) -> Result<Vec<ValId>, Error> {
+        self.body.all(&self.op.operands)
+    }
+
+    /// 结果的值（已编好号，类型来自 op 的结果类型）。
+    pub fn results(&self) -> Result<Vec<ValId>, Error> {
+        self.op.results.iter().map(|r| self.body.names.get(&*r.name).copied().ok_or_else(|| Error::Parse(format!("没定义的结果 %{}", r.name)))).collect()
+    }
+
+    /// 属性（properties 或属性字典）。
+    #[must_use]
+    pub fn attr(&self, name: &str) -> Option<&Attribute<'a>> {
+        prop(self.op, name)
+    }
+
+    /// MLIR 类型 ⇒ 内部类型。
+    pub fn ty(&mut self, t: &Type<'_>) -> Result<Ty, Error> {
+        self.module.ty(t)
+    }
+
+    #[must_use]
+    pub fn types(&self) -> &Types {
+        &self.module.types
+    }
+
+    /// 值的类型。
+    #[must_use]
+    pub fn type_of(&self, v: ValId) -> Ty {
+        self.body.vals[v.0 as usize]
+    }
+
+    /// 新的临时值（展开成多条指令时用）。
+    pub fn temp(&mut self, ty: Ty) -> ValId {
+        let id = ValId(u32::try_from(self.body.vals.len()).expect("值太多"));
+        self.body.vals.push(ty);
+        id
+    }
+
+    /// 出一条指令。
+    pub fn emit(&mut self, result: Option<ValId>, op: Op) {
+        self.insts.push(Inst { result, op });
+    }
+
+    /// 内置 `llvm` 方言：一条 op ⇒ 一条指令。
+    pub(crate) fn llvm(&mut self) -> Result<(), Error> {
+        let result = self.op.results.first().map(|r| self.body.names[&*r.name]);
+        let o = self.module.op(self.op, self.body, result)?;
+        self.emit(result, o);
+        Ok(())
     }
 }
 
@@ -230,11 +307,11 @@ impl Body {
 }
 
 impl Module {
-    fn top(&mut self, op: &Operation<'_>) -> Result<(), Error> {
+    fn top(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         match &*op.name {
-            "llvm.func" => self.function(op),
-            "llvm.mlir.global" => self.global(op),
-            "llvm.mlir.alias" => self.alias(op),
+            "llvm.func" => self.function(op, reg),
+            "llvm.mlir.global" => self.global(op, reg),
+            "llvm.mlir.alias" => self.alias(op, reg),
             // 只影响元数据 / 链接器提示的
             "llvm.module_flags" | "llvm.comdat" | "llvm.metadata" | "llvm.compiler.used" | "llvm.used" | "llvm.mlir.global_ctors" | "llvm.mlir.global_dtors" | "llvm.linker_options" | "llvm.dependent_libraries" => Ok(()),
             n => Err(Error::Op { op: String::from(n), why: String::from("顶层不认识") }),
@@ -325,7 +402,7 @@ impl Module {
         Ok(out)
     }
 
-    fn function(&mut self, op: &Operation<'_>) -> Result<(), Error> {
+    fn function(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         let f: llvm::LLVMFuncOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.func"), why: e.0 })?;
         let name = String::from(f.sym_name.lit().ok_or_else(|| Error::Parse(String::from("llvm.func 没有名字")))?);
         let fty = self.ty(f.function_type.ty().ok_or_else(|| Error::Parse(format!("{name}：没有 function_type")))?)?;
@@ -345,7 +422,7 @@ impl Module {
             name,
         };
         if !f.body.blocks.is_empty() {
-            let (blocks, vals) = self.body(&f.body).map_err(|e| match e {
+            let (blocks, vals) = self.body(&f.body, reg).map_err(|e| match e {
                 Error::Op { op, why } => Error::Op { op, why: format!("{}：{why}", func.name) },
                 e => e,
             })?;
@@ -357,7 +434,7 @@ impl Module {
     }
 
     /// 函数体：先给所有块参数、op 结果编号（MLIR 的块次序不一定是支配次序），再逐条转。
-    fn body(&mut self, region: &Region<'_>) -> Result<(Vec<Block>, Vec<Ty>), Error> {
+    fn body(&mut self, region: &Region<'_>, reg: &Registry<'_>) -> Result<(Vec<Block>, Vec<Ty>), Error> {
         let mut b = Body::default();
         for (i, blk) in region.blocks.iter().enumerate() {
             b.blocks.insert(String::from(blk.label.as_deref().unwrap_or("")), BlockId(u32::try_from(i).expect("块太多")));
@@ -381,15 +458,13 @@ impl Module {
         for (blk, params) in region.blocks.iter().zip(params) {
             let mut insts = Vec::new();
             for op in &blk.ops {
-                let result = match op.results.first() {
-                    Some(r) => Some(b.names[&*r.name]),
-                    None => None,
-                };
-                let o = self.op(op, &b, result).map_err(|e| match e {
+                let ns = op.name.split_once('.').map_or(&*op.name, |(ns, _)| ns);
+                let dialect = reg.find_dialect(ns).ok_or_else(|| Error::Op { op: String::from(&*op.name), why: format!("没有注册 `{ns}` 方言") })?;
+                let mut cx = Lowering { module: self, body: &mut b, op, insts: &mut insts };
+                dialect.lower(&mut cx).map_err(|e| match e {
                     Error::Parse(why) => Error::Op { op: String::from(&*op.name), why },
                     e => e,
                 })?;
-                insts.push(Inst { result, op: o });
             }
             blocks.push(Block { params, insts });
         }
@@ -674,7 +749,7 @@ impl Module {
         }
     }
 
-    fn global(&mut self, op: &Operation<'_>) -> Result<(), Error> {
+    fn global(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         let g: llvm::GlobalOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.mlir.global"), why: e.0 })?;
         let name = String::from(g.sym_name.lit().unwrap_or_default());
         // llvm.used / llvm.compiler.used / llvm.global_ctors 一类（appending）：只给优化器 / 链接器看，⛔ 不出数据
@@ -685,7 +760,7 @@ impl Module {
         let linkage = Self::linkage(Some(&g.linkage));
         let init = match (&g.value, g.initializer.blocks.is_empty()) {
             (Some(v), _) => Some(self.constant(v, ty)?),
-            (None, false) => Some(self.initializer(&g.initializer)?),
+            (None, false) => Some(self.initializer(&g.initializer, reg)?),
             (None, true) if linkage == Linkage::Common => Some(Const::Zero),
             (None, true) => None,
         };
@@ -703,9 +778,9 @@ impl Module {
         Ok(())
     }
 
-    fn alias(&mut self, op: &Operation<'_>) -> Result<(), Error> {
+    fn alias(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         let a: llvm::AliasOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.mlir.alias"), why: e.0 })?;
-        let target = self.initializer(&a.initializer)?;
+        let target = self.initializer(&a.initializer, reg)?;
         self.aliases.push(Alias {
             name: String::from(a.sym_name.lit().unwrap_or_default()),
             linkage: Self::linkage(Some(&a.linkage)),
@@ -716,8 +791,8 @@ impl Module {
     }
 
     /// 初值区域：常量、`addressof`、`insertvalue`、常量下标的 `getelementptr`、指针 / 整数互转 … 折成一个常量。
-    fn initializer(&mut self, region: &Region<'_>) -> Result<Const, Error> {
-        let (blocks, vals) = self.body(region)?;
+    fn initializer(&mut self, region: &Region<'_>, reg: &Registry<'_>) -> Result<Const, Error> {
+        let (blocks, vals) = self.body(region, reg)?;
         let mut env: HashMap<ValId, Const> = HashMap::new();
         for inst in blocks.iter().flat_map(|b| &b.insts) {
             let get = |v: &ValId| env.get(v).cloned().ok_or_else(|| Error::Parse(String::from("初值里用了不是常量的值")));

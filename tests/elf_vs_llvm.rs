@@ -14,6 +14,8 @@ const SCRIPT: &str = "ENTRY(main)\nSECTIONS {\n  . = 0x10000;\n  .text : { *(.te
 const RET: u32 = 0x0fff_fff0;
 const STACK: u32 = 0x7ff0_0000;
 const STEPS: u64 = 50_000_000;
+/// ⛔ 范围外（README「未做」）：用到 fp128（`long double`）常量与运算的。
+const SCOPE: &[&str] = &["powitf2_test", "powixf2_test"];
 
 /// 一侧工具链：一组目标文件 ⇒ ELF ⇒ 从 main 跑。
 struct Side {
@@ -109,6 +111,10 @@ fn level(name: &str) {
     let (mut bad, mut broken, mut n) = (Vec::new(), Vec::new(), 0);
     for m in &progs {
         let stem = m.file_stem().unwrap().to_str().unwrap();
+        if SCOPE.iter().any(|p| stem.starts_with(&format!("{p}."))) {
+            eprintln!("SKIP（范围外：fp128）：{stem}");
+            continue;
+        }
         let theirs_obj = (String::from("test.o"), llc_obj(&llvm, &root.join(format!("unit/{stem}.ll")), &tmp.join("t.o")));
         // 没有 main（源里被 `#if` 掉了）的跳过
         if !object::File::parse(theirs_obj.1.as_slice()).unwrap().symbols().any(|s| s.name() == Ok("main") && s.is_definition()) {

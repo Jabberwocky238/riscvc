@@ -83,17 +83,75 @@ impl Form {
     }
 }
 
+/// 扩展（`-march` 里的一项）；除了 I 都是同名的 cargo feature（`m` 蕴含 `zmmul`，`f` 蕴含 `zicsr`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Ext {
+    /// 基础整数 + 特权指令（总在）。
+    I,
+    /// 只有乘法（`mul` / `mulh*`）。
+    Zmmul,
+    /// 除法、取余（M 的其余部分）。
+    M,
+    F,
+    Zicsr,
+}
+
+impl Ext {
+    /// 这次编译开了没有（feature）。
+    #[must_use]
+    pub const fn enabled(self) -> bool {
+        match self {
+            Self::I => true,
+            Self::Zmmul => cfg!(feature = "zmmul"),
+            Self::M => cfg!(feature = "m"),
+            Self::F => cfg!(feature = "f"),
+            Self::Zicsr => cfg!(feature = "zicsr"),
+        }
+    }
+
+    /// `-march` 串（同 clang 的规范写法，只列开了的）：`rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`。
+    #[must_use]
+    pub fn march() -> String {
+        let mut s = String::from("rv32i2p1");
+        for (ext, part) in [(Self::M, "_m2p0"), (Self::F, "_f2p2"), (Self::Zicsr, "_zicsr2p0"), (Self::Zmmul, "_zmmul1p0")] {
+            if ext.enabled() {
+                s.push_str(part);
+            }
+        }
+        s
+    }
+
+    /// llc / llvm-mc 的 `-mattr`（对照用）：`+m,+f,+zicsr` 这样，关了的写 `-x`。
+    #[must_use]
+    pub fn mattr() -> String {
+        [(Self::M, "m"), (Self::Zmmul, "zmmul"), (Self::F, "f"), (Self::Zicsr, "zicsr")].iter().map(|(e, n)| format!("{}{n}", if e.enabled() { '+' } else { '-' })).collect::<Vec<_>>().join(",")
+    }
+
+    /// 浮点调用约定：开了 F 用 ilp32f，否则 ilp32（软浮点）。
+    #[must_use]
+    pub const fn abi() -> &'static str {
+        if Self::F.enabled() { "ilp32f" } else { "ilp32" }
+    }
+}
+
 macro_rules! ops {
-    ($($v:ident $name:literal $form:ident $bits:literal,)*) => {
+    ($($v:ident $name:literal $form:ident $bits:literal $ext:ident,)*) => {
         /// 一条指令的助记符（⛔ 不含伪指令：伪指令在汇编器里展开、在打印时按别名还原）。
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum Op { $($v),* }
         impl Op {
+            /// 全部指令（含没开的扩展的；开了的见 [`Op::enabled`]）。
             pub const ALL: &[Op] = &[$(Op::$v),*];
             #[must_use]
             pub const fn form(self) -> Form { match self { $(Op::$v => Form::$form),* } }
             #[must_use]
             pub const fn bits(self) -> u32 { match self { $(Op::$v => $bits),* } }
+            /// 属于哪个扩展。
+            #[must_use]
+            pub const fn ext(self) -> Ext { match self { $(Op::$v => Ext::$ext),* } }
+            /// 这次编译认不认（扩展开了没有）。
+            #[must_use]
+            pub const fn enabled(self) -> bool { self.ext().enabled() }
         }
         impl fmt::Display for Op {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -102,101 +160,102 @@ macro_rules! ops {
         }
         impl FromStr for Op {
             type Err = ();
+            /// 助记符 ⇒ 指令（没开的扩展的不认）。
             fn from_str(s: &str) -> Result<Self, ()> {
-                match s { $($name => Ok(Op::$v),)* _ => Err(()) }
+                match s { $($name => Ok(Op::$v),)* _ => Err(()) }.and_then(|op: Op| if op.enabled() { Ok(op) } else { Err(()) })
             }
         }
     };
 }
 
 ops! {
-    Lui "lui" U 0x37,
-    Auipc "auipc" U 0x17,
-    Jal "jal" J 0x6f,
-    Jalr "jalr" Jalr 0x67,
-    Beq "beq" Branch 0x63,
-    Bne "bne" Branch 0x1063,
-    Blt "blt" Branch 0x4063,
-    Bge "bge" Branch 0x5063,
-    Bltu "bltu" Branch 0x6063,
-    Bgeu "bgeu" Branch 0x7063,
-    Lb "lb" Load 0x03,
-    Lh "lh" Load 0x1003,
-    Lw "lw" Load 0x2003,
-    Lbu "lbu" Load 0x4003,
-    Lhu "lhu" Load 0x5003,
-    Sb "sb" Store 0x23,
-    Sh "sh" Store 0x1023,
-    Sw "sw" Store 0x2023,
-    Addi "addi" Imm 0x13,
-    Slti "slti" Imm 0x2013,
-    Sltiu "sltiu" Imm 0x3013,
-    Xori "xori" Imm 0x4013,
-    Ori "ori" Imm 0x6013,
-    Andi "andi" Imm 0x7013,
-    Slli "slli" Shift 0x1013,
-    Srli "srli" Shift 0x5013,
-    Srai "srai" Shift 0x4000_5013,
-    Add "add" R 0x33,
-    Sub "sub" R 0x4000_0033,
-    Sll "sll" R 0x1033,
-    Slt "slt" R 0x2033,
-    Sltu "sltu" R 0x3033,
-    Xor "xor" R 0x4033,
-    Srl "srl" R 0x5033,
-    Sra "sra" R 0x4000_5033,
-    Or "or" R 0x6033,
-    And "and" R 0x7033,
-    Fence "fence" Fence 0x0f,
-    FenceTso "fence.tso" Fixed 0x8330_000f,
-    FenceI "fence.i" Fixed 0x100f,
-    Ecall "ecall" Fixed 0x73,
-    Ebreak "ebreak" Fixed 0x0010_0073,
-    Mret "mret" Fixed 0x3020_0073,
-    Sret "sret" Fixed 0x1020_0073,
-    Wfi "wfi" Fixed 0x1050_0073,
-    Dret "dret" Fixed 0x7b20_0073,
-    SfenceVma "sfence.vma" Sfence 0x1200_0073,
-    Csrrw "csrrw" Csr 0x1073,
-    Csrrs "csrrs" Csr 0x2073,
-    Csrrc "csrrc" Csr 0x3073,
-    Csrrwi "csrrwi" CsrI 0x5073,
-    Csrrsi "csrrsi" CsrI 0x6073,
-    Csrrci "csrrci" CsrI 0x7073,
-    Mul "mul" R 0x0200_0033,
-    Mulh "mulh" R 0x0200_1033,
-    Mulhsu "mulhsu" R 0x0200_2033,
-    Mulhu "mulhu" R 0x0200_3033,
-    Div "div" R 0x0200_4033,
-    Divu "divu" R 0x0200_5033,
-    Rem "rem" R 0x0200_6033,
-    Remu "remu" R 0x0200_7033,
-    Flw "flw" FLoad 0x2007,
-    Fsw "fsw" FStore 0x2027,
-    FmaddS "fmadd.s" R4 0x43,
-    FmsubS "fmsub.s" R4 0x47,
-    FnmsubS "fnmsub.s" R4 0x4b,
-    FnmaddS "fnmadd.s" R4 0x4f,
-    FaddS "fadd.s" FRrm 0x53,
-    FsubS "fsub.s" FRrm 0x0800_0053,
-    FmulS "fmul.s" FRrm 0x1000_0053,
-    FdivS "fdiv.s" FRrm 0x1800_0053,
-    FsqrtS "fsqrt.s" FR1rm 0x5800_0053,
-    FsgnjS "fsgnj.s" FR 0x2000_0053,
-    FsgnjnS "fsgnjn.s" FR 0x2000_1053,
-    FsgnjxS "fsgnjx.s" FR 0x2000_2053,
-    FminS "fmin.s" FR 0x2800_0053,
-    FmaxS "fmax.s" FR 0x2800_1053,
-    FcvtWS "fcvt.w.s" FCvtXF 0xc000_0053,
-    FcvtWuS "fcvt.wu.s" FCvtXF 0xc010_0053,
-    FmvXW "fmv.x.w" FToX 0xe000_0053,
-    FeqS "feq.s" FCmp 0xa000_2053,
-    FltS "flt.s" FCmp 0xa000_1053,
-    FleS "fle.s" FCmp 0xa000_0053,
-    FclassS "fclass.s" FToX 0xe000_1053,
-    FcvtSW "fcvt.s.w" FCvtFX 0xd000_0053,
-    FcvtSWu "fcvt.s.wu" FCvtFX 0xd010_0053,
-    FmvWX "fmv.w.x" XToF 0xf000_0053,
+    Lui "lui" U 0x37 I,
+    Auipc "auipc" U 0x17 I,
+    Jal "jal" J 0x6f I,
+    Jalr "jalr" Jalr 0x67 I,
+    Beq "beq" Branch 0x63 I,
+    Bne "bne" Branch 0x1063 I,
+    Blt "blt" Branch 0x4063 I,
+    Bge "bge" Branch 0x5063 I,
+    Bltu "bltu" Branch 0x6063 I,
+    Bgeu "bgeu" Branch 0x7063 I,
+    Lb "lb" Load 0x03 I,
+    Lh "lh" Load 0x1003 I,
+    Lw "lw" Load 0x2003 I,
+    Lbu "lbu" Load 0x4003 I,
+    Lhu "lhu" Load 0x5003 I,
+    Sb "sb" Store 0x23 I,
+    Sh "sh" Store 0x1023 I,
+    Sw "sw" Store 0x2023 I,
+    Addi "addi" Imm 0x13 I,
+    Slti "slti" Imm 0x2013 I,
+    Sltiu "sltiu" Imm 0x3013 I,
+    Xori "xori" Imm 0x4013 I,
+    Ori "ori" Imm 0x6013 I,
+    Andi "andi" Imm 0x7013 I,
+    Slli "slli" Shift 0x1013 I,
+    Srli "srli" Shift 0x5013 I,
+    Srai "srai" Shift 0x4000_5013 I,
+    Add "add" R 0x33 I,
+    Sub "sub" R 0x4000_0033 I,
+    Sll "sll" R 0x1033 I,
+    Slt "slt" R 0x2033 I,
+    Sltu "sltu" R 0x3033 I,
+    Xor "xor" R 0x4033 I,
+    Srl "srl" R 0x5033 I,
+    Sra "sra" R 0x4000_5033 I,
+    Or "or" R 0x6033 I,
+    And "and" R 0x7033 I,
+    Fence "fence" Fence 0x0f I,
+    FenceTso "fence.tso" Fixed 0x8330_000f I,
+    FenceI "fence.i" Fixed 0x100f I,
+    Ecall "ecall" Fixed 0x73 I,
+    Ebreak "ebreak" Fixed 0x0010_0073 I,
+    Mret "mret" Fixed 0x3020_0073 I,
+    Sret "sret" Fixed 0x1020_0073 I,
+    Wfi "wfi" Fixed 0x1050_0073 I,
+    Dret "dret" Fixed 0x7b20_0073 I,
+    SfenceVma "sfence.vma" Sfence 0x1200_0073 I,
+    Csrrw "csrrw" Csr 0x1073 Zicsr,
+    Csrrs "csrrs" Csr 0x2073 Zicsr,
+    Csrrc "csrrc" Csr 0x3073 Zicsr,
+    Csrrwi "csrrwi" CsrI 0x5073 Zicsr,
+    Csrrsi "csrrsi" CsrI 0x6073 Zicsr,
+    Csrrci "csrrci" CsrI 0x7073 Zicsr,
+    Mul "mul" R 0x0200_0033 Zmmul,
+    Mulh "mulh" R 0x0200_1033 Zmmul,
+    Mulhsu "mulhsu" R 0x0200_2033 Zmmul,
+    Mulhu "mulhu" R 0x0200_3033 Zmmul,
+    Div "div" R 0x0200_4033 M,
+    Divu "divu" R 0x0200_5033 M,
+    Rem "rem" R 0x0200_6033 M,
+    Remu "remu" R 0x0200_7033 M,
+    Flw "flw" FLoad 0x2007 F,
+    Fsw "fsw" FStore 0x2027 F,
+    FmaddS "fmadd.s" R4 0x43 F,
+    FmsubS "fmsub.s" R4 0x47 F,
+    FnmsubS "fnmsub.s" R4 0x4b F,
+    FnmaddS "fnmadd.s" R4 0x4f F,
+    FaddS "fadd.s" FRrm 0x53 F,
+    FsubS "fsub.s" FRrm 0x0800_0053 F,
+    FmulS "fmul.s" FRrm 0x1000_0053 F,
+    FdivS "fdiv.s" FRrm 0x1800_0053 F,
+    FsqrtS "fsqrt.s" FR1rm 0x5800_0053 F,
+    FsgnjS "fsgnj.s" FR 0x2000_0053 F,
+    FsgnjnS "fsgnjn.s" FR 0x2000_1053 F,
+    FsgnjxS "fsgnjx.s" FR 0x2000_2053 F,
+    FminS "fmin.s" FR 0x2800_0053 F,
+    FmaxS "fmax.s" FR 0x2800_1053 F,
+    FcvtWS "fcvt.w.s" FCvtXF 0xc000_0053 F,
+    FcvtWuS "fcvt.wu.s" FCvtXF 0xc010_0053 F,
+    FmvXW "fmv.x.w" FToX 0xe000_0053 F,
+    FeqS "feq.s" FCmp 0xa000_2053 F,
+    FltS "flt.s" FCmp 0xa000_1053 F,
+    FleS "fle.s" FCmp 0xa000_0053 F,
+    FclassS "fclass.s" FToX 0xe000_1053 F,
+    FcvtSW "fcvt.s.w" FCvtFX 0xd000_0053 F,
+    FcvtSWu "fcvt.s.wu" FCvtFX 0xd010_0053 F,
+    FmvWX "fmv.w.x" XToF 0xf000_0053 F,
 }
 
 /// 一条译好 / 待编的指令。寄存器按编号存（哪一类由格式定）。
@@ -295,7 +354,7 @@ impl TryFrom<u32> for Inst {
     type Error = ();
     /// 译一个字：命中多条时取掩码位最多的（`fence.tso` 胜过 `fence`）。
     fn try_from(w: u32) -> Result<Self, ()> {
-        let op = Op::ALL.iter().copied().filter(|op| w & op.form().mask() == op.bits()).max_by_key(|op| op.form().mask().count_ones()).ok_or(())?;
+        let op = Op::ALL.iter().copied().filter(|op| op.enabled() && w & op.form().mask() == op.bits()).max_by_key(|op| op.form().mask().count_ones()).ok_or(())?;
         let form = op.form();
         let (rd, rs1, rs2, rs3) = (field(w, 7, 5) as u8, field(w, 15, 5) as u8, field(w, 20, 5) as u8, field(w, 27, 5) as u8);
         let imm = match form {

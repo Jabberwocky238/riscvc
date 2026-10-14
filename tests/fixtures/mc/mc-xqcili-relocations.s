@@ -98,7 +98,7 @@ same_section:
 # riscvc-fixtures: qc.e.li s1, undef
 
 ## Enable compression/relaxation to check how symbols are handled.
-.option noexact
+# riscvc-scope: .option noexact
 
 # ASM: qc.li a1, %qc.abs20(undef)
 # OBJ-NEXT: qc.li a1, 0x0
