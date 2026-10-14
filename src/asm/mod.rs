@@ -198,10 +198,8 @@ impl<'e> Assembler<'e> {
             options: Vec::new(),
             directs: Vec::new(),
         };
-        // llvm-mc 一开始就有这三个节
-        for name in [".text", ".data", ".bss"] {
-            asm.switch(name, None, None, None);
-        }
+        // 同 llvm-mc：一开始只有 .text；.data / .bss 等源里真的切过去才建（空的也建），按第一次切换的次序
+        asm.switch(".text", None, None, None);
         asm.cur = 0;
         asm.prev = 0;
         asm

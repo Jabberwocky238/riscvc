@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 #[derive(Debug, PartialEq)]
 struct Norm {
     sections: BTreeMap<String, (u32, u64, Vec<u8>)>,
+    /// 节名的次序（含空节；不含符号表、字符串表、重定位节）：MC 只建用到的节。
+    names: Vec<String>,
     relocs: Vec<(String, u64, u32, String, i64)>,
     globals: BTreeMap<String, (String, u64, u64, u8, u8)>,
 }
@@ -20,6 +22,7 @@ impl Norm {
         let file = object::File::parse(bytes).unwrap();
         let name = |i: object::SectionIndex| file.section_by_index(i).map(|s| String::from(s.name().unwrap())).unwrap_or_default();
         let mut sections = BTreeMap::new();
+        let names = file.sections().filter_map(|s| s.name().ok().map(String::from)).filter(|n| !SKIP.contains(&n.as_str()) && !n.starts_with(".rela") && !n.is_empty()).collect();
         let mut relocs = Vec::new();
         for s in file.sections() {
             let n = String::from(s.name().unwrap());
@@ -58,7 +61,7 @@ impl Norm {
                 (String::from(s.name().unwrap()), (s.section_index().map(name).unwrap_or_default(), s.address(), s.size(), st_info, st_other))
             })
             .collect();
-        Self { sections, relocs, globals }
+        Self { sections, names, relocs, globals }
     }
 }
 
@@ -104,6 +107,9 @@ fn corpus(sub: &str, how: &str) {
                 }
                 for k in ours.sections.keys().filter(|k| !theirs.sections.contains_key(*k)) {
                     eprintln!("  多出节 {k}");
+                }
+                if ours.names != theirs.names {
+                    eprintln!("  节名：riscvc {:?}\n        llvm   {:?}", ours.names, theirs.names);
                 }
                 if ours.relocs != theirs.relocs {
                     eprintln!("  重定位：riscvc {:?}\n          llvm   {:?}", ours.relocs.iter().filter(|r| !theirs.relocs.contains(r)).take(4).collect::<Vec<_>>(), theirs.relocs.iter().filter(|r| !ours.relocs.contains(r)).take(4).collect::<Vec<_>>());
