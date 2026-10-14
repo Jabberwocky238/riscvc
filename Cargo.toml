@@ -47,6 +47,8 @@ mlirformat = { version = "0.2.1", default-features = false }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"] }
 regalloc2 = "0.15.2"
 thiserror = "2"
+# SHF_MERGE 去重的分片哈希（同 lld：llvm::xxh3_64bits）
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # 实参按 ilp32f 放（float 进 fa 寄存器）
 [[test]]

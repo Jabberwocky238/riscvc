@@ -4,11 +4,15 @@
 //! input   读目标文件（节、符号、重定位）
 //! resolve 全局符号：强 / 弱 / COMMON / 未定义
 //! place   按脚本把输入节分给输出节；没被脚本点名的（孤儿）同 lld 按名字归并、按类别插位
+//! merge   SHF_MERGE 节去重（同 lld -O1）
 //! layout  定地址：`.`、ALIGN、AT、符号赋值
+//! relax   链接松弛（同 lld：ALIGN 删 nop、call ⇒ jal、lui 省掉），定了再重排
 //! reloc   施加 RISC-V 重定位
 //! write   写 ELF（节表 + 程序头；装载器按节表铺）
 //! ```
 mod input;
+mod merge;
+mod relax;
 mod reloc;
 pub mod script;
 mod write;
@@ -41,6 +45,8 @@ pub struct Options {
     pub strip: bool,
     /// `--unresolved-symbols=ignore-all`：未定义符号当 0。
     pub allow_undefined: bool,
+    /// `--no-relax`：不做 call / lui 的松弛（R_RISCV_ALIGN 删 nop 照做，同 lld）。
+    pub no_relax: bool,
 }
 
 /// 一段输出节的内容。
@@ -173,6 +179,12 @@ pub struct Linker {
     slots: Vec<Slot>,
     /// （文件, 节号）⇒（输出节, 地址）。`None` = 丢弃。
     placed: HashMap<(usize, usize), Option<(usize, u64)>>,
+    /// 合并掉的输入节（文件, 节号）⇒ 合成节与片映射。
+    merged: HashMap<(usize, usize), merge::Member>,
+    /// 松弛中的输入节（文件, 节号）⇒ 状态。
+    relax: HashMap<(usize, usize), relax::Aux>,
+    /// 松弛中符号的（值, 大小）：（文件, 符号下标）。
+    relaxed: HashMap<(usize, usize), (u64, u64)>,
     pub entry: u64,
 }
 
@@ -181,11 +193,13 @@ impl Linker {
     pub fn link(opts: Options, inputs: &[(&str, &[u8])]) -> Result<Vec<u8>, Error> {
         let script = opts.script.as_deref().map(Script::try_from).transpose()?.unwrap_or_default();
         let objs = inputs.iter().map(|&(n, b)| Obj::try_from((n, b))).collect::<Result<Vec<_>, _>>()?;
-        let mut l = Self { opts, objs, script, globals: HashMap::new(), order: Vec::new(), outs: Vec::new(), slots: Vec::new(), placed: HashMap::new(), entry: 0 };
+        let mut l = Self { opts, objs, script, globals: HashMap::new(), order: Vec::new(), outs: Vec::new(), slots: Vec::new(), placed: HashMap::new(), merged: HashMap::new(), relax: HashMap::new(), relaxed: HashMap::new(), entry: 0 };
         l.resolve()?;
         l.commons();
         l.place();
+        l.merge();
         l.layout()?;
+        l.relax_all()?;
         l.relocate()?;
         l.write()
     }
@@ -474,7 +488,7 @@ impl Linker {
                         let s = self.objs[o].sections[i].as_ref().expect("放进来的都有");
                         here = here.next_multiple_of(s.align);
                         self.placed.insert((o, i), Some((idx, here)));
-                        here += s.size;
+                        here += s.size - self.dropped(o, i);
                     }
                     Piece::Assign(a) => self.assign(&a, &mut here, &mut syms, Some(start))?,
                     Piece::Data(n, _) => here += u64::from(n),
@@ -509,11 +523,14 @@ impl Linker {
                     Piece::Input(o, i) => {
                         let s = self.objs[o].sections[i].as_ref().expect("放进来的都有");
                         here = here.next_multiple_of(s.align);
+                        let size = s.size - self.dropped(o, i);
                         if s.ty != elf::SHT_NOBITS {
+                            // 松弛中（还没改写）只拷得下的部分
                             let at = usize::try_from(here - start).unwrap_or_default();
-                            data[at..at + s.data.len()].copy_from_slice(&s.data);
+                            let n = s.data.len().min(usize::try_from(size).unwrap_or_default());
+                            data[at..at + n].copy_from_slice(&s.data[..n]);
                         }
-                        here += s.size;
+                        here += size;
                     }
                     Piece::Assign(a) => self.assign(&a, &mut here, &mut HashMap::new(), Some(start))?,
                     Piece::Data(n, e) => {
@@ -621,24 +638,54 @@ impl Linker {
     fn global(&self, name: &str) -> Option<u64> {
         match self.globals.get(name)? {
             Def::Script(v) => Some(*v),
-            Def::Obj(o, i) => self.sym_value(*o, &self.objs[*o].syms[*i]),
+            Def::Obj(o, i) => self.sym_value(*o, *i),
         }
     }
 
+    /// 输入节里的一个偏移 ⇒（输出节, 地址）：合并掉的经片映射，丢掉的 ⇒ `None`。
+    fn locate(&self, o: usize, i: usize, off: u64) -> Option<(usize, u64)> {
+        if let Some(m) = self.merged.get(&(o, i)) {
+            let (out, a) = (*self.placed.get(&m.syn)?)?;
+            return Some((out, a + m.map(off)));
+        }
+        let (out, a) = (*self.placed.get(&(o, i))?)?;
+        Some((out, a + off))
+    }
+
+    /// 符号此刻的（值, 大小）（松弛中的取松弛后的）。
+    fn sym_now(&self, o: usize, idx: usize) -> (u64, u64) {
+        let s = &self.objs[o].syms[idx];
+        self.relaxed.get(&(o, idx)).copied().unwrap_or((s.value, s.size))
+    }
+
     /// 某文件里一个符号（按它自己的定义）的地址。
-    fn sym_value(&self, o: usize, s: &InSym) -> Option<u64> {
+    fn sym_value(&self, o: usize, idx: usize) -> Option<u64> {
+        let s = &self.objs[o].syms[idx];
         match s.place {
             Place::Abs => Some(s.value),
-            Place::Section(i) => self.placed.get(&(o, i)).map(|p| p.map_or(0, |(_, a)| a + s.value)),
+            // 丢掉的节里的符号当 0（同原来）
+            Place::Section(i) => Some(self.locate(o, i, self.sym_now(o, idx).0).map_or(0, |(_, a)| a)).filter(|_| self.placed.contains_key(&(o, i)) || self.merged.contains_key(&(o, i))),
             Place::Undef | Place::Common(_) => None,
         }
+    }
+
+    /// 重定位的（符号 + 加数）里符号的地址：指向合并节的节符号按「值 + 加数」找片，再减回加数（同 lld）。
+    fn target_at(&self, o: usize, idx: usize, addend: i64) -> Result<Option<u64>, Error> {
+        let s = &self.objs[o].syms[idx];
+        if s.ty == elf::STT_SECTION
+            && let Place::Section(i) = s.place
+            && self.merged.contains_key(&(o, i))
+        {
+            return Ok(self.locate(o, i, s.value.wrapping_add_signed(addend)).map(|(_, a)| a.wrapping_add_signed(-addend)));
+        }
+        self.target(o, idx)
     }
 
     /// 重定位里引用的符号 ⇒ 地址；`None` = 未定义（弱引用或 `--unresolved-symbols=ignore-all`）。
     fn target(&self, o: usize, idx: usize) -> Result<Option<u64>, Error> {
         let s = &self.objs[o].syms[idx];
         if s.local() {
-            return self.sym_value(o, s).map(Some).ok_or_else(|| Error::Link(format!("{}：局部符号 `{}` 没地址", self.objs[o].name, s.name)));
+            return self.sym_value(o, idx).map(Some).ok_or_else(|| Error::Link(format!("{}：局部符号 `{}` 没地址", self.objs[o].name, s.name)));
         }
         match self.global(&s.name) {
             Some(v) => Ok(Some(v)),

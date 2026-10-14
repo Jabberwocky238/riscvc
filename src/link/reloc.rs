@@ -1,4 +1,4 @@
-//! RISC-V 重定位（静态可执行，⛔ 不做 linker relaxation：`R_RISCV_RELAX` / `R_RISCV_ALIGN` 原样保留字节）。
+//! RISC-V 重定位（静态可执行）。松弛在这之前（relax.rs）做完：这里的 `R_RISCV_RELAX` / `R_RISCV_ALIGN` 只是空操作。
 use super::{Error, Linker};
 use crate::isa::Base;
 use object::elf;
@@ -19,7 +19,7 @@ impl Linker {
                     }
                     let p = base + r.offset;
                     let at = usize::try_from(p - self.outs[out].addr).unwrap_or_default();
-                    let target = self.target(o, r.sym)?;
+                    let target = self.target_at(o, r.sym, r.addend)?;
                     let s = target.unwrap_or(0);
                     let v = s.wrapping_add_signed(r.addend);
                     // 未定义符号的跳转 / 调用同 lld：跳到自己（死循环，⛔ 不溢出）
@@ -41,6 +41,13 @@ impl Linker {
                         elf::R_RISCV_HI20 => Self::field(data, at, Base::U, Self::hi20(v.cast_signed())),
                         elf::R_RISCV_LO12_I => Self::field(data, at, Base::Imm, Self::lo12(v.cast_signed())),
                         elf::R_RISCV_LO12_S => Self::field(data, at, Base::Store, Self::lo12(v.cast_signed())),
+                        // 松弛后：lui 删了，lo12 改用 x0（rs1 清 0）
+                        super::relax::X0REL_I | super::relax::X0REL_S => {
+                            let w = Self::get(data, at, 4) & !(31 << 15);
+                            Self::put(data, at, 4, w);
+                            let form = if r.r_type == super::relax::X0REL_I { Base::Imm } else { Base::Store };
+                            Self::field(data, at, form, Self::lo12(v.cast_signed()));
+                        }
                         elf::R_RISCV_PCREL_HI20 => {
                             range(32, pc)?;
                             Self::field(data, at, Base::U, Self::hi20(pc));
@@ -53,7 +60,7 @@ impl Linker {
                                 .iter()
                                 .find(|h| h.offset == hi_at && h.r_type == elf::R_RISCV_PCREL_HI20)
                                 .ok_or_else(|| Error::Link(format!("{}：{} 的 %pcrel_lo 在 {hi_at:#x} 处找不到 %pcrel_hi", self.objs[o].name, sec.name)))?;
-                            let target = self.target(o, hi.sym)?.unwrap_or(0).wrapping_add_signed(hi.addend);
+                            let target = self.target_at(o, hi.sym, hi.addend)?.unwrap_or(0).wrapping_add_signed(hi.addend);
                             let d = target.wrapping_sub(s).cast_signed();
                             let form = if r.r_type == elf::R_RISCV_PCREL_LO12_I { Base::Imm } else { Base::Store };
                             let data = &mut self.outs[out].data;

@@ -134,9 +134,9 @@ impl Linker {
                         continue;
                     }
                     let (value, shndx) = match s.place {
-                        Place::Section(i) => match self.placed.get(&(o, i)) {
-                            Some(Some((out, a))) => (a + s.value, index(&self.outs[*out].name)),
-                            _ => continue,
+                        Place::Section(i) => match self.locate(o, i, s.value) {
+                            Some((out, a)) => (a, index(&self.outs[out].name)),
+                            None => continue,
                         },
                         Place::Abs if s.ty == elf::STT_FILE => (0, elf::SHN_ABS),
                         Place::Abs => (s.value, elf::SHN_ABS),
@@ -159,9 +159,9 @@ impl Linker {
                     super::Def::Obj(o, i) => {
                         let s = &self.objs[o].syms[i];
                         let (value, shndx) = match s.place {
-                            Place::Section(si) => match self.placed.get(&(o, si)) {
-                                Some(Some((out, a))) => (a + s.value, index(&self.outs[*out].name)),
-                                _ => (0, elf::SHN_UNDEF),
+                            Place::Section(si) => match self.locate(o, si, s.value) {
+                                Some((out, a)) => (a, index(&self.outs[out].name)),
+                                None => (0, elf::SHN_UNDEF),
                             },
                             Place::Abs => (s.value, elf::SHN_ABS),
                             _ => (0, elf::SHN_UNDEF),

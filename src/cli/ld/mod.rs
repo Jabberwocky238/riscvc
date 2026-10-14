@@ -20,6 +20,9 @@ pub struct Ld {
     /// 未定义符号当 0（同 `--unresolved-symbols=ignore-all`）。
     #[arg(long)]
     allow_undefined: bool,
+    /// 不做 call / lui 的松弛（`R_RISCV_ALIGN` 删 nop 照做，同 ld.lld --no-relax）。
+    #[arg(long)]
+    no_relax: bool,
 }
 
 impl Ld {
@@ -35,7 +38,7 @@ impl Ld {
             .map(|p| std::fs::read(p).map(|b| (p.display().to_string(), b)).map_err(|e| format!("{}：{e}", p.display())))
             .collect::<Result<_, _>>()?;
         let inputs: Vec<(&str, &[u8])> = bytes.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
-        let opts = crate::link::Options { script, entry: self.entry.clone(), strip: self.strip, allow_undefined: self.allow_undefined };
+        let opts = crate::link::Options { script, entry: self.entry.clone(), strip: self.strip, allow_undefined: self.allow_undefined, no_relax: self.no_relax };
         let elf = crate::link::Linker::link(opts, &inputs).map_err(|e| e.to_string())?;
         super::write(&self.output, &elf)
     }

@@ -53,7 +53,7 @@ impl Image {
     }
 }
 
-/// 目标文件由谁出：riscvc 汇编器，或 llvm-mc 带 `+relax`（带 R_RISCV_RELAX / R_RISCV_ALIGN，对照 lld 用 --no-relax）。
+/// 目标文件由谁出：riscvc 汇编器，或 llvm-mc 带 `+relax`（带 R_RISCV_RELAX / R_RISCV_ALIGN，还有 SHF_MERGE 的串节）。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Objs {
     Riscvc,
@@ -61,10 +61,11 @@ enum Objs {
 }
 
 fn link(script: &str, name: &str) {
-    link_with(script, name, Objs::Riscvc);
+    link_with(script, name, Objs::Riscvc, false);
 }
 
-fn link_with(script: &str, name: &str, objs_from: Objs) {
+/// `no_relax`：两边都 --no-relax（lld 仍按 R_RISCV_ALIGN 删 nop）。
+fn link_with(script: &str, name: &str, objs_from: Objs, no_relax: bool) {
     let Some(llvm) = llvm::Llvm::locate() else { return };
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/corpus/s");
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -91,7 +92,10 @@ fn link_with(script: &str, name: &str, objs_from: Objs) {
     let ld = tmp.join("link.ld");
     std::fs::write(&ld, script).unwrap();
     let lld_out = tmp.join("lld.elf");
-    let mut args: Vec<String> = vec!["-T".into(), ld.display().to_string(), "--unresolved-symbols=ignore-all".into(), "--no-relax".into(), "-o".into(), lld_out.display().to_string()];
+    let mut args: Vec<String> = vec!["-T".into(), ld.display().to_string(), "--unresolved-symbols=ignore-all".into(), "-o".into(), lld_out.display().to_string()];
+    if no_relax {
+        args.push("--no-relax".into());
+    }
     args.extend(objs.iter().map(|o| o.display().to_string()));
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (_, err) = llvm.run("ld.lld", &args, "");
@@ -99,14 +103,7 @@ fn link_with(script: &str, name: &str, objs_from: Objs) {
     let theirs = Image::of(&std::fs::read(&lld_out).unwrap());
     let bytes: Vec<(String, Vec<u8>)> = objs.iter().map(|o| (o.display().to_string(), std::fs::read(o).unwrap())).collect();
     let inputs: Vec<(&str, &[u8])> = bytes.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
-    let ours = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), allow_undefined: true, ..Default::default() }, &inputs).unwrap();
-    // ⚠ +relax 的目标文件只验「能链上」（RELAX / ALIGN 当空操作）：lld 即使 --no-relax 也按 ALIGN 删多余的 nop，
-    // 还会合并 SHF_MERGE | SHF_STRINGS 节里重复的串 —— 这两样 riscvc 都没做，字节对不上
-    if objs_from == Objs::LlvmRelax {
-        eprintln!("{name}：{} 个目标文件链上了", objs.len());
-        std::fs::remove_dir_all(&tmp).ok();
-        return;
-    }
+    let ours = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), allow_undefined: true, no_relax, ..Default::default() }, &inputs).unwrap();
     std::fs::write(tmp.join("riscvc.elf"), &ours).unwrap();
     let ours = Image::of(&ours);
     assert_eq!(ours.entry, theirs.entry, "入口");
@@ -135,8 +132,19 @@ fn program_script() {
     link(PROGRAM, "program");
 }
 
-/// llvm-mc 带 `+relax` 出的目标文件（有 RELAX / ALIGN，0 号空符号）：能链上（松弛提示当空操作）。
+/// llvm-mc 带 `+relax` 出的目标文件：链接松弛（ALIGN 删 nop、call ⇒ jal、lui 省掉）与 SHF_MERGE 去重，同 ld.lld。
 #[test]
-fn relax_hints_ignored() {
-    link_with(PROGRAM, "relax", Objs::LlvmRelax);
+fn relax_program() {
+    link_with(PROGRAM, "relax-program", Objs::LlvmRelax, false);
+}
+
+#[test]
+fn relax_flat() {
+    link_with(FLAT, "relax-flat", Objs::LlvmRelax, false);
+}
+
+/// 同上、两边都 `--no-relax`：只剩 ALIGN 删 nop 与去重。
+#[test]
+fn no_relax_program() {
+    link_with(PROGRAM, "norelax-program", Objs::LlvmRelax, true);
 }
