@@ -260,7 +260,7 @@ impl<T: Semantics> Extension for Std<T> {
             return Some(Ok(Emit::Text(text)));
         }
         let op: T = mnemonic.parse().ok()?;
-        Some(Encoder::encode(op, args.ops))
+        Some(Encoder::encode(op, args))
     }
 
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
@@ -311,7 +311,8 @@ impl Template {
 struct Encoder;
 
 impl Encoder {
-    fn encode<T: Table>(op: T, ops: &[Operand]) -> Result<Emit, String> {
+    fn encode<T: Table>(op: T, args: &Args<'_>) -> Result<Emit, String> {
+        let ops = args.ops;
         use Operand::{F as Fr, Imm, Mem, Sym, X as Xr};
         let i = Inst::of(op);
         let bad = || format!("`{op}` 的操作数不对：{ops:?}");
@@ -322,7 +323,12 @@ impl Encoder {
                 _ => Err(format!("舍入模式写错：{rest:?}")),
             }
         };
+        // CSR：原文是 CSR 名就按名字（哪怕同名符号 `.set` 过，同 llvm-mc），否则按值
         let csr = |o: &Operand| -> Result<u16, String> {
+            let k = ops.iter().position(|x| core::ptr::eq(x, o)).unwrap_or(usize::MAX);
+            if let Some(c) = args.raw.get(k).and_then(|r| r.parse::<Csr>().ok()) {
+                return Ok(c.0);
+            }
             match o {
                 Sym(n) => n.parse::<Csr>().map(|c| c.0).map_err(|()| format!("不认识的 CSR `{n}`")),
                 Imm(k) => u16::try_from(*k).ok().filter(|&c| c < 4096).ok_or_else(|| format!("CSR 编号 {k} 越界")),

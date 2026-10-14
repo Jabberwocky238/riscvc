@@ -1,6 +1,8 @@
-//! 译码 + 打印 vs `llvm-mc --disassemble`（riscv32 +m,+f,+zicsr）：随机字逐条比，别名与 no-aliases 两种风格。
+//! 译码 + 打印 vs `llvm-objdump`（riscv32，-mattr 同开了的扩展）：随机字逐条比，别名与 no-aliases 两种风格。
+//! 我们这边走 [`Disasm`]（内置扩展 + RV32I），同 `riscvc objdump`。
 mod llvm;
-use riscvc::isa::{Inst, Op, Style};
+use riscvc::ext::Disasm;
+use riscvc::isa::{Opcode, Style, Table};
 
 fn words(n: usize) -> Vec<u32> {
     let mut rng = llvm::Rng(0x1234_5678_9abc_def1);
@@ -10,7 +12,7 @@ fn words(n: usize) -> Vec<u32> {
             if i % 8 == 0 {
                 (r | 3) & !(u32::from(r & 0x1c == 0x1c) << 2) // 纯随机，落在 32 位指令空间（低两位 11、bit 4:2 ≠ 111）：看拒收是否一致
             } else {
-                let op = Op::ALL[(rng.next() % Op::ALL.len() as u64) as usize];
+                let op = Opcode::ALL[(rng.next() % Opcode::ALL.len() as u64) as usize];
                 op.bits() | (r & !op.form().mask())
             }
         })
@@ -26,7 +28,8 @@ fn compare(style: Style, args: &[&str]) {
     obj.append_section_data(text, &words.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>(), 4);
     let dir = std::env::temp_dir().join(format!("riscvc-disasm-{}-{}", std::process::id(), args.join("")));
     std::fs::write(&dir, obj.write().unwrap()).unwrap();
-    let mut cmd = vec!["-d", "--no-show-raw-insn", "--mattr=+m,+f,+zicsr"];
+    let mattr = format!("--mattr={}", riscvc::isa::Ext::mattr());
+    let mut cmd = vec!["-d", "--no-show-raw-insn", mattr.as_str()];
     cmd.extend(args);
     cmd.push(dir.to_str().unwrap());
     let (out, _) = llvm.run("llvm-objdump", &cmd, "");
@@ -45,7 +48,9 @@ fn compare(style: Style, args: &[&str]) {
     let (mut bad, mut shown) = (0, 0);
     for (i, &w) in words.iter().enumerate() {
         let pc = 4 * i as u64;
-        let ours = Inst::try_from(w).map_or_else(|()| String::from("<unknown>"), |inst| inst.print(pc, style).replace('\t', " "));
+        // 一个字的反汇编：内置扩展先认，再 RV32I（同 objdump）
+        let bytes = w.to_le_bytes();
+        let ours = Disasm::new(&bytes, pc, &[], style).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
         let expect = theirs.get(&pc).cloned().unwrap_or_default();
         if ours != expect {
             bad += 1;

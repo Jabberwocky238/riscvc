@@ -288,7 +288,6 @@ impl Assembler<'_> {
                 self.imm(Inst::new(op).x(rd.0, rs.0, 0), e, fix)?;
             }
             (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
-            (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
             (Form::Fixed, []) => self.emit(i)?,
             (Form::Sfence, []) => self.emit(i)?,
             (Form::Sfence, [Opnd::X(a)]) => self.emit(i.x(0, a.0, 0))?,
