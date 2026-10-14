@@ -3,7 +3,7 @@ use super::{Error, Isel, Part, R};
 use crate::codegen::mir::MOp;
 use crate::ir::{BinOp, CastOp, Const, IPred, Kind, Ty, ValId};
 use crate::feature::{Zmmul, M, Float};
-use crate::isa::{Inst, Rv32i as IOp, Table, Form};
+use crate::isa::{Base, Rv32i as IOp, Table};
 use regalloc2::RegClass;
 
 impl Isel<'_> {
@@ -48,8 +48,8 @@ impl Isel<'_> {
     /// `op rd, x, 常数`：立即数放得下用 I 型，否则把常数装进寄存器用 R 型。
     fn with_imm(&mut self, rop: IOp, iop: IOp, x: R, b: ValId) -> Result<R, Error> {
         if let Some(c) = self.const_i32(b)
-            && Inst::fits(iop.form(), i64::from(c))
-            && !(iop.form() == Form::Shift && c < 0)
+            && iop.form().fits(i64::from(c))
+            && !(iop.form() == Base::Shift && c < 0)
         {
             return Ok(self.ri(iop, x, c));
         }
@@ -73,7 +73,7 @@ impl Isel<'_> {
                 let r = self.with_imm(IOp::Add, IOp::Addi, x, b)?;
                 self.mask(r, w)
             }
-            BinOp::Sub => match self.const_i32(b).filter(|c| Inst::fits(Form::Imm, -i64::from(*c))) {
+            BinOp::Sub => match self.const_i32(b).filter(|c| Base::Imm.fits(-i64::from(*c))) {
                 Some(c) => {
                     let r = self.ri(IOp::Addi, x, -c);
                     self.mask(r, w)
@@ -280,13 +280,13 @@ impl Isel<'_> {
             let c = if Self::signed(p) && w < 32 { (c << (32 - w)) >> (32 - w) } else { c };
             match p {
                 IPred::Eq | IPred::Ne => {
-                    let t = if c == 0 { x } else if Inst::fits(Form::Imm, i64::from(c)) { self.ri(IOp::Xori, x, c) } else {
+                    let t = if c == 0 { x } else if Base::Imm.fits(i64::from(c)) { self.ri(IOp::Xori, x, c) } else {
                         let y = self.li(c);
                         self.rr(IOp::Xor, x, y)
                     };
                     return Ok(if p == IPred::Eq { self.ri(IOp::Sltiu, t, 1) } else { self.rr(IOp::Sltu, R::ZERO, t) });
                 }
-                IPred::Slt | IPred::Ult if Inst::fits(Form::Imm, i64::from(c)) => return Ok(self.ri(if p == IPred::Slt { IOp::Slti } else { IOp::Sltiu }, x, c)),
+                IPred::Slt | IPred::Ult if Base::Imm.fits(i64::from(c)) => return Ok(self.ri(if p == IPred::Slt { IOp::Slti } else { IOp::Sltiu }, x, c)),
                 _ => {}
             }
         }
@@ -403,7 +403,7 @@ impl Isel<'_> {
                 let x = self.get(a)?;
                 match (self.kind(from), self.kind(to)) {
                     // 软浮点的 float 本来就在整数寄存器里
-                    (Kind::Float, _) | (_, Kind::Float) if !crate::isa::Ext::F.enabled() => x,
+                    (Kind::Float, _) | (_, Kind::Float) if !crate::feature::Float::ENABLED => x,
                     (Kind::Float, Kind::Int(32)) => {
                         let d = self.xr();
                         self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![d], x);

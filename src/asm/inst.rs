@@ -3,7 +3,7 @@ use super::fixup::Fix;
 use super::lex::{Tok, Toks};
 use super::{Assembler, Error, Expr, Modifier};
 use crate::ext::{Args, Emit, Field, Operand};
-use crate::isa::{F, Form, Inst, Opcode, Rv32i as Op, Table, X};
+use crate::isa::{F, Base, Inst, Rv32i as Op, X};
 use object::elf;
 
 /// 一个操作数。
@@ -20,11 +20,11 @@ impl Assembler<'_> {
     pub(super) fn instruction(&mut self, mnem: &str, rest: &str) -> Result<(), Error> {
         let toks = Toks::try_from(rest)?.split_commas();
         // 要符号的位置上，寄存器名也是符号（同 llvm-mc：`call zero`、`j a0`、`jal a0, a0`）
-        let symbolic = match (mnem, mnem.parse::<Opcode>().map(|o| o.form()), toks.len()) {
+        let symbolic = match (mnem, mnem.parse::<Op>().map(|o| o.form()), toks.len()) {
             ("jump", ..) => Some(0),
             ("j" | "jal" | "call" | "tail" | "la" | "lla" | "lga" | "la.tls.gd" | "la.tls.ie", ..) => toks.len().checked_sub(1),
             // `lw a2, sym` / `flw fa0, sym, t0` / `sw a0, sym, t0`：取存全局的伪指令
-            (_, Ok(Form::Load | Form::FLoad), 2) | (_, Ok(Form::FLoad | Form::Store | Form::FStore), 3) => Some(1),
+            (_, Ok(Base::Load), 2) | (_, Ok(Base::Store), 3) => Some(1),
             _ => None,
         };
         let register = |n: &str| n.parse::<X>().is_ok() || n.parse::<F>().is_ok();
@@ -237,7 +237,7 @@ impl Assembler<'_> {
         let form = op.form();
         let bad = || Error::Syntax(format!("`{op}` 的操作数不对：{ops:?}"));
         match (form, ops) {
-            (Form::U, [Opnd::X(rd), E(e)]) => {
+            (Base::U, [Opnd::X(rd), E(e)]) => {
                 let i = i.x(rd.0, 0, 0);
                 let fix = match (op, e.modifier()) {
                     (_, None) => return self.imm(i, e, Fix::U20),
@@ -253,26 +253,26 @@ impl Assembler<'_> {
                 let Some((_, inner)) = e.modifier() else { return Err(bad()) };
                 self.emit_fix(i, fix, inner.clone())?;
             }
-            (Form::J, [Opnd::X(rd), E(t)]) => self.emit_fix(i.x(rd.0, 0, 0), Fix::Jal, t.clone())?,
-            (Form::Jalr, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
-            (Form::Jalr, [Opnd::X(rd), M(e, rs), E(m)]) if let Some((Modifier::TlsdescCall, label)) = m.modifier() => {
+            (Base::J, [Opnd::X(rd), E(t)]) => self.emit_fix(i.x(rd.0, 0, 0), Fix::Jal, t.clone())?,
+            (Base::Jalr, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
+            (Base::Jalr, [Opnd::X(rd), M(e, rs), E(m)]) if let Some((Modifier::TlsdescCall, label)) = m.modifier() => {
                 self.note(Fix::Reloc(elf::R_RISCV_TLSDESC_CALL), label.clone());
                 self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?;
             }
-            (Form::Jalr, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
-            (Form::Branch, [Opnd::X(a), Opnd::X(b), E(t)]) => self.branch(op, a.0, b.0, t)?,
-            (Form::Load, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
-            (Form::Load, [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcrelHi20, op, rd.0, rd.0, e, true)?,
-            (Form::Store, [Opnd::X(rs2), M(e, rs1)]) => self.imm(i.x(0, rs1.0, rs2.0), e, Fix::Store12)?,
-            (Form::Store, [Opnd::X(rs2), E(e), Opnd::X(tmp)]) => self.pcrel(Fix::PcrelHi20, op, rs2.0, tmp.0, e, false)?,
-            (Form::Imm, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
-            (Form::Shift, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Shamt)?,
-            (Form::R, [Opnd::X(rd), Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
-            (Form::R, [Opnd::X(rd), Opnd::X(a), Opnd::X(b), E(m)]) if op == Op::Add && let Some((Modifier::TprelAdd, sym)) = m.modifier() => {
+            (Base::Jalr, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
+            (Base::Branch, [Opnd::X(a), Opnd::X(b), E(t)]) => self.branch(op, a.0, b.0, t)?,
+            (Base::Load, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
+            (Base::Load, [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcrelHi20, op, rd.0, rd.0, e, true)?,
+            (Base::Store, [Opnd::X(rs2), M(e, rs1)]) => self.imm(i.x(0, rs1.0, rs2.0), e, Fix::Store12)?,
+            (Base::Store, [Opnd::X(rs2), E(e), Opnd::X(tmp)]) => self.pcrel(Fix::PcrelHi20, op, rs2.0, tmp.0, e, false)?,
+            (Base::Imm, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
+            (Base::Shift, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Shamt)?,
+            (Base::R, [Opnd::X(rd), Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
+            (Base::R, [Opnd::X(rd), Opnd::X(a), Opnd::X(b), E(m)]) if op == Op::Add && let Some((Modifier::TprelAdd, sym)) = m.modifier() => {
                 self.emit_fix(i.x(rd.0, a.0, b.0), Fix::Reloc(elf::R_RISCV_TPREL_ADD), sym.clone())?;
             }
             // GNU 的写法：R 型助记符带立即数 ⇒ 对应的 I 型
-            (Form::R, [Opnd::X(rd), Opnd::X(rs), E(e)]) => {
+            (Base::R, [Opnd::X(rd), Opnd::X(rs), E(e)]) => {
                 let (op, fix) = match op {
                     Op::Add => (Op::Addi, Fix::Imm12),
                     Op::And => (Op::Andi, Fix::Imm12),
@@ -287,11 +287,11 @@ impl Assembler<'_> {
                 };
                 self.imm(Inst::new(op).x(rd.0, rs.0, 0), e, fix)?;
             }
-            (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
-            (Form::Fixed, []) => self.emit(i)?,
-            (Form::Sfence, []) => self.emit(i)?,
-            (Form::Sfence, [Opnd::X(a)]) => self.emit(i.x(0, a.0, 0))?,
-            (Form::Sfence, [Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(0, a.0, b.0))?,
+            (Base::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
+            (Base::Fixed, []) => self.emit(i)?,
+            (Base::Sfence, []) => self.emit(i)?,
+            (Base::Sfence, [Opnd::X(a)]) => self.emit(i.x(0, a.0, 0))?,
+            (Base::Sfence, [Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(0, a.0, b.0))?,
             _ => return Err(bad()),
         }
         Ok(())
@@ -400,12 +400,12 @@ impl Assembler<'_> {
     /// `.insn` 的立即数位段：能算就填，算不了（`%lo(sym)`）记修补点。
     fn imm_word(&mut self, w: u32, e: &Expr, plain: Fix) -> Result<(), Error> {
         let form = match plain {
-            Fix::Store12 => Form::Store,
-            Fix::U20 => Form::U,
-            _ => Form::Imm,
+            Fix::Store12 => Base::Store,
+            Fix::U20 => Base::U,
+            _ => Base::Imm,
         };
         match self.eval(e, 0)?.constant().map(|k| Self::rv32(form, k)) {
-            Some(k) if Inst::fits(form, k) => self.word(w | Inst::scatter(form, i32::try_from(k).unwrap_or_default())),
+            Some(k) if form.fits(k) => self.word(w | form.scatter(i32::try_from(k).unwrap_or_default())),
             Some(k) => Err(Error::Syntax(format!("立即数 {k} 超出范围"))),
             None => {
                 let (fix, e) = match e.modifier() {
@@ -471,22 +471,22 @@ impl Assembler<'_> {
             return self.emit_fix(i, fix, inner.clone());
         }
         let form = match plain {
-            Fix::Store12 => Form::Store,
-            Fix::Shamt => Form::Shift,
-            Fix::U20 => Form::U,
-            _ => Form::Imm,
+            Fix::Store12 => Base::Store,
+            Fix::Shamt => Base::Shift,
+            Fix::U20 => Base::U,
+            _ => Base::Imm,
         };
         match self.eval(e, 0)?.constant().map(|k| Self::rv32(form, k)) {
-            Some(k) if Inst::fits(form, k) => self.emit(i.with_imm(i32::try_from(k).unwrap_or_default())),
+            Some(k) if form.fits(k) => self.emit(i.with_imm(i32::try_from(k).unwrap_or_default())),
             Some(k) => Err(Error::Syntax(format!("立即数 {k} 超出范围"))),
             None => self.emit_fix(i, plain, e.clone()),
         }
     }
 
     /// RV32 的有符号立即数：`[2³¹, 2³²)` 当 32 位补码（同 llvm-mc 的 fixImmediateForRV32）。
-    pub(super) const fn rv32(form: Form, k: i64) -> i64 {
+    pub(super) const fn rv32(form: Base, k: i64) -> i64 {
         match form {
-            Form::U | Form::Shift => k,
+            Base::U | Base::Shift => k,
             _ if k >= 1 << 31 && k < 1 << 32 => k - (1 << 32),
             _ => k,
         }

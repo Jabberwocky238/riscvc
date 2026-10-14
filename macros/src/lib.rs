@@ -2,7 +2,8 @@
 //!
 //! ```ignore
 //! #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-//! #[isa(name = "zmmul", feature = "zmmul")]                   // 扩展名（-mattr 写法）、对应的 cargo feature（可省）、alias = 打印别名的函数（可省）
+//! #[isa(name = "zmmul", feature = "zmmul")]                   // 扩展名（-mattr 写法）；可选：feature = cargo feature、
+//!                                                             // form = 格式类型（实现 Layout，缺省 riscvc::isa::Base）、alias = 打印别名的函数
 //! #[pseudo("mul.lo $rd:x, $a:x, $b:x" => "mul $rd, $a, $b")]  // 伪指令模板：`$名:类`（x / f / 不写 = 任意）
 //! pub enum Zmmul {
 //!     #[isa("mul", R, 0x0200_0033, exec = |c, i| c.set(i.rd, c.x(i.rs1).wrapping_mul(c.x(i.rs2))))]
@@ -10,7 +11,7 @@
 //! }
 //! ```
 //!
-//! `Isa` 生成：`ALL`、`Table`（名字、格式、固定位、开没开、打印别名 `alias = 函数`）、`FromStr` / `Display`；
+//! `Isa` 生成：`ALL`、`ENABLED`、`form()`、`Table`（名字、固定位、开没开、按格式编 / 译 / 印 / 汇编、打印别名）、`FromStr` / `Display`；
 //! 有 `exec` 的再生成 `Semantics`（执行、伪指令模板），配 `riscvc::ext::Std<T>` 就是一个完整的扩展。
 //! `Opcode` 写在「每个变体包一张表」的枚举上，生成 `From<表>`、`Table` 的委托与按表的 `match`。
 use proc_macro::TokenStream;
@@ -73,7 +74,7 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
     let ty = &input.ident;
     let Data::Enum(data) = &input.data else { return Err(syn::Error::new_spanned(ty, "`Isa` 只用在枚举上")) };
     // 表头：name / feature / alias
-    let (mut name, mut feature, mut alias) = (None::<LitStr>, None::<LitStr>, None::<Path>);
+    let (mut name, mut feature, mut alias, mut form) = (None::<LitStr>, None::<LitStr>, None::<Path>, None::<Path>);
     let mut pseudos = Vec::new();
     for a in &input.attrs {
         if a.path().is_ident("isa") {
@@ -84,8 +85,10 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
                     feature = Some(m.value()?.parse()?);
                 } else if m.path.is_ident("alias") {
                     alias = Some(m.value()?.parse()?);
+                } else if m.path.is_ident("form") {
+                    form = Some(m.value()?.parse()?);
                 } else {
-                    return Err(m.error("表头只认 name / feature / alias"));
+                    return Err(m.error("表头只认 name / feature / alias / form"));
                 }
                 Ok(())
             })?;
@@ -95,6 +98,7 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
     }
     let name = name.ok_or_else(|| syn::Error::new_spanned(ty, "要 `#[isa(name = \"…\")]`"))?;
     let enabled = feature.map_or_else(|| quote!(true), |f| quote!(cfg!(feature = #f)));
+    let form = form.map_or_else(|| quote!(::riscvc::isa::Base), |f| quote!(#f));
     let alias = alias.map(|a| quote! {
         fn alias(i: &::riscvc::isa::Inst<Self>, pc: u64, style: ::riscvc::isa::Style) -> Option<(String, String)> {
             #a(i, pc, style)
@@ -117,14 +121,24 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
         impl #ty {
             /// 全部指令。
             pub const ALL: &'static [Self] = &[#(Self::#idents),*];
+            /// 这次编译开没开（扩展的 cargo feature）。
+            pub const ENABLED: bool = #enabled;
+            /// 这条的格式。
+            #[must_use]
+            pub fn form(&self) -> #form { match self { #(Self::#idents => <#form>::#forms),* } }
         }
         impl ::riscvc::isa::Table for #ty {
             const ALL: &'static [Self] = &[#(Self::#idents),*];
             fn ext(&self) -> &str { #name }
             fn name(&self) -> &str { match self { #(Self::#idents => #names),* } }
-            fn form(&self) -> ::riscvc::isa::Form { match self { #(Self::#idents => ::riscvc::isa::Form::#forms),* } }
             fn bits(&self) -> u32 { match self { #(Self::#idents => #bits),* } }
-            fn enabled(&self) -> bool { #enabled }
+            fn enabled(&self) -> bool { Self::ENABLED }
+            fn mask(&self) -> u32 { ::riscvc::isa::Layout::mask(self.form()) }
+            fn encode(&self, f: &::riscvc::isa::Fields) -> u32 { ::riscvc::isa::Layout::encode(self.form(), f) }
+            fn decode(&self, w: u32) -> Option<::riscvc::isa::Fields> { ::riscvc::isa::Layout::decode(self.form(), w) }
+            fn operands(&self, f: &::riscvc::isa::Fields, pc: u64, style: ::riscvc::isa::Style) -> String { ::riscvc::isa::Layout::print(self.form(), f, pc, style) }
+            fn assemble(&self, args: &::riscvc::ext::Args<'_>) -> Result<(::riscvc::isa::Fields, Vec<::riscvc::ext::Fixup>), String> { ::riscvc::isa::Layout::assemble(self.form(), args) }
+            fn has_rm(&self) -> bool { ::riscvc::isa::Layout::has_rm(self.form()) }
             #alias
         }
         impl ::core::str::FromStr for #ty {
@@ -200,9 +214,14 @@ fn opcode(input: &DeriveInput) -> syn::Result<Ts> {
             };
             fn ext(&self) -> &str { match self { #(Self::#vs(o) => ::riscvc::isa::Table::ext(o)),* } }
             fn name(&self) -> &str { match self { #(Self::#vs(o) => ::riscvc::isa::Table::name(o)),* } }
-            fn form(&self) -> ::riscvc::isa::Form { match self { #(Self::#vs(o) => ::riscvc::isa::Table::form(o)),* } }
             fn bits(&self) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::bits(o)),* } }
             fn enabled(&self) -> bool { match self { #(Self::#vs(o) => ::riscvc::isa::Table::enabled(o)),* } }
+            fn mask(&self) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::mask(o)),* } }
+            fn encode(&self, f: &::riscvc::isa::Fields) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::encode(o, f)),* } }
+            fn decode(&self, w: u32) -> Option<::riscvc::isa::Fields> { match self { #(Self::#vs(o) => ::riscvc::isa::Table::decode(o, w)),* } }
+            fn operands(&self, f: &::riscvc::isa::Fields, pc: u64, style: ::riscvc::isa::Style) -> String { match self { #(Self::#vs(o) => ::riscvc::isa::Table::operands(o, f, pc, style)),* } }
+            fn assemble(&self, args: &::riscvc::ext::Args<'_>) -> Result<(::riscvc::isa::Fields, Vec<::riscvc::ext::Fixup>), String> { match self { #(Self::#vs(o) => ::riscvc::isa::Table::assemble(o, args)),* } }
+            fn has_rm(&self) -> bool { match self { #(Self::#vs(o) => ::riscvc::isa::Table::has_rm(o)),* } }
             fn alias(i: &::riscvc::isa::Inst<Self>, pc: u64, style: ::riscvc::isa::Style) -> Option<(String, String)> {
                 match i.op { #(Self::#vs(o) => <#tys as ::riscvc::isa::Table>::alias(&i.with_op(o), pc, style)),* }
             }

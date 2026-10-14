@@ -56,7 +56,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { float_abi: riscv::Ext::F.enabled(), preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None }
+        Self { float_abi: crate::feature::Float::ENABLED, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None }
     }
 }
 

@@ -1,6 +1,6 @@
 //! 修补点：表达式求值、就地解析、解析不了的变重定位。
 use super::{Assembler, Bind, Def, Error, Expr};
-use crate::isa::{Form, Inst};
+use crate::isa::Base;
 use object::elf;
 
 /// 修补哪种位段。
@@ -216,16 +216,16 @@ impl Assembler<'_> {
         match f.kind {
             Fix::Imm12 | Fix::Store12 | Fix::Shamt | Fix::U20 => {
                 let form = match f.kind {
-                    Fix::Imm12 => Form::Imm,
-                    Fix::Store12 => Form::Store,
-                    Fix::Shamt => Form::Shift,
-                    _ => Form::U,
+                    Fix::Imm12 => Base::Imm,
+                    Fix::Store12 => Base::Store,
+                    Fix::Shamt => Base::Shift,
+                    _ => Base::U,
                 };
                 let k = Self::rv32(form, need_const(&v)?);
-                if !Inst::fits(form, k) {
+                if !form.fits(k) {
                     return Err(Error::Syntax(format!("立即数 {k} 超出 {form:?} 的范围")));
                 }
-                self.patch(section, pc, Inst::scatter(form, i32::try_from(k).unwrap_or_default()));
+                self.patch(section, pc, form.scatter(i32::try_from(k).unwrap_or_default()));
             }
             Fix::Hi20 | Fix::Lo12I | Fix::Lo12S => match v.constant() {
                 Some(k) => self.patch(section, pc, Self::hi_lo(f.kind, k)),
@@ -241,23 +241,23 @@ impl Assembler<'_> {
             Fix::Reloc(t) | Fix::PcHi(t) => relocs.push(reloc(t, &v)?),
             // 常数目标 = 偏移（同 llvm-mc：`jal 2046`、`beq a0, a1, 102`）
             Fix::Branch | Fix::Jal if let Some(d) = v.constant() => {
-                let form = if f.kind == Fix::Branch { Form::Branch } else { Form::J };
+                let form = if f.kind == Fix::Branch { Base::Branch } else { Base::J };
                 let d = Self::rv32(form, d);
-                if !Inst::fits(form, d) {
+                if !form.fits(d) {
                     return Err(Error::Syntax(format!("跳转距离 {d} 超出 {form:?} 的范围")));
                 }
-                self.patch(section, pc, Inst::scatter(form, i32::try_from(d).unwrap_or_default()));
+                self.patch(section, pc, form.scatter(i32::try_from(d).unwrap_or_default()));
             }
             Fix::Branch | Fix::Jal | Fix::Call | Fix::PcrelHi20 => match self.local_target(section, &v) {
                 Some(target) => {
                     let d = target.cast_signed() - pc.cast_signed();
                     match f.kind {
                         Fix::Branch | Fix::Jal => {
-                            let form = if f.kind == Fix::Branch { Form::Branch } else { Form::J };
-                            if !Inst::fits(form, d) {
+                            let form = if f.kind == Fix::Branch { Base::Branch } else { Base::J };
+                            if !form.fits(d) {
                                 return Err(Error::Syntax(format!("跳转距离 {d} 超出 {form:?} 的范围")));
                             }
-                            self.patch(section, pc, Inst::scatter(form, i32::try_from(d).unwrap_or_default()));
+                            self.patch(section, pc, form.scatter(i32::try_from(d).unwrap_or_default()));
                         }
                         Fix::Call => {
                             self.patch(section, pc, Self::hi_lo(Fix::Hi20, d));
@@ -336,9 +336,9 @@ impl Assembler<'_> {
     fn hi_lo(kind: Fix, v: i64) -> u32 {
         let v = v as i32;
         match kind {
-            Fix::Hi20 => Inst::scatter(Form::U, (v.wrapping_add(0x800)) >> 12),
-            Fix::Lo12I => Inst::scatter(Form::Imm, (v << 20) >> 20),
-            _ => Inst::scatter(Form::Store, (v << 20) >> 20),
+            Fix::Hi20 => Base::U.scatter((v.wrapping_add(0x800)) >> 12),
+            Fix::Lo12I => Base::Imm.scatter((v << 20) >> 20),
+            _ => Base::Store.scatter((v << 20) >> 20),
         }
     }
 

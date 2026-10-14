@@ -1,11 +1,14 @@
 //! Zicsr：CSR 指令。伪指令（`csrr` / `csrw` / `rdcycle` …）全是模板；浮点 CSR 的那些在 `f/`。
+mod layout;
+
+pub use layout::CsrForm;
 use crate::ext::Exec;
 use crate::isa::{Csr, Inst, Style, Table};
 use crate::macros::Isa;
 use crate::sim::Stop;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "zicsr", feature = "zicsr", alias = alias)]
+#[isa(name = "zicsr", feature = "zicsr", form = CsrForm, alias = alias)]
 #[pseudo("csrr $rd:x, $c" => "csrrs $rd, $c, zero")]
 #[pseudo("csrw $c, $rs:x" => "csrrw zero, $c, $rs")]
 #[pseudo("csrs $c, $rs:x" => "csrrs zero, $c, $rs")]

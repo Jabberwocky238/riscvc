@@ -12,18 +12,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 B = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('RISCVC_LLVM_BIN', os.path.join(ROOT, '../llvm-project/build/bin'))
 LLVM = os.path.join(ROOT, '../llvm-project')
 OUT = os.path.join(ROOT, 'tests/fixtures/mc')
-MC = [f'{B}/llvm-mc', '-triple=riscv32', '-mattr=+m,+f,+zicsr,-relax', '-target-abi=ilp32f', '-filetype=obj', '-', '-o', os.devnull]
+OUT_XTHEAD = os.path.join(ROOT, 'tests/fixtures/mc-xthead')
+STD = '+m,+f,+zicsr,-relax'
+# 玄铁：文件名带 thead 的那批，另开全部 XThead 扩展过一遍 ⇒ tests/fixtures/mc-xthead（cargo test --features xthead）
+XTHEAD = STD + ',' + ','.join('+xthead' + x for x in ['ba', 'bb', 'bs', 'cmo', 'condmov', 'fmemidx', 'mac', 'memidx', 'mempair', 'sync'])
+
+
+def mc(mattr):
+    return [f'{B}/llvm-mc', '-triple=riscv32', f'-mattr={mattr}', '-target-abi=ilp32f', '-filetype=obj', '-', '-o', os.devnull]
 ERR = re.compile(r'^<stdin>:(\d+):\d+: error:', re.M)
 # 范围外：压缩指令 / 别的扩展（.option rvc / arch）、linker relaxation（.option relax）、
 # CFI（不出 .eh_frame）、.attribute arch 的规范化（要 LLVM 的整张扩展表）、H 扩展（llvm-mc 不查扩展也收的 hfence）、厂商的 `.insn qc.*`
 SCOPE = re.compile(r'^\s*(\.insn\s+qc\.|hfence\.|hinval\.|\.option\s+(rvc|arch|relax|noexact)\b|\.cfi_|\.attribute\s+(arch|5|Tag_RISCV_arch)\b)')
 
 
-def clean(text):
+def clean(text, mattr=STD):
     """llvm-mc 报错的行注释掉，直到不报错；回 None 表示放弃。"""
     lines = ['# riscvc-scope: ' + l if SCOPE.match(l) else l for l in text.split('\n')]
     for _ in range(10):
-        r = subprocess.run(MC, input='\n'.join(lines), capture_output=True, text=True)
+        r = subprocess.run(mc(mattr), input='\n'.join(lines), capture_output=True, text=True)
         bad = {int(n) - 1 for n in ERR.findall(r.stderr)}
         if r.returncode == 0:
             return '\n'.join(lines)
@@ -53,14 +60,24 @@ def sources():
                             yield f'{stem}-{name[:-2]}', body
 
 
-os.makedirs(OUT, exist_ok=True)
-kept = dropped = 0
+def keep(out):
+    """剩下的得真有东西：去掉注释、空行、只剩伪操作的也算有（数据伪操作）。"""
+    return out is not None and any(l.strip() and not l.lstrip().startswith(('#', '//', ';')) for l in out.split('\n'))
+
+
+for d in (OUT, OUT_XTHEAD):
+    os.makedirs(d, exist_ok=True)
+kept = dropped = xt = 0
 for stem, text in sources():
     out = clean(text)
-    # 剩下的得真有东西：去掉注释、空行、只剩伪操作的也算有（数据伪操作）
-    if out is None or not any(l.strip() and not l.lstrip().startswith(('#', '//', ';')) for l in out.split('\n')):
+    if keep(out):
+        open(os.path.join(OUT, stem + '.s'), 'w').write(out)
+        kept += 1
+    else:
         dropped += 1
-        continue
-    open(os.path.join(OUT, stem + '.s'), 'w').write(out)
-    kept += 1
-print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}')
+    if 'thead' in stem.lower():
+        out = clean(text, XTHEAD)
+        if keep(out):
+            open(os.path.join(OUT_XTHEAD, stem + '.s'), 'w').write(out)
+            xt += 1
+print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}；玄铁 {xt} 份 ⇒ {OUT_XTHEAD}')

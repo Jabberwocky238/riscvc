@@ -11,7 +11,7 @@ categories = ["compilers", "development-tools"]
 # fixture（31 MB）与对照脚本不进 crates.io 的包
 exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 
-# 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 全开。没开的扩展：汇编器不认、译码不认、
+# 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 开标准的 m、f。没开的扩展：汇编器不认、译码不认、
 # 解释器陷入，代码生成改走 compiler-rt（乘除 libcall、软浮点）。组件（汇编器、链接器、代码生成 …）总在，不是 feature。
 [features]
 default = ["m", "f"]
@@ -23,6 +23,19 @@ zmmul = []
 f = ["zicsr"]
 # Zicsr：CSR 指令
 zicsr = []
+# 玄铁（T-Head）厂商扩展，默认不开（src/feature/xthead/）
+xtheadba = []
+xtheadbb = []
+xtheadbs = []
+xtheadcmo = []
+xtheadcondmov = []
+xtheadfmemidx = ["f"]
+xtheadmac = []
+xtheadmemidx = []
+xtheadmempair = []
+xtheadsync = []
+# 玄铁的全部
+xthead = ["xtheadba", "xtheadbb", "xtheadbs", "xtheadcmo", "xtheadcondmov", "xtheadfmemidx", "xtheadmac", "xtheadmemidx", "xtheadmempair", "xtheadsync"]
 
 [workspace]
 members = [".", "macros"]

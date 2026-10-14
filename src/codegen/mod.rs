@@ -26,7 +26,7 @@ use core::fmt::Write;
 impl Module {
     /// ⭐ 整个模块 ⇒ 汇编文本（与 clang -S 同样带上架构属性）。
     pub fn compile(&self) -> Result<String, Error> {
-        let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::isa::Ext::march());
+        let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::feature::Target::march());
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
                 continue;

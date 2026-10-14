@@ -72,10 +72,12 @@ fn corpus(sub: &str, how: &str) {
     let mut files: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
     files.sort();
     let (mut bad, mut n) = (0, 0);
+    // 对照的 llvm-mc 开同样的扩展（cargo feature）
+    let mattr = format!("-mattr={},-relax", riscvc::feature::Target::mattr());
     let out = std::env::temp_dir().join(format!("riscvc-as-{}-{}.o", std::process::id(), sub.replace('/', "-")));
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
-        let (_, err) = llvm.run("llvm-mc", &["-triple=riscv32", "-mattr=+m,+f,+zicsr,-relax", "-target-abi=ilp32f", "-filetype=obj", f.to_str().unwrap(), "-o", out.to_str().unwrap()], "");
+        let (_, err) = llvm.run("llvm-mc", &["-triple=riscv32", &mattr, "-target-abi=ilp32f", "-filetype=obj", f.to_str().unwrap(), "-o", out.to_str().unwrap()], "");
         assert!(!err.contains("error:"), "{}: llvm-mc: {err}", f.display());
         let theirs = Norm::of(&std::fs::read(&out).unwrap());
         n += 1;
@@ -125,4 +127,11 @@ fn compiler_rt_corpus() {
 #[test]
 fn llvm_fixtures() {
     corpus("tests/fixtures/mc", "tools/fixtures.py");
+}
+
+/// 玄铁：`tests/fixtures/mc-xthead`（LLVM 的 XThead fixture，`cargo test --features xthead`）。
+#[cfg(feature = "xthead")]
+#[test]
+fn xthead_fixtures() {
+    corpus("tests/fixtures/mc-xthead", "tools/fixtures.py");
 }

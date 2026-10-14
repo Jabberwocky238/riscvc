@@ -21,7 +21,6 @@ mod mem;
 use super::abi::{Assign, Loc, Part};
 use super::mir::{Base, MBlock, MInst, MOp, R};
 use super::Error;
-use crate::isa::Ext;
 use crate::ir::{Block as IBlock, Const, Function, IPred, Inst, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::feature::{Float, M, Zmmul};
 use crate::isa::{Opcode, Rv32i as IOp, Table};
@@ -194,7 +193,7 @@ impl<'m> Isel<'m> {
     fn soft(&self, t: Ty) -> Option<&'static str> {
         match self.kind(t) {
             Kind::Double => Some("df"),
-            Kind::Float if !Ext::F.enabled() => Some("sf"),
+            Kind::Float if !crate::feature::Float::ENABLED => Some("sf"),
             _ => None,
         }
     }
@@ -236,7 +235,7 @@ impl<'m> Isel<'m> {
             Kind::Int(w) if *w <= 32 => vec![Part::X],
             Kind::Int(w) if *w <= 64 => vec![Part::Lo, Part::Hi],
             Kind::Ptr | Kind::Half | Kind::BFloat => vec![Part::X],
-            Kind::Float if Ext::F.enabled() => vec![Part::F],
+            Kind::Float if crate::feature::Float::ENABLED => vec![Part::F],
             // 没有 F（ilp32）：float 是一个整数部件
             Kind::Float => vec![Part::X],
             Kind::Double => vec![Part::Lo, Part::Hi],
@@ -370,7 +369,7 @@ impl<'m> Isel<'m> {
             (Const::Int(v), Kind::Int(w)) if *w <= 32 => vec![self.li(*v as u32 as i32)],
             (Const::Int(v), Kind::Int(_)) => vec![self.li(*v as u32 as i32), self.li((*v >> 32) as u32 as i32)],
             (Const::Int(v), Kind::Ptr) => vec![self.li(*v as u32 as i32)],
-            (Const::Float(bits), Kind::Float) if !Ext::F.enabled() => vec![self.li(*bits as u32 as i32)],
+            (Const::Float(bits), Kind::Float) if !crate::feature::Float::ENABLED => vec![self.li(*bits as u32 as i32)],
             (Const::Float(bits), Kind::Float) => {
                 let x = self.li(*bits as u32 as i32);
                 let d = self.fr();

@@ -1,6 +1,6 @@
 //! RISC-V 重定位（静态可执行，⛔ 不做 linker relaxation：`R_RISCV_RELAX` / `R_RISCV_ALIGN` 原样保留字节）。
 use super::{Error, Linker};
-use crate::isa::{Form, Inst};
+use crate::isa::Base;
 use object::elf;
 
 impl Linker {
@@ -34,12 +34,12 @@ impl Linker {
                         elf::R_RISCV_32 => Self::put(data, at, 4, v),
                         elf::R_RISCV_64 => Self::put(data, at, 8, v),
                         elf::R_RISCV_32_PCREL | elf::R_RISCV_PLT32 => Self::put(data, at, 4, pc.cast_unsigned()),
-                        elf::R_RISCV_HI20 => Self::field(data, at, Form::U, Self::hi20(v.cast_signed())),
-                        elf::R_RISCV_LO12_I => Self::field(data, at, Form::Imm, Self::lo12(v.cast_signed())),
-                        elf::R_RISCV_LO12_S => Self::field(data, at, Form::Store, Self::lo12(v.cast_signed())),
+                        elf::R_RISCV_HI20 => Self::field(data, at, Base::U, Self::hi20(v.cast_signed())),
+                        elf::R_RISCV_LO12_I => Self::field(data, at, Base::Imm, Self::lo12(v.cast_signed())),
+                        elf::R_RISCV_LO12_S => Self::field(data, at, Base::Store, Self::lo12(v.cast_signed())),
                         elf::R_RISCV_PCREL_HI20 => {
                             range(32, pc)?;
-                            Self::field(data, at, Form::U, Self::hi20(pc));
+                            Self::field(data, at, Base::U, Self::hi20(pc));
                         }
                         elf::R_RISCV_PCREL_LO12_I | elf::R_RISCV_PCREL_LO12_S => {
                             // 符号是 auipc 那条的标号：取那里的 PCREL_HI20 的目标
@@ -51,22 +51,22 @@ impl Linker {
                                 .ok_or_else(|| Error::Link(format!("{}：{} 的 %pcrel_lo 在 {hi_at:#x} 处找不到 %pcrel_hi", self.objs[o].name, sec.name)))?;
                             let target = self.target(o, hi.sym)?.unwrap_or(0).wrapping_add_signed(hi.addend);
                             let d = target.wrapping_sub(s).cast_signed();
-                            let form = if r.r_type == elf::R_RISCV_PCREL_LO12_I { Form::Imm } else { Form::Store };
+                            let form = if r.r_type == elf::R_RISCV_PCREL_LO12_I { Base::Imm } else { Base::Store };
                             let data = &mut self.outs[out].data;
                             Self::field(data, at, form, Self::lo12(d));
                         }
                         elf::R_RISCV_BRANCH => {
                             range(13, pc)?;
-                            Self::field(data, at, Form::Branch, pc as i32);
+                            Self::field(data, at, Base::Branch, pc as i32);
                         }
                         elf::R_RISCV_JAL => {
                             range(21, pc)?;
-                            Self::field(data, at, Form::J, pc as i32);
+                            Self::field(data, at, Base::J, pc as i32);
                         }
                         elf::R_RISCV_CALL | elf::R_RISCV_CALL_PLT => {
                             range(32, pc)?;
-                            Self::field(data, at, Form::U, Self::hi20(pc));
-                            Self::field(data, at + 4, Form::Imm, Self::lo12(pc));
+                            Self::field(data, at, Base::U, Self::hi20(pc));
+                            Self::field(data, at + 4, Base::Imm, Self::lo12(pc));
                         }
                         elf::R_RISCV_ADD8 | elf::R_RISCV_ADD16 | elf::R_RISCV_ADD32 | elf::R_RISCV_ADD64 | elf::R_RISCV_SUB8 | elf::R_RISCV_SUB16 | elf::R_RISCV_SUB32 | elf::R_RISCV_SUB64 => {
                             let n = match r.r_type {
@@ -101,14 +101,14 @@ impl Linker {
     }
 
     /// 改写 `at` 处那条指令的立即数位段（先清再填）。
-    fn field(data: &mut [u8], at: usize, form: Form, imm: i32) {
+    fn field(data: &mut [u8], at: usize, form: Base, imm: i32) {
         let mask = match form {
-            Form::U | Form::J => 0xffff_f000,
-            Form::Imm => 0xfff0_0000,
+            Base::U | Base::J => 0xffff_f000,
+            Base::Imm => 0xfff0_0000,
             _ => 0xfe00_0f80,
         };
         let w = u32::from_le_bytes(data[at..at + 4].try_into().expect("4 字节"));
-        let w = (w & !mask) | Inst::scatter(form, imm);
+        let w = (w & !mask) | form.scatter(imm);
         data[at..at + 4].copy_from_slice(&w.to_le_bytes());
     }
 

@@ -2,9 +2,11 @@
 //! 我们这边走 [`Disasm`]（内置扩展 + RV32I），同 `riscvc objdump`。
 mod llvm;
 use riscvc::ext::Disasm;
-use riscvc::isa::{Opcode, Style, Table};
+use riscvc::isa::Style;
 
 fn words(n: usize) -> Vec<u32> {
+    // 开了的全部指令（RV32I + 按 feature 注册的扩展，含 --features xthead 的玄铁）
+    let pats = riscvc::feature::patterns();
     let mut rng = llvm::Rng(0x1234_5678_9abc_def1);
     (0..n)
         .map(|i| {
@@ -12,8 +14,8 @@ fn words(n: usize) -> Vec<u32> {
             if i % 8 == 0 {
                 (r | 3) & !(u32::from(r & 0x1c == 0x1c) << 2) // 纯随机，落在 32 位指令空间（低两位 11、bit 4:2 ≠ 111）：看拒收是否一致
             } else {
-                let op = Opcode::ALL[(rng.next() % Opcode::ALL.len() as u64) as usize];
-                op.bits() | (r & !op.form().mask())
+                let (bits, mask) = pats[(rng.next() % pats.len() as u64) as usize];
+                bits | (r & !mask)
             }
         })
         .collect()

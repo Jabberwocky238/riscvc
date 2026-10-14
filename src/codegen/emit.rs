@@ -9,7 +9,7 @@ use super::abi::Abi;
 use super::isel::Selected;
 use super::mir::{Base, MFunc, MInst, MOp, R};
 use crate::feature::{Float};
-use crate::isa::{F, Form, Opcode, Rv32i as IOp, Table, Rm, X};
+use crate::isa::{F, Opcode, Rv32i as IOp, Table, Rm, X};
 use core::fmt::Write;
 use regalloc2::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
 
@@ -233,7 +233,7 @@ impl<'a> Emitter<'a> {
                 let mut regs = d.clone();
                 regs.extend(u.iter().cloned());
                 let suffix = match Rm::try_from(u32::from(*rm)) {
-                    Ok(r) if op.form().has_rm() && r != Rm::Dyn => format!(", {r}"),
+                    Ok(r) if op.has_rm() && r != Rm::Dyn => format!(", {r}"),
                     _ => String::new(),
                 };
                 self.line(&format!("{op}\t{}{suffix}", regs.join(", ")));
@@ -251,7 +251,7 @@ impl<'a> Emitter<'a> {
             MOp::Load(op, b, off) => {
                 let (base, adj) = self.base(*b, &u, 0);
                 // 整数读：大偏移时用目的寄存器算地址，⛔ 不占 t6
-                if op.form() == Form::Load && !(-2048..2048).contains(&(adj + off)) {
+                if matches!(op, Opcode::I(_)) && !(-2048..2048).contains(&(adj + off)) {
                     self.addr(&d[0], &base, adj + off);
                     self.line(&format!("{op}\t{}, 0({})", d[0], d[0]));
                 } else {

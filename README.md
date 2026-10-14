@@ -15,8 +15,9 @@ crt.S        ─ riscvc as  ─▶ crt.o ─────────────
 
 ## 范围
 
-- 指令集：**只做 RV32IMF + Zicsr**（ABI ilp32f），即 CCU 标量核声明的 `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`。
-  ⛔ 不做宽指令、xcalculet、xthead*、压缩指令（C）、双精度（D）。
+- 指令集：核心只有 **RV32I**；M / Zmmul / F / Zicsr 与玄铁 XThead* 是扩展（`src/feature/`，按 cargo feature 开），
+  缺省 = CCU 标量核声明的 `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`（ABI ilp32f）。
+  ⛔ 不做压缩指令（C）、双精度（D）、向量（V / XTheadVdot）；专用指令（xcalculet 等）在下游经扩展接口挂进来。
 - 输入：MLIR `llvm` 方言（通用形式）与 GNU 汇编（`.s`；`.S` 只认简单的 `#if` / `#ifdef` / `#define`）。
   从 LLVM IR 来：`mlir-translate --import-llvm x.ll | mlir-opt --mlir-print-op-generic`。
 - ⛔ 不是 C / C++ 前端。
@@ -25,14 +26,17 @@ crt.S        ─ riscvc as  ─▶ crt.o ─────────────
 
 | 模块 | 做什么 |
 | --- | --- |
-| `src/isa/` | 一张指令表（宏展开）：编码、译码、按 LLVM 的写法打印（含别名） |
+| `src/isa/` | 指令表的通用部分（`Table` / `Layout`：按格式编码、译码、打印、汇编）与 RV32I 的格式和表 |
+| `src/ext/` | 扩展器：`Extension`（自定义指令：译码 / 打印 / 汇编 / 执行）、`Device`（MMIO）、`Std<表>` |
+| `src/feature/` | 扩展（一个文件夹一个 cargo feature）：`zmmul` `m` `f` `zicsr`、`xthead/<名>`；各自的表、格式、语义、伪指令模板 |
+| `macros/` | 过程宏包 `riscvc-macros`：`#[derive(Isa)]` 写指令表、`#[derive(Opcode)]` 操作码并集 |
 | `src/asm/` | GNU 汇编器：指令、伪指令、伪操作、`%hi` / `%lo` / `%pcrel_*` 重定位 ⇒ ELF 目标文件（`object` crate 写） |
 | `src/link/` | 链接器：链接脚本子集（`ENTRY`、`SECTIONS`、`.`、`ALIGN`、`/DISCARD/`）、RISC-V 重定位 |
 | `src/llvm/` | `llvm` 方言插件：`mlirformat tblgen` 从 LLVMOps.td / LLVMIntrinsicOps.td 生成的 op 结构体 + 手写的类型参数钩子 |
 | `src/ir/` | 内部 IR（块参数、常量即 op）：从 mlirformat 的模块转来；类型与 RV32 布局 |
 | `src/codegen/` | 指令选择（值拆 32 位部件；i64 / double 软实现）、`regalloc2`、栈帧、出汇编、全局数据 |
 | `src/plugin/` | 插件接口（照 MLIR 的 Dialect / Pass）：方言注册语法并把本方言的 op 下降成内部 IR，pass 在内部 IR 上变换 |
-| `src/sim/` | RV32IMF 解释器（对拍用） |
+| `src/sim/` | RV32I 解释器（扩展指令的语义经 `Extension` 执行；对拍用） |
 | `src/cli/` | 命令行：一条子命令一个目录（`as` / `ld` / `objdump` / `llc`） |
 
 第三方：`mlirformat`（MLIR 文本）、`object`（ELF 读写）、`regalloc2`（Cranelift 的寄存器分配器）、`clap`、`thiserror`，都是纯 Rust。
@@ -84,7 +88,7 @@ cargo test
 cargo build --release --no-default-features --features zicsr               # rv32i：无 M、无 F（软浮点）
 ```
 
-一个 feature = 一个编译选项 = 一个目标扩展（`Cargo.toml`），`default` 全开；组件（汇编器、链接器、代码生成、命令行 …）总在：
+一个 feature = 一个编译选项 = 一个目标扩展（`Cargo.toml`），`default` = `m`、`f`；组件（汇编器、链接器、代码生成、命令行 …）总在：
 
 | feature | 是什么 | 关掉之后 |
 | --- | --- | --- |
@@ -92,8 +96,14 @@ cargo build --release --no-default-features --features zicsr               # rv3
 | `zmmul` | 只有乘法 | 同上，`mul` / `mulh*` 调 `__mulsi3` / `__muldi3` |
 | `f` | F 扩展 + ilp32f（蕴含 `zicsr`） | 汇编器 / 译码不认浮点指令，`e_flags` 不带单精度 ABI；代码生成走 ilp32 + 软浮点（`__addsf3` 一类） |
 | `zicsr` | CSR 指令 | 不认 `csr*` 与 `frcsr` 一类伪指令 |
+| `xthead` | 玄铁全部（下面十个） | — |
+| `xtheadba` `xtheadbb` `xtheadbs` `xtheadcmo` `xtheadcondmov` `xtheadfmemidx`（蕴含 `f`） `xtheadmac` `xtheadmemidx` `xtheadmempair` `xtheadsync` | 玄铁厂商扩展（LLVM 认的 RV32 标量部分），缺省不开 | 汇编器 / 译码不认；代码生成不用它们 |
 
-`.riscv.attributes` 的架构串（`Ext::march()`）与对照用的 `-mattr`（`Ext::mattr()`）都从开了的扩展推出来。
+`.riscv.attributes` 的架构串（`feature::Target::march()`）与对照用的 `-mattr`（`feature::Target::mattr()`）都从开了的扩展推出来。
+
+写一个扩展：`#[derive(Isa)]` 一张表（每行 `#[isa("助记符", 格式, 固定位, exec = 语义)]`，表头可挂 `#[pseudo(…)]`
+伪指令模板、`alias = 打印别名`、`form = 格式类型`），格式不够就在扩展里实现一个 `isa::Layout`，再用 `ext::Std<表>` 包成扩展。
+最小样板见 `src/feature/zmmul/`，自带格式的见 `src/feature/xthead/`。
 
 ## 测试与语料
 

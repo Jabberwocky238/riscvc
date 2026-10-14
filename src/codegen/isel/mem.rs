@@ -4,7 +4,7 @@ use super::{Error, FrameObj, Isel, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{Index, Kind, Ty, ValId};
 use crate::feature::{Zmmul, Float};
-use crate::isa::{Ext, Form, Inst, Opcode, Rv32i as IOp};
+use crate::isa::{Base as IForm, Opcode, Rv32i as IOp};
 
 /// 一个标量叶子：类型与它在聚合里的字节偏移。
 type Leaf = (Ty, u64);
@@ -39,7 +39,7 @@ impl Isel<'_> {
     /// （基址, 偏移）⇒ 偏移放得进 12 位的形式（寄存器基址超了就先加好）。
     fn fit(&mut self, base: Base, off: i64) -> (Base, i32) {
         match base {
-            Base::Reg(r) if !Inst::fits(Form::Imm, off) || !Inst::fits(Form::Imm, off + 8) => {
+            Base::Reg(r) if !IForm::Imm.fits(off) || !IForm::Imm.fits(off + 8) => {
                 let k = self.li(off as i32);
                 (Base::Reg(self.rr(IOp::Add, r, k)), 0)
             }
@@ -51,7 +51,7 @@ impl Isel<'_> {
     pub(super) fn materialize(&mut self, base: Base, off: i64) -> R {
         match base {
             Base::Reg(r) if off == 0 => r,
-            Base::Reg(r) if Inst::fits(Form::Imm, off) => self.ri(IOp::Addi, r, off as i32),
+            Base::Reg(r) if IForm::Imm.fits(off) => self.ri(IOp::Addi, r, off as i32),
             Base::Reg(r) => {
                 let k = self.li(off as i32);
                 self.rr(IOp::Add, r, k)
@@ -90,7 +90,7 @@ impl Isel<'_> {
                 }
                 words.push(acc);
             }
-            if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
+            if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
                 let d = self.fr();
                 self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![words[0]]);
                 return Ok(vec![d]);
@@ -110,7 +110,7 @@ impl Isel<'_> {
             Kind::Int(_) | Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
             Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
             Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu.into(), false, off)],
-            Kind::Float if Ext::F.enabled() => vec![one(self, Float::Flw.into(), true, off)],
+            Kind::Float if crate::feature::Float::ENABLED => vec![one(self, Float::Flw.into(), true, off)],
             Kind::Float => vec![one(self, IOp::Lw.into(), false, off)],
             k => return Self::bad(format!("不能 load {k:?}")),
         })
@@ -140,7 +140,7 @@ impl Isel<'_> {
             s.emit(MOp::Store(op, b, o), Vec::new(), uses);
         };
         if align < natural && size > 1 {
-            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
+            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
                 let x = self.xr();
                 self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![x], vec![parts[0]]);
                 vec![x]
@@ -166,7 +166,7 @@ impl Isel<'_> {
             }
             Kind::Ptr => one(self, IOp::Sw.into(), parts[0], off),
             Kind::Half | Kind::BFloat => one(self, IOp::Sh.into(), parts[0], off),
-            Kind::Float if Ext::F.enabled() => one(self, Float::Fsw.into(), parts[0], off),
+            Kind::Float if crate::feature::Float::ENABLED => one(self, Float::Fsw.into(), parts[0], off),
             Kind::Float => one(self, IOp::Sw.into(), parts[0], off),
             k => return Self::bad(format!("不能 store {k:?}")),
         }

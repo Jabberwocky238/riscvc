@@ -1,10 +1,164 @@
-//! RV32I（与特权指令）：基础指令表，`#[derive(Isa)]` 生成；语义在解释器核心（`src/sim`）。
+//! RV32I（与特权指令）：基础格式 [`Base`] 与基础指令表（`#[derive(Isa)]` 生成）；语义在解释器核心（`src/sim`）。
+use super::inst::{Fields, Layout, field, sext};
 use super::{Inst, Style};
+use crate::asm::Expr;
+use crate::ext::{Args, Field, Fixup, Operand};
 use crate::macros::Isa;
 use core::fmt::Write;
 
+/// RV32I 的格式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Base {
+    /// `rd, imm20`
+    U,
+    /// `rd, 目标`
+    J,
+    /// `rd, imm(rs1)`
+    Jalr,
+    /// `rs1, rs2, 目标`
+    Branch,
+    /// `rd, imm(rs1)`
+    Load,
+    /// `rs2, imm(rs1)`
+    Store,
+    /// `rd, rs1, imm12`
+    Imm,
+    /// `rd, rs1, shamt`
+    Shift,
+    /// `rd, rs1, rs2`
+    R,
+    /// `pred, succ`
+    Fence,
+    /// 没有操作数
+    Fixed,
+    /// `rs1, rs2`（`sfence.vma`）
+    Sfence,
+}
+
+impl Base {
+    /// 立即数编进字里的那几位（I / S / B / U / J 各自的散布）。
+    #[must_use]
+    pub const fn scatter(self, imm: i32) -> u32 {
+        let v = imm as u32;
+        match self {
+            Self::U => (v & 0xf_ffff) << 12,
+            Self::J => (field(v, 20, 1) << 31) | (field(v, 1, 10) << 21) | (field(v, 11, 1) << 20) | (field(v, 12, 8) << 12),
+            Self::Branch => (field(v, 12, 1) << 31) | (field(v, 5, 6) << 25) | (field(v, 1, 4) << 8) | (field(v, 11, 1) << 7),
+            Self::Store => (field(v, 5, 7) << 25) | (field(v, 0, 5) << 7),
+            Self::Imm | Self::Load | Self::Jalr => (v & 0xfff) << 20,
+            Self::Shift => (v & 0x1f) << 20,
+            Self::Fence => (v & 0xff) << 20,
+            _ => 0,
+        }
+    }
+
+    /// 立即数的范围检查（编码前）：放不进就报，⛔ 不静默截位。
+    #[must_use]
+    pub const fn fits(self, imm: i64) -> bool {
+        match self {
+            Self::U => imm >= 0 && imm < (1 << 20),
+            Self::J => imm >= -(1 << 20) && imm < (1 << 20) && imm % 2 == 0,
+            Self::Branch => imm >= -(1 << 12) && imm < (1 << 12) && imm % 2 == 0,
+            Self::Imm | Self::Load | Self::Jalr | Self::Store => imm >= -2048 && imm < 2048,
+            Self::Shift => imm >= 0 && imm < 32,
+            _ => true,
+        }
+    }
+
+    /// 立即数位段：常数就地填（放不进报错），否则一个修补点。
+    fn imm_or_fix(self, f: Fields, e: &Expr, field: Field) -> Result<(Fields, Vec<Fixup>), String> {
+        match e {
+            Expr::Num(k) if self.fits(*k) => Ok((f.with_imm(i32::try_from(*k).unwrap_or_default()), Vec::new())),
+            Expr::Num(k) => Err(format!("立即数 {k} 超出 {self:?} 的范围")),
+            e => Ok((f, vec![Fixup { offset: 0, field, expr: e.clone() }])),
+        }
+    }
+}
+
+impl Layout for Base {
+    fn mask(self) -> u32 {
+        match self {
+            Self::U | Self::J => 0x7f,
+            Self::Jalr | Self::Branch | Self::Load | Self::Store | Self::Imm => 0x707f,
+            Self::Shift | Self::R => 0xfe00_707f,
+            Self::Fence => 0xf00f_ffff,
+            Self::Fixed => 0xffff_ffff,
+            Self::Sfence => 0xfe00_7fff,
+        }
+    }
+
+    fn encode(self, f: &Fields) -> u32 {
+        let (rd, rs1, rs2) = (u32::from(f.rd), u32::from(f.rs1), u32::from(f.rs2));
+        let regs = match self {
+            Self::U | Self::J => rd << 7,
+            Self::Branch | Self::Store | Self::Sfence => rs1 << 15 | rs2 << 20,
+            Self::Jalr | Self::Load | Self::Imm | Self::Shift => rd << 7 | rs1 << 15,
+            Self::R => rd << 7 | rs1 << 15 | rs2 << 20,
+            Self::Fence | Self::Fixed => 0,
+        };
+        regs | self.scatter(f.imm)
+    }
+
+    fn decode(self, w: u32) -> Option<Fields> {
+        let imm = match self {
+            Self::U => field(w, 12, 20) as i32,
+            Self::J => sext(field(w, 31, 1) << 20 | field(w, 12, 8) << 12 | field(w, 20, 1) << 11 | field(w, 21, 10) << 1, 21),
+            Self::Branch => sext(field(w, 31, 1) << 12 | field(w, 7, 1) << 11 | field(w, 25, 6) << 5 | field(w, 8, 4) << 1, 13),
+            Self::Store => sext(field(w, 25, 7) << 5 | field(w, 7, 5), 12),
+            Self::Imm | Self::Load | Self::Jalr => sext(field(w, 20, 12), 12),
+            Self::Shift => field(w, 20, 5) as i32,
+            Self::Fence => field(w, 20, 8) as i32,
+            _ => 0,
+        };
+        Some(Fields::regs_of(w).with_imm(imm))
+    }
+
+    fn print(self, f: &Fields, pc: u64, s: Style) -> String {
+        let x = |r| s.x(r);
+        let (rd, rs1, rs2) = (f.rd, f.rs1, f.rs2);
+        match self {
+            Self::U => format!("{}, {:#x}", x(rd), f.imm),
+            Self::J => format!("{}, {}", x(rd), s.target(pc, f.imm)),
+            Self::Jalr | Self::Load => format!("{}, {}({})", x(rd), s.imm(f.imm), x(rs1)),
+            Self::Store => format!("{}, {}({})", x(rs2), s.imm(f.imm), x(rs1)),
+            Self::Branch => format!("{}, {}, {}", x(rs1), x(rs2), s.target(pc, f.imm)),
+            Self::Imm | Self::Shift => format!("{}, {}, {}", x(rd), x(rs1), s.imm(f.imm)),
+            Self::R => format!("{}, {}, {}", x(rd), x(rs1), x(rs2)),
+            Self::Fence => format!("{}, {}", Style::fence(f.imm >> 4), Style::fence(f.imm & 0xf)),
+            Self::Fixed => String::new(),
+            Self::Sfence => format!("{}, {}", x(rs1), x(rs2)),
+        }
+    }
+
+    /// 扩展里用到 RV32I 格式的指令（`mul` 一类）怎么汇编；RV32I 自己的由汇编器核心做（伪指令、长跳转 …）。
+    fn assemble(self, args: &Args<'_>) -> Result<(Fields, Vec<Fixup>), String> {
+        use Operand::{Expr as E, Imm, Mem, X as Xr};
+        let f = Fields::ZERO;
+        let num = |o: &Operand| match o {
+            Imm(k) => Some(Expr::Num(*k)),
+            E(e) => Some(e.clone()),
+            Operand::Sym(n) => Some(Expr::Sym(n.clone())),
+            _ => None,
+        };
+        let bad = || format!("{self:?} 格式的操作数不对：{:?}", args.ops);
+        match (self, args.ops) {
+            (Self::R, [Xr(rd), Xr(a), Xr(b)]) => Ok((f.x(*rd, *a, *b), Vec::new())),
+            (Self::Imm | Self::Shift, [Xr(rd), Xr(a), e]) => self.imm_or_fix(f.x(*rd, *a, 0), &num(e).ok_or_else(bad)?, Field::I),
+            (Self::Load | Self::Jalr, [Xr(rd), Mem(e, rs)]) => self.imm_or_fix(f.x(*rd, *rs, 0), e, Field::I),
+            (Self::Store, [Xr(rs2), Mem(e, rs)]) => self.imm_or_fix(f.x(0, *rs, *rs2), e, Field::S),
+            (Self::U, [Xr(rd), e]) => self.imm_or_fix(f.x(*rd, 0, 0), &num(e).ok_or_else(bad)?, Field::U),
+            (Self::Branch, [Xr(a), Xr(b), e]) => Ok((f.x(0, *a, *b), vec![Fixup { offset: 0, field: Field::B, expr: num(e).ok_or_else(bad)? }])),
+            (Self::J, [Xr(rd), e]) => Ok((f.x(*rd, 0, 0), vec![Fixup { offset: 0, field: Field::J, expr: num(e).ok_or_else(bad)? }])),
+            (Self::Fixed, []) => Ok((f, Vec::new())),
+            (Self::Sfence, [Xr(a), Xr(b)]) => Ok((f.x(0, *a, *b), Vec::new())),
+            (Self::Sfence, [Xr(a)]) => Ok((f.x(0, *a, 0), Vec::new())),
+            _ => Err(bad()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "i", alias = alias)]
+#[isa(name = "i", form = Base, alias = alias)]
 pub enum Rv32i {
     #[isa("lui", U, 0x37)]
     Lui,

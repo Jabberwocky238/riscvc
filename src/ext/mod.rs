@@ -12,7 +12,7 @@
 //! ⭐ 写一张标准格式的指令表：`#[derive(Isa)]`（`crate::macros`）+ [`Std<表>`]，见 `src/feature/zmmul`。
 //! 先问扩展、再走标准表：扩展可以占用标准表里没有的编码（RISC-V 的 custom-0..3、低两位不是 `11` 的长指令）。
 use crate::asm::Expr;
-use crate::isa::{Csr, Form, Inst, Rm, Style, Table};
+use crate::isa::{Inst, Style, Table};
 use crate::sim::{Cpu, Stop};
 use core::marker::PhantomData;
 
@@ -260,7 +260,11 @@ impl<T: Semantics> Extension for Std<T> {
             return Some(Ok(Emit::Text(text)));
         }
         let op: T = mnemonic.parse().ok()?;
-        Some(Encoder::encode(op, args))
+        // 按这条的格式（Layout）：字段 + 修补点
+        Some(op.assemble(args).map(|(f, fixups)| {
+            let bytes = u32::from(f.with_op(op)).to_le_bytes().to_vec();
+            if fixups.is_empty() { Emit::Bytes(bytes) } else { Emit::Fixed(bytes, fixups) }
+        }))
     }
 
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
@@ -304,85 +308,6 @@ impl Template {
             out = out.replace(&format!("${n}"), v);
         }
         Some(out)
-    }
-}
-
-/// 按格式编码（标准表的扩展指令都走这里）。
-struct Encoder;
-
-impl Encoder {
-    fn encode<T: Table>(op: T, args: &Args<'_>) -> Result<Emit, String> {
-        let ops = args.ops;
-        use Operand::{F as Fr, Imm, Mem, Sym, X as Xr};
-        let i = Inst::of(op);
-        let bad = || format!("`{op}` 的操作数不对：{ops:?}");
-        let rm = |rest: &[Operand]| -> Result<u8, String> {
-            match rest {
-                [] => Ok(Rm::Dyn as u8),
-                [Sym(s)] => s.parse::<Rm>().map(|r| r as u8).map_err(|()| format!("不认识的舍入模式 `{s}`")),
-                _ => Err(format!("舍入模式写错：{rest:?}")),
-            }
-        };
-        // CSR：原文是 CSR 名就按名字（哪怕同名符号 `.set` 过，同 llvm-mc），否则按值
-        let csr = |o: &Operand| -> Result<u16, String> {
-            let k = ops.iter().position(|x| core::ptr::eq(x, o)).unwrap_or(usize::MAX);
-            if let Some(c) = args.raw.get(k).and_then(|r| r.parse::<Csr>().ok()) {
-                return Ok(c.0);
-            }
-            match o {
-                Sym(n) => n.parse::<Csr>().map(|c| c.0).map_err(|()| format!("不认识的 CSR `{n}`")),
-                Imm(k) => u16::try_from(*k).ok().filter(|&c| c < 4096).ok_or_else(|| format!("CSR 编号 {k} 越界")),
-                _ => Err(format!("要 CSR，见 {o:?}")),
-            }
-        };
-        let word = |i: Inst<T>| u32::from(i).to_le_bytes().to_vec();
-        // 带 `imm(rs)` 的：常数就地填，否则一个修补点
-        let mem = |i: Inst<T>, e: &Expr, field: Field| -> Result<Emit, String> {
-            let form = if field == Field::S { Form::Store } else { Form::Imm };
-            match e {
-                Expr::Num(k) if Inst::fits(form, *k) => Ok(Emit::Bytes(word(i.with_imm(i32::try_from(*k).unwrap_or_default())))),
-                Expr::Num(k) => Err(format!("立即数 {k} 超出范围")),
-                e => Ok(Emit::Fixed(word(i), vec![Fixup { offset: 0, field, expr: e.clone() }])),
-            }
-        };
-        let r = |o: &Operand| -> Option<u8> {
-            match o {
-                Xr(r) | Fr(r) => Some(*r),
-                _ => None,
-            }
-        };
-        let regs = |os: &[Operand]| -> Option<Vec<u8>> { os.iter().map(r).collect() };
-        Ok(match (op.form(), ops) {
-            (Form::FLoad | Form::Load, [Fr(rd) | Xr(rd), Mem(e, rs)]) => return mem(i.x(*rd, *rs, 0), e, Field::I),
-            (Form::FStore | Form::Store, [Fr(rs2) | Xr(rs2), Mem(e, rs)]) => return mem(i.x(0, *rs, *rs2), e, Field::S),
-            (Form::Csr, [Xr(rd), c, Xr(rs)]) => Emit::Bytes(word(Inst { csr: csr(c)?, ..i.x(*rd, *rs, 0) })),
-            (Form::CsrI, [Xr(rd), c, Imm(k)]) => {
-                let u = u8::try_from(*k).ok().filter(|&u| u < 32).ok_or_else(|| format!("{k} 不是 5 位无符号数"))?;
-                Emit::Bytes(word(Inst { csr: csr(c)?, ..i.x(*rd, u, 0) }))
-            }
-            (Form::R | Form::FR | Form::FCmp, [a, b, c]) => {
-                let v = regs(&[a.clone(), b.clone(), c.clone()]).ok_or_else(bad)?;
-                Emit::Bytes(word(i.x(v[0], v[1], v[2])))
-            }
-            (Form::FRrm, [a, b, c, rest @ ..]) => {
-                let v = regs(&[a.clone(), b.clone(), c.clone()]).ok_or_else(bad)?;
-                Emit::Bytes(word(Inst { rm: rm(rest)?, ..i.x(v[0], v[1], v[2]) }))
-            }
-            (Form::R4, [a, b, c, d, rest @ ..]) => {
-                let v = regs(&[a.clone(), b.clone(), c.clone(), d.clone()]).ok_or_else(bad)?;
-                Emit::Bytes(word(Inst { rs3: v[3], rm: rm(rest)?, ..i.x(v[0], v[1], v[2]) }))
-            }
-            (Form::FR1rm | Form::FCvtXF | Form::FCvtFX, [a, b, rest @ ..]) => {
-                let v = regs(&[a.clone(), b.clone()]).ok_or_else(bad)?;
-                Emit::Bytes(word(Inst { rm: rm(rest)?, ..i.x(v[0], v[1], 0) }))
-            }
-            (Form::FToX | Form::XToF, [a, b]) => {
-                let v = regs(&[a.clone(), b.clone()]).ok_or_else(bad)?;
-                Emit::Bytes(word(i.x(v[0], v[1], 0)))
-            }
-            (Form::Fixed, []) => Emit::Bytes(word(i)),
-            _ => return Err(bad()),
-        })
     }
 }
 

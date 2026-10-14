@@ -36,7 +36,7 @@ impl As {
         let mut include = self.include.clone();
         include.extend(self.input.parent().map(PathBuf::from));
         let opts = crate::asm::Options {
-            float_abi: crate::isa::Ext::F.enabled() && !self.soft_float,
+            float_abi: crate::feature::Float::ENABLED && !self.soft_float,
             preprocess: self.preprocess || self.input.extension().is_some_and(|e| e == "S"),
             defines,
             include,

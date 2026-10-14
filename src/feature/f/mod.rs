@@ -1,12 +1,15 @@
 //! F：单精度浮点（`f` feature 蕴含 `zicsr`）。舍入只做 RNE（`frm` 恒 0，`fcvt` 的 rtz 单独处理）；NaN 结果规范化。
 //! 伪指令（`fmv.s`、`fgt.s`、`frcsr`、取存全局的 `flw rd, sym, tmp` …）全是模板。
+mod layout;
+
+pub use layout::FForm;
 use crate::ext::Exec;
 use crate::isa::{Inst, Rm, Style};
 use crate::macros::Isa;
 use core::fmt::Write;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "f", feature = "f", alias = alias)]
+#[isa(name = "f", feature = "f", form = FForm, alias = alias)]
 #[pseudo("fmv.s $rd:f, $rs:f" => "fsgnj.s $rd, $rs, $rs")]
 #[pseudo("fabs.s $rd:f, $rs:f" => "fsgnjx.s $rd, $rs, $rs")]
 #[pseudo("fneg.s $rd:f, $rs:f" => "fsgnjn.s $rd, $rs, $rs")]

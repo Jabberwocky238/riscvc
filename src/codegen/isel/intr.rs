@@ -3,7 +3,7 @@ use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{IPred, Intr, Kind, Ty, ValId};
 use crate::feature::{Zmmul, Float};
-use crate::isa::{Ext, Opcode, Rv32i as IOp, Rm};
+use crate::isa::{Opcode, Rv32i as IOp, Rm};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
@@ -530,7 +530,7 @@ impl Isel<'_> {
 
     /// `is.fpclass`：LLVM 的类别位（0 sNaN 1 qNaN 2 −inf 3 −normal 4 −subnormal 5 −0 6 +0 7 +subnormal 8 +normal 9 +inf）。
     fn fpclass(&mut self, a: ValId, mask: u32) -> Result<R, Error> {
-        if matches!(self.kind(self.ty(a)), Kind::Float) && Ext::F.enabled() {
+        if matches!(self.kind(self.ty(a)), Kind::Float) && crate::feature::Float::ENABLED {
             // RISC-V fclass：0 −inf 1 −normal 2 −subnormal 3 −0 4 +0 5 +subnormal 6 +normal 7 +inf 8 sNaN 9 qNaN
             const MAP: [u32; 10] = [8, 9, 0, 1, 2, 3, 4, 5, 6, 7];
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));
