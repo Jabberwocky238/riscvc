@@ -189,7 +189,11 @@ impl Assembler<'_> {
                 None => return Err(bad(".reloc 的位置要是「标号 + 常数」")),
             };
             let t = self.eval(&target, 0)?;
-            let (symbol, addend) = t.single().ok_or_else(|| bad(".reloc 的目标要是「符号 + 常数」（常数目标的不带符号重定位没做）"))?;
+            // 常数目标（含 `.set` 成常数的符号）⇒ 0 号符号 + 加数（同 llvm-mc）
+            let (symbol, addend) = match t.constant() {
+                Some(k) => ("", k),
+                None => t.single().ok_or_else(|| bad(".reloc 的目标要是「符号 + 常数」或常数"))?,
+            };
             relocs.push(Reloc { section, offset, r_type, symbol: String::from(symbol), addend });
         }
         for r in &relocs {
