@@ -459,8 +459,8 @@ impl Module {
                 let ty = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
                 Op::Alloca { ty, count: args[0], align: Self::uint(op, "alignment").max(1) }
             }
-            "llvm.load" => Op::Load { ptr: args[0], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::uint(op, "ordering") != 0 },
-            "llvm.store" => Op::Store { val: args[0], ptr: args[1], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::uint(op, "ordering") != 0 },
+            "llvm.load" => Op::Load { ptr: args[0], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
+            "llvm.store" => Op::Store { val: args[0], ptr: args[1], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
             "llvm.getelementptr" => {
                 let o: llvm::GEPOp<'_> = op.to_op().map_err(typed)?;
                 let src = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
@@ -481,12 +481,24 @@ impl Module {
             "llvm.atomicrmw" => {
                 const OPS: [RmwOp; 15] = [RmwOp::Xchg, RmwOp::Add, RmwOp::Sub, RmwOp::And, RmwOp::Nand, RmwOp::Or, RmwOp::Xor, RmwOp::Max, RmwOp::Min, RmwOp::UMax, RmwOp::UMin, RmwOp::FAdd, RmwOp::FSub, RmwOp::FMax, RmwOp::FMin];
                 let k = usize::try_from(Self::uint(op, "bin_op")).unwrap_or(usize::MAX);
-                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, args[0], args[1])
+                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, args[0], args[1], Self::order(op).unwrap_or(5))
             }
             "llvm.cmpxchg" => Op::CmpXchg(args[0], args[1], args[2]),
             "llvm.fence" => Op::Fence,
             "llvm.va_arg" => return Err(Error::Parse(String::from("va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）"))),
             n => return Err(Error::Parse(format!("不支持的 op `{n}`"))),
+        })
+    }
+
+    /// MLIR 的 `ordering`（not_atomic 0、unordered 1、monotonic 2、acquire 4、release 5、acq_rel 6、seq_cst 7）⇒ C 内存序。
+    fn order(op: &Operation<'_>) -> Option<u8> {
+        Some(match Self::uint(op, "ordering") {
+            0 => return None,
+            1 | 2 => 0,
+            4 => 2,
+            5 => 3,
+            6 => 4,
+            _ => 5,
         })
     }
 
@@ -594,7 +606,7 @@ impl Module {
     /// `dense<…> : tensor<…>` ⇒ 聚合常量（单值 = 每个元素都是它）。
     fn dense(&mut self, body: &str, ty: Ty) -> Result<Const, Error> {
         let inner = body.trim().trim_start_matches('<').trim_end_matches('>').trim();
-        let flat: Vec<&str> = inner.split(|c| matches!(c, '[' | ']' | ',')).map(str::trim).filter(|s| !s.is_empty()).collect();
+        let flat: Vec<&str> = inner.split(['[', ']', ',']).map(str::trim).filter(|s| !s.is_empty()).collect();
         let mut leaves = Vec::new();
         self.leaves(ty, &mut leaves);
         let elem = |s: &str, t: Ty, me: &Self| -> Result<Const, Error> {
@@ -642,6 +654,10 @@ impl Module {
     fn global(&mut self, op: &Operation<'_>) -> Result<(), Error> {
         let g: llvm::GlobalOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.mlir.global"), why: e.0 })?;
         let name = String::from(g.sym_name.lit().unwrap_or_default());
+        // llvm.used / llvm.compiler.used / llvm.global_ctors 一类（appending）：只给优化器 / 链接器看，⛔ 不出数据
+        if name.starts_with("llvm.") {
+            return Ok(());
+        }
         let ty = self.ty(g.global_type.ty().ok_or_else(|| Error::Parse(format!("{name}：没有 global_type")))?)?;
         let linkage = Self::linkage(Some(&g.linkage));
         let init = match (&g.value, g.initializer.blocks.is_empty()) {
@@ -747,10 +763,9 @@ impl Module {
             let fill = if matches!(base, Const::Undef) { Const::Undef } else { Const::Zero };
             *base = Const::Agg(vec![fill; n]);
         }
-        if let (Const::Agg(items), Some((ety, _))) = (base, self.types.element(ty, u64::from(first))) {
-            if let Some(slot) = items.get_mut(first as usize) {
+        if let (Const::Agg(items), Some((ety, _))) = (base, self.types.element(ty, u64::from(first)))
+            && let Some(slot) = items.get_mut(first as usize) {
                 self.insert(slot, ety, rest, v);
             }
-        }
     }
 }

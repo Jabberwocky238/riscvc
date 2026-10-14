@@ -154,8 +154,9 @@ pub enum Op {
     ICmp(IPred, ValId, ValId),
     FCmp(FPred, ValId, ValId),
     Alloca { ty: Ty, count: ValId, align: u64 },
-    Load { ptr: ValId, align: u64, volatile: bool, atomic: bool },
-    Store { val: ValId, ptr: ValId, align: u64, volatile: bool, atomic: bool },
+    /// `atomic`：C 的内存序（0 relaxed、2 acquire、3 release、4 acq_rel、5 seq_cst）；`None` = 普通访存。
+    Load { ptr: ValId, align: u64, volatile: bool, atomic: Option<u8> },
+    Store { val: ValId, ptr: ValId, align: u64, volatile: bool, atomic: Option<u8> },
     Gep { src: Ty, base: ValId, indices: Vec<Index> },
     Cast(CastOp, ValId),
     Select(ValId, ValId, ValId),
@@ -165,7 +166,8 @@ pub enum Op {
     InsertValue(ValId, ValId, Vec<u32>),
     Freeze(ValId),
     Intr(Intr, Vec<ValId>),
-    AtomicRmw(RmwOp, ValId, ValId),
+    /// 运算、指针、值、C 内存序。
+    AtomicRmw(RmwOp, ValId, ValId, u8),
     CmpXchg(ValId, ValId, ValId),
     Fence,
 }

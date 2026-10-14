@@ -28,6 +28,7 @@ subcommands! {
     As(r#as) As,
     Ld(ld) Ld,
     Objdump(objdump) Objdump,
+    Llc(llc) Llc,
 }
 
 #[derive(Parser)]
