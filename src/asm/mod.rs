@@ -118,8 +118,10 @@ pub struct Symbol {
 }
 
 /// 汇编器状态。
-pub struct Assembler {
+pub struct Assembler<'e> {
     opts: Options,
+    /// 扩展指令（[`crate::ext::Extension::assemble`]）：助记符先问它们，不认再走标准表。
+    exts: &'e [&'e dyn crate::ext::Extension],
     pub sections: Vec<Section>,
     cur: usize,
     prev: usize,
@@ -148,8 +150,16 @@ pub struct Assembler {
     directs: Vec<(Expr, u32, Expr, usize)>,
 }
 
+impl<'e> Assembler<'e> {
+    /// 挂上扩展指令（借用）。
+    #[must_use]
+    pub fn extensions(self, exts: &'e [&'e dyn crate::ext::Extension]) -> Self {
+        Self { exts, ..self }
+    }
+}
+
 /// 表达式里局部标号与 `.` 的命名（借汇编器状态）。
-impl expr::Names for Assembler {
+impl expr::Names for Assembler<'_> {
     fn local(&mut self, n: u32, forward: bool) -> String {
         let defined = self.locals.get(&n).copied().unwrap_or(0);
         if forward { format!(".L{n}\u{2}{}", defined + 1) } else { format!(".L{n}\u{2}{defined}") }
@@ -163,11 +173,12 @@ impl expr::Names for Assembler {
     }
 }
 
-impl Assembler {
+impl Assembler<'_> {
     #[must_use]
     pub fn new(opts: Options) -> Self {
         let mut asm = Self {
             opts,
+            exts: &[],
             sections: Vec::new(),
             cur: 0,
             prev: 0,
@@ -195,6 +206,8 @@ impl Assembler {
     }
 
     /// ⭐ 汇编一份源文本 ⇒ ELF 目标文件字节。
+    ///
+    /// 挂扩展：`Assembler::new(opts).extensions(&[&my_ext]).assemble(text)`。
     pub fn assemble(mut self, text: &str) -> Result<Vec<u8>, Error> {
         let source = Source { defines: self.opts.defines.clone(), preprocess: self.opts.preprocess };
         let lines = source.lines(text)?;

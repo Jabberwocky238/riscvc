@@ -40,14 +40,14 @@ impl Objdump {
                 .map(|s| (s.address(), s.name().unwrap_or("")))
                 .collect();
             labels.sort_unstable();
-            for (i, word) in data.chunks(4).enumerate() {
-                let pc = base + 4 * i as u64;
-                for (_, name) in labels.iter().filter(|(a, _)| *a == pc) {
-                    println!("\n{pc:08x} <{name}>:");
+            for line in crate::ext::Disasm::new(data, base, &[], style) {
+                for (_, name) in labels.iter().filter(|(a, _)| *a == line.pc) {
+                    println!("\n{:08x} <{name}>:", line.pc);
                 }
-                let w = u32::from_le_bytes(word.try_into().unwrap_or([0; 4]));
-                let text = crate::isa::Inst::try_from(w).map_or_else(|()| String::from("<unknown>"), |inst| inst.print(pc, style));
-                println!("{pc:8x}: {w:08x}     \t{text}");
+                // 同 llvm-objdump：按 4 字节一组、各组小端读成字，低地址的组在前
+                let raw: Vec<String> = line.bytes.chunks(4).map(|c| c.iter().rev().map(|b| format!("{b:02x}")).collect()).collect();
+                let raw = raw.join(" ");
+                println!("{:8x}: {raw}     \t{}", line.pc, line.text);
             }
         }
         Ok(())

@@ -78,7 +78,7 @@ impl Value {
     }
 }
 
-impl Assembler {
+impl Assembler<'_> {
     /// 表达式求值。`.set` 的符号展开；标号留成符号；同节的「标号 − 标号」折成常数。
     pub(crate) fn eval(&self, e: &Expr, depth: usize) -> Result<Value, Error> {
         if depth > 100 {

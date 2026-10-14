@@ -2,6 +2,7 @@
 pub mod asm;
 pub mod cli;
 pub mod codegen;
+pub mod ext;
 pub mod ir;
 pub mod isa;
 pub mod link;

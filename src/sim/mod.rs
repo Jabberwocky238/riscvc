@@ -1,6 +1,10 @@
 //! RV32IMF + Zicsr 解释器：装 ELF、设寄存器、跑到返回。给代码生成做对拍用（同一份输入，两份编译产物比结果）。
 //!
+//! 扩展：[`Cpu::step_on`] / [`Cpu::run_on`] 先问 [`Extension`]（自定义指令）、访存先问 [`Device`]（MMIO）；
+//! [`Cpu::step`] / [`Cpu::run`] = 什么都不挂。
+//!
 //! 浮点：舍入只做 RNE（`frm` 恒 0，`fcvt` 的 rtz 单独处理）；NaN 结果规范化成 `0x7fc00000`（同硬件）。
+use crate::ext::{Device, Extension};
 use crate::isa::{Inst, Op, Rm};
 use std::collections::HashMap;
 
@@ -100,10 +104,20 @@ impl Cpu {
         self.f[r as usize] = if v.is_nan() { NAN } else { v.to_bits() };
     }
 
-    fn load_n(&self, addr: u32, n: usize) -> u32 {
+    /// 读 `n` 字节（小端拼成 u32）：设备先答，没有设备认就读内存。
+    fn load_n(&mut self, devs: &mut [&mut dyn Device], addr: u32, n: usize) -> u32 {
         let mut b = [0u8; 4];
-        self.mem.read(addr, &mut b[..n]);
+        if !devs.iter_mut().any(|d| d.load(addr, &mut b[..n])) {
+            self.mem.read(addr, &mut b[..n]);
+        }
         u32::from_le_bytes(b)
+    }
+
+    /// 写：设备先收，没有设备认就写内存。
+    fn store(&mut self, devs: &mut [&mut dyn Device], addr: u32, data: &[u8]) {
+        if !devs.iter_mut().any(|d| d.store(addr, data)) {
+            self.mem.write(addr, data);
+        }
     }
 
     /// float ⇒ 有符号 / 无符号 32 位整数（截断，饱和；NaN 同 RISC-V：有符号 2³¹−1，无符号 2³²−1）。
@@ -157,9 +171,23 @@ impl Cpu {
         }
     }
 
-    /// 执行一条指令。
+    /// 执行一条指令（不挂扩展与设备）。
     pub fn step(&mut self) -> Result<(), Stop> {
-        let w = self.mem.u32(self.pc);
+        self.step_on(&mut [], &mut [])
+    }
+
+    /// ⭐ 执行一条指令：pc 处的字节先给扩展认（认了就由它执行），再走标准表；访存经设备。
+    pub fn step_on(&mut self, exts: &mut [&mut dyn Extension], devs: &mut [&mut dyn Device]) -> Result<(), Stop> {
+        let mut window = [0; 8];
+        self.mem.read(self.pc, &mut window);
+        if let Some(e) = exts.iter_mut().find(|e| e.decode(&window).is_some()) {
+            let n = e.decode(&window).unwrap_or(4);
+            let next = e.execute(self, &window[..n.min(8)])?;
+            self.pc = next.unwrap_or_else(|| self.pc.wrapping_add(u32::try_from(n).unwrap_or(4)));
+            self.steps += 1;
+            return Ok(());
+        }
+        let w = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
         let i = Inst::try_from(w).map_err(|()| Stop::Trap(w))?;
         let (rs1, rs2) = (self.x[i.rs1 as usize], self.x[i.rs2 as usize]);
         let imm = i.imm.cast_unsigned();
@@ -190,14 +218,22 @@ impl Cpu {
                     next = self.pc.wrapping_add(imm);
                 }
             }
-            Op::Lb => self.set(i.rd, (self.load_n(rs1.wrapping_add(imm), 1) as u8 as i8 as i32).cast_unsigned()),
-            Op::Lh => self.set(i.rd, (self.load_n(rs1.wrapping_add(imm), 2) as u16 as i16 as i32).cast_unsigned()),
-            Op::Lw => self.set(i.rd, self.load_n(rs1.wrapping_add(imm), 4)),
-            Op::Lbu => self.set(i.rd, self.load_n(rs1.wrapping_add(imm), 1)),
-            Op::Lhu => self.set(i.rd, self.load_n(rs1.wrapping_add(imm), 2)),
-            Op::Sb => self.mem.write(rs1.wrapping_add(imm), &rs2.to_le_bytes()[..1]),
-            Op::Sh => self.mem.write(rs1.wrapping_add(imm), &rs2.to_le_bytes()[..2]),
-            Op::Sw => self.mem.write(rs1.wrapping_add(imm), &rs2.to_le_bytes()),
+            Op::Lb | Op::Lh | Op::Lw | Op::Lbu | Op::Lhu => {
+                let n = match i.op {
+                    Op::Lb | Op::Lbu => 1,
+                    Op::Lh | Op::Lhu => 2,
+                    _ => 4,
+                };
+                let v = self.load_n(devs, rs1.wrapping_add(imm), n);
+                self.set(i.rd, match i.op {
+                    Op::Lb => (v as u8 as i8 as i32).cast_unsigned(),
+                    Op::Lh => (v as u16 as i16 as i32).cast_unsigned(),
+                    _ => v,
+                });
+            }
+            Op::Sb => self.store(devs, rs1.wrapping_add(imm), &rs2.to_le_bytes()[..1]),
+            Op::Sh => self.store(devs, rs1.wrapping_add(imm), &rs2.to_le_bytes()[..2]),
+            Op::Sw => self.store(devs, rs1.wrapping_add(imm), &rs2.to_le_bytes()),
             Op::Addi => self.set(i.rd, rs1.wrapping_add(imm)),
             Op::Slti => self.set(i.rd, u32::from(rs1.cast_signed() < i.imm)),
             Op::Sltiu => self.set(i.rd, u32::from(rs1 < imm)),
@@ -249,8 +285,14 @@ impl Cpu {
                 self.csr.insert(i.csr, new);
                 self.set(i.rd, old);
             }
-            Op::Flw => self.f[i.rd as usize] = self.load_n(rs1.wrapping_add(imm), 4),
-            Op::Fsw => self.mem.write(rs1.wrapping_add(imm), &self.f[i.rs2 as usize].to_le_bytes()),
+            Op::Flw => {
+                let v = self.load_n(devs, rs1.wrapping_add(imm), 4);
+                self.f[i.rd as usize] = v;
+            }
+            Op::Fsw => {
+                let v = self.f[i.rs2 as usize];
+                self.store(devs, rs1.wrapping_add(imm), &v.to_le_bytes());
+            }
             Op::FaddS => self.fset(i.rd, self.fv(i.rs1) + self.fv(i.rs2)),
             Op::FsubS => self.fset(i.rd, self.fv(i.rs1) - self.fv(i.rs2)),
             Op::FmulS => self.fset(i.rd, self.fv(i.rs1) * self.fv(i.rs2)),
@@ -285,8 +327,13 @@ impl Cpu {
         Ok(())
     }
 
-    /// 从 `entry` 跑到返回地址 `ret`（`ra` 设成它）或停下，最多 `limit` 步。
+    /// 从 `entry` 跑到返回地址 `ret`（`ra` 设成它）或停下，最多 `limit` 步（不挂扩展与设备）。
     pub fn run(&mut self, entry: u32, ret: u32, limit: u64) -> Stop {
+        self.run_on(entry, ret, limit, &mut [], &mut [])
+    }
+
+    /// 同 [`Self::run`]，挂上扩展与设备（[`Self::step_on`]）。
+    pub fn run_on(&mut self, entry: u32, ret: u32, limit: u64, exts: &mut [&mut dyn Extension], devs: &mut [&mut dyn Device]) -> Stop {
         self.pc = entry;
         self.x[1] = ret;
         let start = self.steps;
@@ -294,7 +341,7 @@ impl Cpu {
             if self.steps - start >= limit {
                 return Stop::Limit;
             }
-            if let Err(stop) = self.step() {
+            if let Err(stop) = self.step_on(exts, devs) {
                 return stop;
             }
         }

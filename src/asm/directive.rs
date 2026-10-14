@@ -4,7 +4,7 @@ use super::lex::{Tok, Toks};
 use super::{Assembler, Bind, Def, Error};
 use object::elf;
 
-impl Assembler {
+impl Assembler<'_> {
     pub(super) fn directive(&mut self, word: &str, rest: &str) -> Result<(), Error> {
         let args = || Toks::try_from(rest).map(Toks::split_commas);
         match word {
@@ -331,7 +331,7 @@ impl Assembler {
     }
 }
 
-impl Assembler {
+impl Assembler<'_> {
     fn uleb(mut v: u64) -> Vec<u8> {
         let mut out = Vec::new();
         loop {

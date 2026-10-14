@@ -5,7 +5,7 @@ use object::write::{Object, Relocation, SectionId, Symbol, SymbolId, SymbolSecti
 use object::{Architecture, BinaryFormat, Endianness, FileFlags, RelocationFlags, SectionFlags, SectionKind, SymbolFlags, SymbolKind, SymbolScope};
 use std::collections::HashMap;
 
-impl Assembler {
+impl Assembler<'_> {
     /// 解析修补点、写 ELF。
     pub(super) fn finish(mut self) -> Result<Vec<u8>, Error> {
         let relocs = self.resolve()?;

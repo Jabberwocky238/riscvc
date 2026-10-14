@@ -2,6 +2,7 @@
 use super::fixup::Fix;
 use super::lex::{Tok, Toks};
 use super::{Assembler, Error, Expr, Modifier};
+use crate::ext::Operand;
 use crate::isa::{Csr, F, Form, Inst, Op, Rm, X};
 use object::elf;
 
@@ -15,7 +16,7 @@ pub enum Opnd {
     M(Expr, X),
 }
 
-impl Assembler {
+impl Assembler<'_> {
     pub(super) fn instruction(&mut self, mnem: &str, rest: &str) -> Result<(), Error> {
         let toks = Toks::try_from(rest)?.split_commas();
         // 要符号的位置上，寄存器名也是符号（同 llvm-mc：`call zero`、`j a0`、`jal a0, a0`）
@@ -35,11 +36,35 @@ impl Assembler {
                 _ => self.operand(t),
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(bytes) = self.extended(mnem, &ops)? {
+            return self.bytes(&bytes);
+        }
         if self.pseudo(mnem, &ops)? {
             return Ok(());
         }
         let op: Op = mnem.parse().map_err(|()| Error::Syntax(format!("不认识的指令 `{mnem}`")))?;
         self.real(op, &ops)
+    }
+
+    /// 扩展指令：操作数求值成常数 / 寄存器号，交给认这个助记符的扩展。没有扩展认 ⇒ `None`。
+    fn extended(&mut self, mnem: &str, ops: &[Opnd]) -> Result<Option<Vec<u8>>, Error> {
+        if self.exts.is_empty() {
+            return Ok(None);
+        }
+        let mut plain = Vec::with_capacity(ops.len());
+        for op in ops {
+            plain.push(match op {
+                Opnd::X(r) => Operand::X(r.0),
+                Opnd::F(r) => Operand::F(r.0),
+                Opnd::E(e) => match self.eval(e, 0).ok().and_then(|v| v.constant()) {
+                    Some(k) => Operand::Imm(k),
+                    None => return Ok(None),
+                },
+                Opnd::M(..) => return Ok(None),
+            });
+        }
+        let exts = self.exts;
+        exts.iter().find_map(|e| e.assemble(mnem, &plain).map(|r| r.map_err(|msg| Error::Syntax(format!("{}：{msg}", e.name()))))).transpose()
     }
 
     pub(super) fn operand(&mut self, t: Toks) -> Result<Opnd, Error> {
