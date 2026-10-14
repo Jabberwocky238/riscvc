@@ -2,8 +2,8 @@
 use super::fixup::Fix;
 use super::lex::{Tok, Toks};
 use super::{Assembler, Error, Expr, Modifier};
-use crate::ext::Operand;
-use crate::isa::{Csr, F, Form, Inst, Op, Rm, X};
+use crate::ext::{Args, Emit, Field, Operand};
+use crate::isa::{F, Form, Inst, Opcode, Rv32i as Op, Table, X};
 use object::elf;
 
 /// 一个操作数。
@@ -20,7 +20,7 @@ impl Assembler<'_> {
     pub(super) fn instruction(&mut self, mnem: &str, rest: &str) -> Result<(), Error> {
         let toks = Toks::try_from(rest)?.split_commas();
         // 要符号的位置上，寄存器名也是符号（同 llvm-mc：`call zero`、`j a0`、`jal a0, a0`）
-        let symbolic = match (mnem, mnem.parse::<Op>().map(Op::form), toks.len()) {
+        let symbolic = match (mnem, mnem.parse::<Opcode>().map(|o| o.form()), toks.len()) {
             ("jump", ..) => Some(0),
             ("j" | "jal" | "call" | "tail" | "la" | "lla" | "lga" | "la.tls.gd" | "la.tls.ie", ..) => toks.len().checked_sub(1),
             // `lw a2, sym` / `flw fa0, sym, t0` / `sw a0, sym, t0`：取存全局的伪指令
@@ -36,8 +36,8 @@ impl Assembler<'_> {
                 _ => self.operand(t),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(bytes) = self.extended(mnem, &ops)? {
-            return self.bytes(&bytes);
+        if self.extended(mnem, rest, &ops)? {
+            return Ok(());
         }
         if self.pseudo(mnem, &ops)? {
             return Ok(());
@@ -46,25 +46,86 @@ impl Assembler<'_> {
         self.real(op, &ops)
     }
 
-    /// 扩展指令：操作数求值成常数 / 寄存器号，交给认这个助记符的扩展。没有扩展认 ⇒ `None`。
-    fn extended(&mut self, mnem: &str, ops: &[Opnd]) -> Result<Option<Vec<u8>>, Error> {
-        if self.exts.is_empty() {
-            return Ok(None);
-        }
-        let mut plain = Vec::with_capacity(ops.len());
-        for op in ops {
-            plain.push(match op {
+    /// 扩展指令（给的、再内置的 M / Zmmul / F / Zicsr）：认这个助记符的扩展出字节、修补点或文本展开。没有扩展认 ⇒ `false`。
+    fn extended(&mut self, mnem: &str, rest: &str, ops: &[Opnd]) -> Result<bool, Error> {
+        let plain: Vec<Operand> = ops
+            .iter()
+            .map(|op| match op {
                 Opnd::X(r) => Operand::X(r.0),
                 Opnd::F(r) => Operand::F(r.0),
-                Opnd::E(e) => match self.eval(e, 0).ok().and_then(|v| v.constant()) {
-                    Some(k) => Operand::Imm(k),
-                    None => return Ok(None),
+                Opnd::E(e) => match (self.eval(e, 0).ok().and_then(|v| v.constant()), e) {
+                    (Some(k), _) => Operand::Imm(k),
+                    (None, Expr::Sym(n)) => Operand::Sym(n.clone()),
+                    (None, e) => Operand::Expr(self.pin(e)),
                 },
-                Opnd::M(..) => return Ok(None),
-            });
+                Opnd::M(e, base) => Operand::Mem(self.eval(e, 0).ok().and_then(|v| v.constant()).map_or_else(|| self.pin(e), Expr::Num), base.0),
+            })
+            .collect();
+        let raw = Self::raw_args(rest);
+        let args = Args { ops: &plain, raw: &raw };
+        let exts = self.exts.clone();
+        let Some((name, out)) = exts.iter().find_map(|e| e.assemble(mnem, &args).map(|r| (e.name(), r))) else { return Ok(false) };
+        match out.map_err(|msg| Error::Syntax(format!("{name}：{msg}")))? {
+            Emit::Bytes(b) => self.bytes(&b)?,
+            Emit::Fixed(b, fixups) => {
+                let start = self.here();
+                for f in fixups {
+                    let (kind, e) = Self::field(f.field, &f.expr)?;
+                    let (line, expr) = (self.line, self.pin(&e));
+                    self.sections[self.cur].fixups.push(super::fixup::Fixup { offset: start + f.offset as u64, kind, expr, line });
+                }
+                self.bytes(&b)?;
+            }
+            Emit::Text(t) => {
+                let label = format!(".Lpcrel_hi{}", self.temp);
+                self.temp += 1;
+                for line in t.replace("$L", &label).lines() {
+                    self.statement(line.trim())?;
+                }
+            }
         }
-        let exts = self.exts;
-        exts.iter().find_map(|e| e.assemble(mnem, &plain).map(|r| r.map_err(|msg| Error::Syntax(format!("{}：{msg}", e.name()))))).transpose()
+        Ok(true)
+    }
+
+    /// 扩展给的位段 + 表达式（最外层的修饰符）⇒ 内部的修补点种类。
+    fn field(field: Field, e: &Expr) -> Result<(Fix, Expr), Error> {
+        let store = field == Field::S;
+        let (kind, inner) = match (field, e.modifier()) {
+            (Field::I | Field::S, Some((Modifier::Lo, inner))) => (if store { Fix::Lo12S } else { Fix::Lo12I }, inner),
+            (Field::I | Field::S, Some((Modifier::PcrelLo, inner))) => (if store { Fix::PcrelLo12S } else { Fix::PcrelLo12I }, inner),
+            (Field::I | Field::S, Some((Modifier::TprelLo, inner))) => (Fix::Reloc(if store { elf::R_RISCV_TPREL_LO12_S } else { elf::R_RISCV_TPREL_LO12_I }), inner),
+            (Field::U, Some((Modifier::Hi, inner))) => (Fix::Hi20, inner),
+            (Field::U, Some((Modifier::PcrelHi, inner))) => (Fix::PcrelHi20, inner),
+            (_, Some((m, _))) => return Err(Error::Syntax(format!("这里不能用 {m:?}"))),
+            (Field::I, None) => (Fix::Imm12, e),
+            (Field::S, None) => (Fix::Store12, e),
+            (Field::U, None) => (Fix::U20, e),
+            (Field::B, None) => (Fix::Branch, e),
+            (Field::J, None) => (Fix::Jal, e),
+        };
+        Ok((kind, inner.clone()))
+    }
+
+    /// 操作数原文（按最外层的逗号分，括号与引号里的不分）。
+    fn raw_args(rest: &str) -> Vec<String> {
+        let (mut out, mut cur, mut depth, mut quote) = (Vec::new(), String::new(), 0i32, false);
+        for c in rest.chars() {
+            match c {
+                '"' => quote = !quote,
+                '(' if !quote => depth += 1,
+                ')' if !quote => depth -= 1,
+                ',' if !quote && depth == 0 => {
+                    out.push(core::mem::take(&mut cur).trim().to_string());
+                    continue;
+                }
+                _ => {}
+            }
+            cur.push(c);
+        }
+        if !cur.trim().is_empty() || !out.is_empty() {
+            out.push(cur.trim().to_string());
+        }
+        out
     }
 
     pub(super) fn operand(&mut self, t: Toks) -> Result<Opnd, Error> {
@@ -152,62 +213,6 @@ impl Assembler<'_> {
             ("call", [Opnd::X(rd), E(t)]) => self.call(rd.0, rd.0, t)?,
             ("tail", [E(t)]) => self.call(zero, X::T1.0, t)?,
             ("jump", [E(t), Opnd::X(rt)]) => self.call(zero, rt.0, t)?,
-            ("csrr", [Opnd::X(rd), c]) => self.emit(Inst { csr: self.csr(c)?, ..i(Op::Csrrs).x(rd.0, zero, 0) })?,
-            ("csrw" | "csrs" | "csrc", [c, Opnd::X(rs)]) => {
-                let op = match mnem {
-                    "csrw" => Op::Csrrw,
-                    "csrs" => Op::Csrrs,
-                    _ => Op::Csrrc,
-                };
-                self.emit(Inst { csr: self.csr(c)?, ..i(op).x(zero, rs.0, 0) })?;
-            }
-            ("csrw" | "csrs" | "csrc" | "csrwi" | "csrsi" | "csrci", [c, E(e)]) => {
-                let op = match mnem.trim_end_matches('i') {
-                    "csrw" => Op::Csrrwi,
-                    "csrs" => Op::Csrrsi,
-                    _ => Op::Csrrci,
-                };
-                let u = self.uimm5(e)?;
-                self.emit(Inst { csr: self.csr(c)?, ..i(op).x(zero, u, 0) })?;
-            }
-            ("frsr", [Opnd::X(rd)]) => self.emit(Inst { csr: Csr::FCSR.0, ..i(Op::Csrrs).x(rd.0, zero, 0) })?,
-            ("fssr", [Opnd::X(rs)]) => self.emit(Inst { csr: Csr::FCSR.0, ..i(Op::Csrrw).x(zero, rs.0, 0) })?,
-            ("fssr", [Opnd::X(rd), Opnd::X(rs)]) => self.emit(Inst { csr: Csr::FCSR.0, ..i(Op::Csrrw).x(rd.0, rs.0, 0) })?,
-            ("frcsr" | "frrm" | "frflags" | "rdcycle" | "rdtime" | "rdinstret" | "rdcycleh" | "rdtimeh" | "rdinstreth", [Opnd::X(rd)]) => {
-                let csr = match mnem {
-                    "frcsr" => 0x3,
-                    "frrm" => 0x2,
-                    "frflags" => 0x1,
-                    "rdcycle" => 0xc00,
-                    "rdtime" => 0xc01,
-                    "rdinstret" => 0xc02,
-                    "rdcycleh" => 0xc80,
-                    "rdtimeh" => 0xc81,
-                    _ => 0xc82,
-                };
-                self.emit(Inst { csr, ..i(Op::Csrrs).x(rd.0, zero, 0) })?;
-            }
-            ("fscsr" | "fsrm" | "fsflags", [Opnd::X(rs)]) => self.emit(Inst { csr: Self::fcsr(mnem), ..i(Op::Csrrw).x(zero, rs.0, 0) })?,
-            ("fscsr" | "fsrm" | "fsflags", [Opnd::X(rd), Opnd::X(rs)]) => self.emit(Inst { csr: Self::fcsr(mnem), ..i(Op::Csrrw).x(rd.0, rs.0, 0) })?,
-            ("fsrmi" | "fsflagsi", [E(e)]) => {
-                let u = self.uimm5(e)?;
-                self.emit(Inst { csr: Self::fcsr(mnem.trim_end_matches('i')), ..i(Op::Csrrwi).x(zero, u, 0) })?;
-            }
-            ("fsrmi" | "fsflagsi", [Opnd::X(rd), E(e)]) => {
-                let u = self.uimm5(e)?;
-                self.emit(Inst { csr: Self::fcsr(mnem.trim_end_matches('i')), ..i(Op::Csrrwi).x(rd.0, u, 0) })?;
-            }
-            ("fmv.s" | "fabs.s" | "fneg.s", [Opnd::F(rd), Opnd::F(rs)]) => {
-                let op = match mnem {
-                    "fmv.s" => Op::FsgnjS,
-                    "fneg.s" => Op::FsgnjnS,
-                    _ => Op::FsgnjxS,
-                };
-                self.emit(i(op).x(rd.0, rs.0, rs.0))?;
-            }
-            ("fgt.s" | "fge.s", [Opnd::X(rd), Opnd::F(a), Opnd::F(b)]) => self.emit(i(if mnem == "fgt.s" { Op::FltS } else { Op::FleS }).x(rd.0, b.0, a.0))?,
-            ("fmv.x.s", [Opnd::X(rd), Opnd::F(rs)]) => self.emit(i(Op::FmvXW).x(rd.0, rs.0, 0))?,
-            ("fmv.s.x", [Opnd::F(rd), Opnd::X(rs)]) => self.emit(i(Op::FmvWX).x(rd.0, rs.0, 0))?,
             ("zext.b", [Opnd::X(rd), Opnd::X(rs)]) => self.emit(i(Op::Andi).x(rd.0, rs.0, 0).with_imm(0xff))?,
             ("zext.h" | "sext.h" | "sext.b", [Opnd::X(rd), Opnd::X(rs)]) => {
                 let n = if mnem == "sext.b" { 24 } else { 16 };
@@ -216,7 +221,8 @@ impl Assembler<'_> {
             }
             ("sbreak", []) => self.emit(i(Op::Ebreak))?,
             ("scall", []) => self.emit(i(Op::Ecall))?,
-            ("unimp", []) => self.emit(Inst { csr: 0xc00, ..i(Op::Csrrw) })?,
+            // `csrrw zero, cycle, zero`：不管开没开 Zicsr 都认（同 llvm-mc）
+            ("unimp", []) => self.word(0xc000_1073)?,
             ("fence", []) => self.emit(i(Op::Fence).with_imm(0xff))?,
             _ => return Ok(false),
         }
@@ -256,13 +262,9 @@ impl Assembler<'_> {
             (Form::Jalr, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
             (Form::Branch, [Opnd::X(a), Opnd::X(b), E(t)]) => self.branch(op, a.0, b.0, t)?,
             (Form::Load, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
-            (Form::FLoad, [Opnd::F(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
             (Form::Load, [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcrelHi20, op, rd.0, rd.0, e, true)?,
-            (Form::FLoad, [Opnd::F(rd), E(e), Opnd::X(tmp)]) => self.pcrel(Fix::PcrelHi20, op, rd.0, tmp.0, e, true)?,
             (Form::Store, [Opnd::X(rs2), M(e, rs1)]) => self.imm(i.x(0, rs1.0, rs2.0), e, Fix::Store12)?,
-            (Form::FStore, [Opnd::F(rs2), M(e, rs1)]) => self.imm(i.x(0, rs1.0, rs2.0), e, Fix::Store12)?,
             (Form::Store, [Opnd::X(rs2), E(e), Opnd::X(tmp)]) => self.pcrel(Fix::PcrelHi20, op, rs2.0, tmp.0, e, false)?,
-            (Form::FStore, [Opnd::F(rs2), E(e), Opnd::X(tmp)]) => self.pcrel(Fix::PcrelHi20, op, rs2.0, tmp.0, e, false)?,
             (Form::Imm, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
             (Form::Shift, [Opnd::X(rd), Opnd::X(rs), E(e)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Shamt)?,
             (Form::R, [Opnd::X(rd), Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
@@ -285,30 +287,12 @@ impl Assembler<'_> {
                 };
                 self.imm(Inst::new(op).x(rd.0, rs.0, 0), e, fix)?;
             }
-            (Form::Csr, [Opnd::X(rd), c, Opnd::X(rs)]) => self.emit(Inst { csr: self.csr(c)?, ..i.x(rd.0, rs.0, 0) })?,
-            (Form::Csr | Form::CsrI, [Opnd::X(rd), c, E(e)]) => {
-                let op = match op {
-                    Op::Csrrw | Op::Csrrwi => Op::Csrrwi,
-                    Op::Csrrs | Op::Csrrsi => Op::Csrrsi,
-                    _ => Op::Csrrci,
-                };
-                let u = self.uimm5(e)?;
-                self.emit(Inst { csr: self.csr(c)?, ..Inst::new(op).x(rd.0, u, 0) })?;
-            }
+            (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
             (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
             (Form::Fixed, []) => self.emit(i)?,
             (Form::Sfence, []) => self.emit(i)?,
             (Form::Sfence, [Opnd::X(a)]) => self.emit(i.x(0, a.0, 0))?,
             (Form::Sfence, [Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(0, a.0, b.0))?,
-            (Form::FR, [Opnd::F(rd), Opnd::F(a), Opnd::F(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
-            (Form::FRrm, [Opnd::F(rd), Opnd::F(a), Opnd::F(b), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, b.0) })?,
-            (Form::FR1rm, [Opnd::F(rd), Opnd::F(a), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, 0) })?,
-            (Form::FCmp, [Opnd::X(rd), Opnd::F(a), Opnd::F(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
-            (Form::FToX, [Opnd::X(rd), Opnd::F(a)]) => self.emit(i.x(rd.0, a.0, 0))?,
-            (Form::XToF, [Opnd::F(rd), Opnd::X(a)]) => self.emit(i.x(rd.0, a.0, 0))?,
-            (Form::FCvtXF, [Opnd::X(rd), Opnd::F(a), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, 0) })?,
-            (Form::FCvtFX, [Opnd::F(rd), Opnd::X(a), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, 0) })?,
-            (Form::R4, [Opnd::F(rd), Opnd::F(a), Opnd::F(b), Opnd::F(c), rm @ ..]) => self.emit(Inst { rs3: c.0, rm: Self::rm(rm)?, ..i.x(rd.0, a.0, b.0) })?,
             _ => return Err(bad()),
         }
         Ok(())
@@ -590,39 +574,6 @@ impl Assembler<'_> {
     fn call(&mut self, link: u8, base: u8, t: &Expr) -> Result<(), Error> {
         self.emit_fix(Inst::new(Op::Auipc).x(base, 0, 0), Fix::Call, t.clone())?;
         self.emit(Inst::new(Op::Jalr).x(link, base, 0))
-    }
-
-    fn csr(&self, o: &Opnd) -> Result<u16, Error> {
-        let Opnd::E(e) = o else { return Err(Error::Syntax(format!("要 CSR，见 {o:?}"))) };
-        if let Expr::Sym(name) = e
-            && let Ok(c) = name.parse::<Csr>()
-        {
-            return Ok(c.0);
-        }
-        let k = self.eval(e, 0)?.constant().ok_or_else(|| Error::Syntax(String::from("CSR 要名字或常数")))?;
-        u16::try_from(k).ok().filter(|&c| c < 4096).ok_or_else(|| Error::Syntax(format!("CSR 编号 {k} 越界")))
-    }
-
-    fn uimm5(&self, e: &Expr) -> Result<u8, Error> {
-        let k = self.eval(e, 0)?.constant().ok_or_else(|| Error::Syntax(String::from("要 5 位常数")))?;
-        u8::try_from(k).ok().filter(|&u| u < 32).ok_or_else(|| Error::Syntax(format!("{k} 不是 5 位无符号数")))
-    }
-
-    const fn fcsr(mnem: &str) -> u16 {
-        match mnem.as_bytes() {
-            b"fsrm" => Csr::FRM.0,
-            b"fsflags" => Csr::FFLAGS.0,
-            _ => Csr::FCSR.0,
-        }
-    }
-
-    /// 末尾可选的舍入模式（缺省 `dyn`）。
-    fn rm(rest: &[Opnd]) -> Result<u8, Error> {
-        match rest {
-            [] => Ok(Rm::Dyn as u8),
-            [Opnd::E(Expr::Sym(s))] => s.parse::<Rm>().map(|r| r as u8).map_err(|()| Error::Syntax(format!("不认识的舍入模式 `{s}`"))),
-            _ => Err(Error::Syntax(format!("舍入模式写错：{rest:?}"))),
-        }
     }
 
     /// `fence` 的 `iorw` 集合。

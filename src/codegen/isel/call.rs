@@ -4,7 +4,8 @@ use super::{Error, FrameObj, Isel, R};
 use crate::codegen::abi::{Abi, Assign, Loc, Part};
 use crate::codegen::mir::{Base, MInst, MOp};
 use crate::ir::{ArgAttrs, Callee, Kind, RmwOp, Ty, ValId};
-use crate::isa::Op as IOp;
+use crate::feature::{Float};
+use crate::isa::{Opcode, Rv32i as IOp};
 
 /// 一个实参：部件、部件种类、是否可变参数部分。
 struct Actual {
@@ -35,7 +36,7 @@ impl Isel<'_> {
                         inst.fixed_uses.push(Some(p));
                     }
                     Loc::Stack(off) => {
-                        let op = if part == Part::F { IOp::Fsw } else { IOp::Sw };
+                        let op = if part == Part::F { Opcode::from(Float::Fsw) } else { Opcode::from(IOp::Sw) };
                         self.emit(MOp::Store(op, Base::Outgoing, off), Vec::new(), vec![r]);
                     }
                 }
@@ -110,7 +111,7 @@ impl Isel<'_> {
         self.frame.push(FrameObj { size: size.max(1), align });
         let (sb, so) = self.address(src)?;
         let step: u64 = if align >= 4 && size.is_multiple_of(4) { 4 } else { 1 };
-        let (lop, sop) = if step == 4 { (IOp::Lw, IOp::Sw) } else { (IOp::Lbu, IOp::Sb) };
+        let (lop, sop): (Opcode, Opcode) = if step == 4 { (IOp::Lw.into(), IOp::Sw.into()) } else { (IOp::Lbu.into(), IOp::Sb.into()) };
         let base_reg = self.materialize(sb, so);
         for at in (0..size).step_by(usize::try_from(step).unwrap_or(1)) {
             let d = self.xr();

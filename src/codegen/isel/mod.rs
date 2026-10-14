@@ -23,7 +23,8 @@ use super::mir::{Base, MBlock, MInst, MOp, R};
 use super::Error;
 use crate::isa::Ext;
 use crate::ir::{Block as IBlock, Const, Function, IPred, Inst, Kind, Module, Op, Target, Ty, Types, ValId};
-use crate::isa::Op as IOp;
+use crate::feature::{Float, M, Zmmul};
+use crate::isa::{Opcode, Rv32i as IOp, Table};
 use regalloc2::{Block, RegClass, VReg};
 use std::collections::HashMap;
 
@@ -261,7 +262,8 @@ impl<'m> Isel<'m> {
 
     /// `op rd, a, b`，rd 是新整数寄存器。
     /// `op rd, a, b`。M / Zmmul 没开（feature）的乘除改调 compiler-rt（同 llc 的 libcall 降级）。
-    fn rr(&mut self, op: IOp, a: R, b: R) -> R {
+    fn rr(&mut self, op: impl Into<Opcode>, a: R, b: R) -> R {
+        let op: Opcode = op.into();
         if !op.enabled() {
             return self.soft_muldiv(op, a, b);
         }
@@ -271,18 +273,18 @@ impl<'m> Isel<'m> {
     }
 
     /// 没有 M / Zmmul 时的乘除：`mul` / `div*` / `rem*` 各一个 libcall；`mulh*` 把两边扩成 64 位调 `__muldi3` 取高半。
-    fn soft_muldiv(&mut self, op: IOp, a: R, b: R) -> R {
+    fn soft_muldiv(&mut self, op: Opcode, a: R, b: R) -> R {
         let x = |r: R| (vec![r], vec![Part::X]);
         let call = |s: &mut Self, name: &str, args: &[(Vec<R>, Vec<Part>)], ret: &[Part]| s.libcall(name, args, ret).expect("纯整数部件的 libcall 不会失败");
         let name = match op {
-            IOp::Mul => "__mulsi3",
-            IOp::Div => "__divsi3",
-            IOp::Divu => "__udivsi3",
-            IOp::Rem => "__modsi3",
-            IOp::Remu => "__umodsi3",
-            IOp::Mulh | IOp::Mulhu | IOp::Mulhsu => {
+            Opcode::Zmmul(Zmmul::Mul) => "__mulsi3",
+            Opcode::M(M::Div) => "__divsi3",
+            Opcode::M(M::Divu) => "__udivsi3",
+            Opcode::M(M::Rem) => "__modsi3",
+            Opcode::M(M::Remu) => "__umodsi3",
+            Opcode::Zmmul(z) => {
                 let hi = |s: &mut Self, r: R, signed: bool| if signed { s.ri(IOp::Srai, r, 31) } else { R::ZERO };
-                let (ah, bh) = (hi(self, a, op != IOp::Mulhu), hi(self, b, op == IOp::Mulh));
+                let (ah, bh) = (hi(self, a, z != Zmmul::Mulhu), hi(self, b, z == Zmmul::Mulh));
                 let pair = vec![Part::Lo, Part::Hi];
                 return call(self, "__muldi3", &[(vec![a, ah], pair.clone()), (vec![b, bh], pair.clone())], &pair)[1];
             }
@@ -359,7 +361,7 @@ impl<'m> Isel<'m> {
                 .map(|p| match p {
                     Part::F => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(IOp::FmvWX, 7), vec![d], vec![R::ZERO]);
+                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![R::ZERO]);
                         d
                     }
                     _ => R::ZERO,
@@ -372,7 +374,7 @@ impl<'m> Isel<'m> {
             (Const::Float(bits), Kind::Float) => {
                 let x = self.li(*bits as u32 as i32);
                 let d = self.fr();
-                self.emit(MOp::Reg(IOp::FmvWX, 7), vec![d], vec![x]);
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![x]);
                 vec![d]
             }
             (Const::Float(bits), Kind::Double) => vec![self.li(*bits as u32 as i32), self.li((*bits >> 32) as u32 as i32)],
@@ -633,7 +635,7 @@ impl<'m> Isel<'m> {
         args.fixed_defs.truncate(n);
         self.push(args);
         for (d, part, off) in loads {
-            let op = if part == Part::F { IOp::Flw } else { IOp::Lw };
+            let op = if part == Part::F { Opcode::from(Float::Flw) } else { Opcode::from(IOp::Lw) };
             self.emit(MOp::Load(op, Base::Incoming, off), vec![d], Vec::new());
         }
         if self.f.varargs {

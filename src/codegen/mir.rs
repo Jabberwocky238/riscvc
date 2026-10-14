@@ -1,6 +1,6 @@
 //! 机器 IR：一条 = 一条（或一小段固定的）RV32IMF 指令，寄存器是虚拟寄存器或固定的物理寄存器；
 //! 实现 regalloc2 的 `Function`。
-use crate::isa::Op as IOp;
+use crate::isa::{Opcode, Rv32i as IOp};
 use regalloc2::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
 
 /// 一个寄存器引用：虚拟寄存器（交给 regalloc2），或不参与分配的物理寄存器（`zero` / `sp`）。
@@ -31,7 +31,7 @@ pub enum Base {
 #[derive(Clone, Debug, PartialEq)]
 pub enum MOp {
     /// `op rd, rs1, rs2`（R 型、浮点 R / R4 型、比较、转换：按 isa 的格式取寄存器个数）。舍入模式在 `rm`。
-    Reg(IOp, u8),
+    Reg(Opcode, u8),
     /// `op rd, rs1, imm`
     Imm(IOp, i32),
     /// `li rd, imm`（32 位常数，展开同汇编器）
@@ -41,9 +41,9 @@ pub enum MOp {
     /// 取栈帧对象 / 入参区的地址：`addi rd, sp, 偏移`
     Addr(Base, i32),
     /// `op rd, 偏移(基址)`；基址是寄存器时它是最后一个 use。
-    Load(IOp, Base, i32),
+    Load(Opcode, Base, i32),
     /// `op rs, 偏移(基址)`；值是第一个 use，寄存器基址是第二个。
-    Store(IOp, Base, i32),
+    Store(Opcode, Base, i32),
     /// 函数入口：定义各参数（固定寄存器）。
     Args,
     /// 调用：直接调用（符号）或间接（最后一个 use 是目标地址）。

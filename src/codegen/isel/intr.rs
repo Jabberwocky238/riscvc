@@ -2,7 +2,8 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{IPred, Intr, Kind, Ty, ValId};
-use crate::isa::{Ext, Op as IOp, Rm};
+use crate::feature::{Zmmul, Float};
+use crate::isa::{Ext, Opcode, Rv32i as IOp, Rm};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
@@ -27,7 +28,7 @@ impl Isel<'_> {
         let t = self.ri(IOp::Srli, v, 4);
         let v = self.rr(IOp::Add, v, t);
         let v = self.rr(IOp::And, v, k0f);
-        let v = self.rr(IOp::Mul, v, k01);
+        let v = self.rr(Zmmul::Mul, v, k01);
         self.ri(IOp::Srli, v, 24)
     }
 
@@ -249,8 +250,8 @@ impl Isel<'_> {
                     }
                     Intr::USubOv => (self.rr(IOp::Sub, a, b), self.rr(IOp::Sltu, a, b)),
                     Intr::UMulOv => {
-                        let p = self.rr(IOp::Mul, a, b);
-                        let h = self.rr(IOp::Mulhu, a, b);
+                        let p = self.rr(Zmmul::Mul, a, b);
+                        let h = self.rr(Zmmul::Mulhu, a, b);
                         let ovf = if w == 32 {
                             h
                         } else {
@@ -260,10 +261,10 @@ impl Isel<'_> {
                         (p, self.rr(IOp::Sltu, R::ZERO, ovf))
                     }
                     _ => {
-                        let op = match i {
-                            Intr::SAddOv => IOp::Add,
-                            Intr::SSubOv => IOp::Sub,
-                            _ => IOp::Mul,
+                        let op: Opcode = match i {
+                            Intr::SAddOv => IOp::Add.into(),
+                            Intr::SSubOv => IOp::Sub.into(),
+                            _ => Zmmul::Mul.into(),
                         };
                         let s = self.rr(op, a, b);
                         let ovf = if w == 32 {
@@ -271,7 +272,7 @@ impl Isel<'_> {
                                 Intr::SAddOv => self.sign_of_and(s, a, s, b),
                                 Intr::SSubOv => self.sign_of_and(a, b, a, s),
                                 _ => {
-                                    let h = self.rr(IOp::Mulh, a, b);
+                                    let h = self.rr(Zmmul::Mulh, a, b);
                                     let sg = self.ri(IOp::Srai, s, 31);
                                     let d = self.rr(IOp::Xor, h, sg);
                                     self.rr(IOp::Sltu, R::ZERO, d)
@@ -361,7 +362,7 @@ impl Isel<'_> {
             }
             Intr::Fabs => {
                 let x = self.get1(args[0])?;
-                vec![self.fop(IOp::FsgnjxS, vec![x, x])]
+                vec![self.fop(Float::FsgnjxS, vec![x, x])]
             }
             Intr::Copysign if first_double => {
                 let (lo, hi) = self.pair(args[0])?;
@@ -374,11 +375,11 @@ impl Isel<'_> {
             }
             Intr::Copysign => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
-                vec![self.fop(IOp::FsgnjS, vec![a, b])]
+                vec![self.fop(Float::FsgnjS, vec![a, b])]
             }
             Intr::Fma | Intr::FMulAdd if !first_double => {
                 let (a, b, c) = (self.get1(args[0])?, self.get1(args[1])?, self.get1(args[2])?);
-                vec![self.fop(IOp::FmaddS, vec![a, b, c])]
+                vec![self.fop(Float::FmaddS, vec![a, b, c])]
             }
             Intr::Fma => {
                 let ps = args.iter().map(|a| Ok((self.get(*a)?, PAIR.to_vec()))).collect::<Result<Vec<_>, Error>>()?;
@@ -392,11 +393,11 @@ impl Isel<'_> {
             }
             Intr::Sqrt if !first_double => {
                 let x = self.get1(args[0])?;
-                vec![self.fop(IOp::FsqrtS, vec![x])]
+                vec![self.fop(Float::FsqrtS, vec![x])]
             }
             Intr::MinNum | Intr::MaxNum if !first_double => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
-                vec![self.fop(if *i == Intr::MinNum { IOp::FminS } else { IOp::FmaxS }, vec![a, b])]
+                vec![self.fop(if *i == Intr::MinNum { Float::FminS } else { Float::FmaxS }, vec![a, b])]
             }
             Intr::Sqrt | Intr::MinNum | Intr::MaxNum => {
                 let name = match i {
@@ -449,7 +450,7 @@ impl Isel<'_> {
                 if let Base::Reg(r) = b {
                     uses.push(r);
                 }
-                self.emit(MOp::Store(IOp::Sw, b, o), Vec::new(), uses);
+                self.emit(MOp::Store(IOp::Sw.into(), b, o), Vec::new(), uses);
                 Vec::new()
             }
             Intr::VaCopy => {
@@ -459,13 +460,13 @@ impl Isel<'_> {
                 if let Base::Reg(r) = sb {
                     uses.push(r);
                 }
-                self.emit(MOp::Load(IOp::Lw, sb, i32::try_from(so).unwrap_or(0)), vec![v], uses);
+                self.emit(MOp::Load(IOp::Lw.into(), sb, i32::try_from(so).unwrap_or(0)), vec![v], uses);
                 let (db, doff) = self.address(args[0])?;
                 let mut uses = vec![v];
                 if let Base::Reg(r) = db {
                     uses.push(r);
                 }
-                self.emit(MOp::Store(IOp::Sw, db, i32::try_from(doff).unwrap_or(0)), Vec::new(), uses);
+                self.emit(MOp::Store(IOp::Sw.into(), db, i32::try_from(doff).unwrap_or(0)), Vec::new(), uses);
                 Vec::new()
             }
             Intr::Libm(name) => {
@@ -520,7 +521,8 @@ impl Isel<'_> {
     }
 
     /// 结果是浮点寄存器的 F 指令（舍入 dyn）。
-    fn fop(&mut self, op: IOp, uses: Vec<R>) -> R {
+    fn fop(&mut self, op: impl Into<Opcode>, uses: Vec<R>) -> R {
+        let op: Opcode = op.into();
         let d = self.fr();
         self.emit(MOp::Reg(op, Rm::Dyn as u8), vec![d], uses);
         d
@@ -534,7 +536,7 @@ impl Isel<'_> {
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));
             let x = self.get1(a)?;
             let c = self.xr();
-            self.emit(MOp::Reg(IOp::FclassS, 7), vec![c], vec![x]);
+            self.emit(MOp::Reg(Float::FclassS.into(), 7), vec![c], vec![x]);
             let t = self.ri(IOp::Andi, c, m);
             return Ok(self.rr(IOp::Sltu, R::ZERO, t));
         }

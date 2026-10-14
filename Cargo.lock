@@ -269,7 +269,17 @@ dependencies = [
  "mlirformat",
  "object",
  "regalloc2",
+ "riscvc-macros",
  "thiserror",
+]
+
+[[package]]
+name = "riscvc-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

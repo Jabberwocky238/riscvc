@@ -2,7 +2,8 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::MOp;
 use crate::ir::{BinOp, CastOp, Const, IPred, Kind, Ty, ValId};
-use crate::isa::{Inst, Op as IOp, Form};
+use crate::feature::{Zmmul, M, Float};
+use crate::isa::{Inst, Rv32i as IOp, Table, Form};
 use regalloc2::RegClass;
 
 impl Isel<'_> {
@@ -85,7 +86,7 @@ impl Isel<'_> {
             },
             BinOp::Mul => {
                 let y = self.get1(b)?;
-                let r = self.rr(IOp::Mul, x, y);
+                let r = self.rr(Zmmul::Mul, x, y);
                 self.mask(r, w)
             }
             BinOp::And => self.with_imm(IOp::And, IOp::Andi, x, b)?,
@@ -103,12 +104,12 @@ impl Isel<'_> {
             }
             BinOp::UDiv | BinOp::URem => {
                 let y = self.get1(b)?;
-                self.rr(if op == BinOp::UDiv { IOp::Divu } else { IOp::Remu }, x, y)
+                self.rr(if op == BinOp::UDiv { M::Divu } else { M::Remu }, x, y)
             }
             BinOp::SDiv | BinOp::SRem => {
                 let y = self.get1(b)?;
                 let (sx, sy) = (self.sext(x, w), self.sext(y, w));
-                let r = self.rr(if op == BinOp::SDiv { IOp::Div } else { IOp::Rem }, sx, sy);
+                let r = self.rr(if op == BinOp::SDiv { M::Div } else { M::Rem }, sx, sy);
                 self.mask(r, w)
             }
             _ => return Self::bad(format!("整数不支持 {op:?}")),
@@ -147,17 +148,17 @@ impl Isel<'_> {
                 (lo, self.rr(IOp::Sub, h, borrow))
             }
             // 没有 Zmmul：整个调 __muldi3（同 llc；拆开算的 mulhu 自己就要调它）
-            BinOp::Mul if !IOp::Mul.enabled() => {
+            BinOp::Mul if !Zmmul::Mul.enabled() => {
                 let (bl, bh) = self.pair(b)?;
                 let r = self.libcall("__muldi3", &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
                 (r[0], r[1])
             }
             BinOp::Mul => {
                 let (bl, bh) = self.pair(b)?;
-                let lo = self.rr(IOp::Mul, al, bl);
-                let h0 = self.rr(IOp::Mulhu, al, bl);
-                let h1 = self.rr(IOp::Mul, al, bh);
-                let h2 = self.rr(IOp::Mul, ah, bl);
+                let lo = self.rr(Zmmul::Mul, al, bl);
+                let h0 = self.rr(Zmmul::Mulhu, al, bl);
+                let h1 = self.rr(Zmmul::Mul, al, bh);
+                let h2 = self.rr(Zmmul::Mul, ah, bl);
                 let h = self.rr(IOp::Add, h0, h1);
                 (lo, self.rr(IOp::Add, h, h2))
             }
@@ -405,12 +406,12 @@ impl Isel<'_> {
                     (Kind::Float, _) | (_, Kind::Float) if !crate::isa::Ext::F.enabled() => x,
                     (Kind::Float, Kind::Int(32)) => {
                         let d = self.xr();
-                        self.emit(MOp::Reg(IOp::FmvXW, 7), vec![d], x);
+                        self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![d], x);
                         vec![d]
                     }
                     (Kind::Int(32), Kind::Float) => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(IOp::FmvWX, 7), vec![d], x);
+                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], x);
                         vec![d]
                     }
                     _ => x,
@@ -430,8 +431,8 @@ impl Isel<'_> {
             let float = matches!(pa, R::V(v) if v.class() == RegClass::Float);
             let (ia, ib) = if float {
                 let (x, y) = (self.xr(), self.xr());
-                self.emit(MOp::Reg(IOp::FmvXW, 7), vec![x], vec![pa]);
-                self.emit(MOp::Reg(IOp::FmvXW, 7), vec![y], vec![pb]);
+                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![x], vec![pa]);
+                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![y], vec![pb]);
                 (x, y)
             } else {
                 (pa, pb)
@@ -441,7 +442,7 @@ impl Isel<'_> {
             let r = self.rr(IOp::Xor, d, ib);
             out.push(if float {
                 let f = self.fr();
-                self.emit(MOp::Reg(IOp::FmvWX, 7), vec![f], vec![r]);
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![f], vec![r]);
                 f
             } else {
                 r

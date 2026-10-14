@@ -8,7 +8,8 @@
 use super::abi::Abi;
 use super::isel::Selected;
 use super::mir::{Base, MFunc, MInst, MOp, R};
-use crate::isa::{F, Form, Op as IOp, Rm, X};
+use crate::feature::{Float};
+use crate::isa::{F, Form, Opcode, Rv32i as IOp, Table, Rm, X};
 use core::fmt::Write;
 use regalloc2::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
 
@@ -110,7 +111,8 @@ impl<'a> Emitter<'a> {
     }
 
     /// `op reg, off(base)`；偏移放不进 12 位就借 t6 算地址。
-    fn mem(&mut self, op: IOp, reg: &str, base: &str, off: i32) {
+    fn mem(&mut self, op: impl Into<Opcode>, reg: &str, base: &str, off: i32) {
+        let op: Opcode = op.into();
         if (-2048..2048).contains(&off) {
             self.line(&format!("{op}\t{reg}, {off}({base})"));
         } else {
@@ -161,7 +163,7 @@ impl<'a> Emitter<'a> {
     fn prologue(&mut self) {
         self.adjust_sp(-self.size);
         for (p, off) in self.saves.clone() {
-            let op = if p.class() == RegClass::Int { IOp::Sw } else { IOp::Fsw };
+            let op = if p.class() == RegClass::Int { Opcode::from(IOp::Sw) } else { Opcode::from(Float::Fsw) };
             self.mem(op, &Self::reg(p), "sp", off);
         }
         if let Some(first) = self.sel.varargs {
@@ -180,7 +182,7 @@ impl<'a> Emitter<'a> {
             self.addr("sp", "s0", -self.size);
         }
         for (p, off) in self.saves.clone() {
-            let op = if p.class() == RegClass::Int { IOp::Lw } else { IOp::Flw };
+            let op = if p.class() == RegClass::Int { Opcode::from(IOp::Lw) } else { Opcode::from(Float::Flw) };
             self.mem(op, &Self::reg(p), "sp", off);
         }
         self.adjust_sp(self.size);
@@ -197,11 +199,11 @@ impl<'a> Emitter<'a> {
             }
             (None, Some(b), Some(s), _) => {
                 let (base, off) = self.frame_ref(self.spill_base + 4 * i32::try_from(s.index()).unwrap_or(0));
-                self.mem(if b.class() == RegClass::Int { IOp::Lw } else { IOp::Flw }, &Self::reg(b), base, off);
+                self.mem(if b.class() == RegClass::Int { Opcode::from(IOp::Lw) } else { Opcode::from(Float::Flw) }, &Self::reg(b), base, off);
             }
             (Some(a), None, _, Some(s)) => {
                 let (base, off) = self.frame_ref(self.spill_base + 4 * i32::try_from(s.index()).unwrap_or(0));
-                self.mem(if a.class() == RegClass::Int { IOp::Sw } else { IOp::Fsw }, &Self::reg(a), base, off);
+                self.mem(if a.class() == RegClass::Int { Opcode::from(IOp::Sw) } else { Opcode::from(Float::Fsw) }, &Self::reg(a), base, off);
             }
             _ => self.line(&format!("# 不认识的搬运 {e:?}")),
         }

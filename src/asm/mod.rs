@@ -120,8 +120,8 @@ pub struct Symbol {
 /// 汇编器状态。
 pub struct Assembler<'e> {
     opts: Options,
-    /// 扩展指令（[`crate::ext::Extension::assemble`]）：助记符先问它们，不认再走标准表。
-    exts: &'e [&'e dyn crate::ext::Extension],
+    /// 扩展指令（[`crate::ext::Extension::assemble`]）：给的在前、内置的（M / Zmmul / F / Zicsr）在后；助记符先问它们，不认再走 RV32I。
+    exts: Vec<&'e dyn crate::ext::Extension>,
     pub sections: Vec<Section>,
     cur: usize,
     prev: usize,
@@ -151,10 +151,12 @@ pub struct Assembler<'e> {
 }
 
 impl<'e> Assembler<'e> {
-    /// 挂上扩展指令（借用）。
+    /// 挂上扩展指令（借用），排在内置扩展前面。
     #[must_use]
-    pub fn extensions(self, exts: &'e [&'e dyn crate::ext::Extension]) -> Self {
-        Self { exts, ..self }
+    pub fn extensions(self, exts: &[&'e dyn crate::ext::Extension]) -> Self {
+        let mut all = exts.to_vec();
+        all.extend(crate::ext::builtin());
+        Self { exts: all, ..self }
     }
 }
 
@@ -173,12 +175,12 @@ impl expr::Names for Assembler<'_> {
     }
 }
 
-impl Assembler<'_> {
+impl<'e> Assembler<'e> {
     #[must_use]
     pub fn new(opts: Options) -> Self {
         let mut asm = Self {
             opts,
-            exts: &[],
+            exts: crate::ext::builtin(),
             sections: Vec::new(),
             cur: 0,
             prev: 0,
@@ -381,8 +383,8 @@ impl Assembler<'_> {
 
     /// 编一条指令（字段已齐）。没开的扩展的指令（含伪指令展开出来的）报错。
     fn emit(&mut self, i: riscv::Inst) -> Result<(), Error> {
-        if !i.op.enabled() {
-            return Err(Error::Syntax(format!("`{}` 要 {:?} 扩展（feature 没开）", i.op, i.op.ext())));
+        if !crate::isa::Table::enabled(&i.op) {
+            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（feature 没开）", i.op, crate::isa::Table::ext(&i.op))));
         }
         self.bytes(&u32::from(i).to_le_bytes())
     }

@@ -3,7 +3,8 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::MOp;
 use crate::ir::{BinOp, CastOp, FPred, Kind, Ty, ValId};
-use crate::isa::{Op as IOp, Rm};
+use crate::feature::{Float};
+use crate::isa::{Opcode, Rv32i as IOp, Rm};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
@@ -13,14 +14,16 @@ impl Isel<'_> {
     }
 
     /// `op fd, a, b`（F 扩展）。
-    fn ff(&mut self, op: IOp, a: R, b: R, rm: Rm) -> R {
+    fn ff(&mut self, op: impl Into<Opcode>, a: R, b: R, rm: Rm) -> R {
+        let op: Opcode = op.into();
         let d = self.fr();
         self.emit(MOp::Reg(op, rm as u8), vec![d], vec![a, b]);
         d
     }
 
     /// 结果是整数的浮点指令（比较、`fclass`、`fcvt.w.s` …）。
-    fn fx(&mut self, op: IOp, uses: Vec<R>, rm: Rm) -> R {
+    fn fx(&mut self, op: impl Into<Opcode>, uses: Vec<R>, rm: Rm) -> R {
+        let op: Opcode = op.into();
         let d = self.xr();
         self.emit(MOp::Reg(op, rm as u8), vec![d], uses);
         d
@@ -45,10 +48,10 @@ impl Isel<'_> {
         }
         let (x, y) = (self.get1(a)?, self.get1(b)?);
         let iop = match op {
-            BinOp::FAdd => IOp::FaddS,
-            BinOp::FSub => IOp::FsubS,
-            BinOp::FMul => IOp::FmulS,
-            BinOp::FDiv => IOp::FdivS,
+            BinOp::FAdd => Float::FaddS,
+            BinOp::FSub => Float::FsubS,
+            BinOp::FMul => Float::FmulS,
+            BinOp::FDiv => Float::FdivS,
             BinOp::FRem => return self.libcall("fmodf", &[(vec![x], vec![Part::F]), (vec![y], vec![Part::F])], &[Part::F]),
             _ => return Self::bad(format!("float 不支持 {op:?}")),
         };
@@ -67,7 +70,7 @@ impl Isel<'_> {
             return Ok(vec![lo, self.rr(IOp::Xor, hi, sign)]);
         }
         let x = self.get1(a)?;
-        Ok(vec![self.ff(IOp::FsgnjnS, x, x, Rm::Rne)])
+        Ok(vec![self.ff(Float::FsgnjnS, x, x, Rm::Rne)])
     }
 
     /// 浮点比较 ⇒ 0 / 1。
@@ -84,41 +87,41 @@ impl Isel<'_> {
         let not = |s: &mut Self, r: R| s.ri(IOp::Xori, r, 1);
         let rne = Rm::Rne;
         Ok(match p {
-            FPred::Oeq => self.fx(IOp::FeqS, vec![x, y], rne),
-            FPred::Olt => self.fx(IOp::FltS, vec![x, y], rne),
-            FPred::Ole => self.fx(IOp::FleS, vec![x, y], rne),
-            FPred::Ogt => self.fx(IOp::FltS, vec![y, x], rne),
-            FPred::Oge => self.fx(IOp::FleS, vec![y, x], rne),
+            FPred::Oeq => self.fx(Float::FeqS, vec![x, y], rne),
+            FPred::Olt => self.fx(Float::FltS, vec![x, y], rne),
+            FPred::Ole => self.fx(Float::FleS, vec![x, y], rne),
+            FPred::Ogt => self.fx(Float::FltS, vec![y, x], rne),
+            FPred::Oge => self.fx(Float::FleS, vec![y, x], rne),
             FPred::One | FPred::Ueq => {
-                let l = self.fx(IOp::FltS, vec![x, y], rne);
-                let g = self.fx(IOp::FltS, vec![y, x], rne);
+                let l = self.fx(Float::FltS, vec![x, y], rne);
+                let g = self.fx(Float::FltS, vec![y, x], rne);
                 let one = self.rr(IOp::Or, l, g);
                 if p == FPred::One { one } else { not(self, one) }
             }
             FPred::Ord | FPred::Uno => {
-                let ea = self.fx(IOp::FeqS, vec![x, x], rne);
-                let eb = self.fx(IOp::FeqS, vec![y, y], rne);
+                let ea = self.fx(Float::FeqS, vec![x, x], rne);
+                let eb = self.fx(Float::FeqS, vec![y, y], rne);
                 let ord = self.rr(IOp::And, ea, eb);
                 if p == FPred::Ord { ord } else { not(self, ord) }
             }
             FPred::Une => {
-                let e = self.fx(IOp::FeqS, vec![x, y], rne);
+                let e = self.fx(Float::FeqS, vec![x, y], rne);
                 not(self, e)
             }
             FPred::Ugt => {
-                let t = self.fx(IOp::FleS, vec![x, y], rne);
+                let t = self.fx(Float::FleS, vec![x, y], rne);
                 not(self, t)
             }
             FPred::Uge => {
-                let t = self.fx(IOp::FltS, vec![x, y], rne);
+                let t = self.fx(Float::FltS, vec![x, y], rne);
                 not(self, t)
             }
             FPred::Ult => {
-                let t = self.fx(IOp::FleS, vec![y, x], rne);
+                let t = self.fx(Float::FleS, vec![y, x], rne);
                 not(self, t)
             }
             FPred::Ule => {
-                let t = self.fx(IOp::FltS, vec![y, x], rne);
+                let t = self.fx(Float::FltS, vec![y, x], rne);
                 not(self, t)
             }
             FPred::False | FPred::True => unreachable!(),
@@ -175,7 +178,7 @@ impl Isel<'_> {
                 let u = if signed { "" } else { "uns" };
                 match (self.soft(from), w > 32) {
                     (None, false) => {
-                        let r = self.fx(if signed { IOp::FcvtWS } else { IOp::FcvtWuS }, x, Rm::Rtz);
+                        let r = self.fx(if signed { Float::FcvtWS } else { Float::FcvtWuS }, x, Rm::Rtz);
                         vec![self.mask(r, w)]
                     }
                     (None, true) => self.libcall(&format!("__fix{u}sfdi"), &[(x, pf)], &PAIR)?,
@@ -202,7 +205,7 @@ impl Isel<'_> {
                 match (self.soft(to), w > 32) {
                     (None, false) => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(if signed { IOp::FcvtSW } else { IOp::FcvtSWu }, Rm::Dyn as u8), vec![d], src);
+                        self.emit(MOp::Reg(if signed { Float::FcvtSW } else { Float::FcvtSWu }.into(), Rm::Dyn as u8), vec![d], src);
                         vec![d]
                     }
                     (_, true) => self.libcall(&format!("__float{u}di{sfx}"), &[(src, PAIR.to_vec())], &pt)?,

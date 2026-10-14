@@ -3,7 +3,8 @@
 use super::{Error, FrameObj, Isel, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{Index, Kind, Ty, ValId};
-use crate::isa::{Ext, Form, Inst, Op as IOp};
+use crate::feature::{Zmmul, Float};
+use crate::isa::{Ext, Form, Inst, Opcode, Rv32i as IOp};
 
 /// 一个标量叶子：类型与它在聚合里的字节偏移。
 type Leaf = (Ty, u64);
@@ -83,7 +84,7 @@ impl Isel<'_> {
                 for i in 0..n {
                     let (b, o) = self.fit(base, off + i64::try_from(4 * w + i).unwrap_or(0));
                     let d = self.xr();
-                    self.emit(MOp::Load(IOp::Lbu, b, o), vec![d], Self::uses_of(b));
+                    self.emit(MOp::Load(IOp::Lbu.into(), b, o), vec![d], Self::uses_of(b));
                     let sh = if i == 0 { d } else { self.ri(IOp::Slli, d, i32::try_from(8 * i).unwrap_or(0)) };
                     acc = if i == 0 { sh } else { self.rr(IOp::Or, acc, sh) };
                 }
@@ -91,26 +92,26 @@ impl Isel<'_> {
             }
             if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
                 let d = self.fr();
-                self.emit(MOp::Reg(IOp::FmvWX, 7), vec![d], vec![words[0]]);
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![words[0]]);
                 return Ok(vec![d]);
             }
             return Ok(words);
         }
-        let one = |s: &mut Self, op: IOp, float: bool, at: i64| {
+        let one = |s: &mut Self, op: Opcode, float: bool, at: i64| {
             let (b, o) = s.fit(base, at);
             let d = if float { s.fr() } else { s.xr() };
             s.emit(MOp::Load(op, b, o), vec![d], Self::uses_of(b));
             d
         };
         Ok(match self.kind(t) {
-            Kind::Int(w) if *w <= 8 => vec![one(self, IOp::Lbu, false, off)],
-            Kind::Int(w) if *w <= 16 => vec![one(self, IOp::Lhu, false, off)],
-            Kind::Int(w) if *w <= 32 => vec![one(self, IOp::Lw, false, off)],
-            Kind::Int(_) | Kind::Double => vec![one(self, IOp::Lw, false, off), one(self, IOp::Lw, false, off + 4)],
-            Kind::Ptr => vec![one(self, IOp::Lw, false, off)],
-            Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu, false, off)],
-            Kind::Float if Ext::F.enabled() => vec![one(self, IOp::Flw, true, off)],
-            Kind::Float => vec![one(self, IOp::Lw, false, off)],
+            Kind::Int(w) if *w <= 8 => vec![one(self, IOp::Lbu.into(), false, off)],
+            Kind::Int(w) if *w <= 16 => vec![one(self, IOp::Lhu.into(), false, off)],
+            Kind::Int(w) if *w <= 32 => vec![one(self, IOp::Lw.into(), false, off)],
+            Kind::Int(_) | Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
+            Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
+            Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu.into(), false, off)],
+            Kind::Float if Ext::F.enabled() => vec![one(self, Float::Flw.into(), true, off)],
+            Kind::Float => vec![one(self, IOp::Lw.into(), false, off)],
             k => return Self::bad(format!("不能 load {k:?}")),
         })
     }
@@ -132,7 +133,7 @@ impl Isel<'_> {
     fn store_leaf(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
         let size = self.types().size(t);
         let natural = size.min(4);
-        let one = |s: &mut Self, op: IOp, v: R, at: i64| {
+        let one = |s: &mut Self, op: Opcode, v: R, at: i64| {
             let (b, o) = s.fit(base, at);
             let mut uses = vec![v];
             uses.extend(Self::uses_of(b));
@@ -141,7 +142,7 @@ impl Isel<'_> {
         if align < natural && size > 1 {
             let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
                 let x = self.xr();
-                self.emit(MOp::Reg(IOp::FmvXW, 7), vec![x], vec![parts[0]]);
+                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![x], vec![parts[0]]);
                 vec![x]
             } else {
                 parts.to_vec()
@@ -150,23 +151,23 @@ impl Isel<'_> {
                 let n = (size - 4 * w as u64).min(4);
                 for i in 0..n {
                     let v = if i == 0 { word } else { self.ri(IOp::Srli, word, i32::try_from(8 * i).unwrap_or(0)) };
-                    one(self, IOp::Sb, v, off + i64::try_from(4 * w as u64 + i).unwrap_or(0));
+                    one(self, IOp::Sb.into(), v, off + i64::try_from(4 * w as u64 + i).unwrap_or(0));
                 }
             }
             return Ok(());
         }
         match self.kind(t) {
-            Kind::Int(w) if *w <= 8 => one(self, IOp::Sb, parts[0], off),
-            Kind::Int(w) if *w <= 16 => one(self, IOp::Sh, parts[0], off),
-            Kind::Int(w) if *w <= 32 => one(self, IOp::Sw, parts[0], off),
+            Kind::Int(w) if *w <= 8 => one(self, IOp::Sb.into(), parts[0], off),
+            Kind::Int(w) if *w <= 16 => one(self, IOp::Sh.into(), parts[0], off),
+            Kind::Int(w) if *w <= 32 => one(self, IOp::Sw.into(), parts[0], off),
             Kind::Int(_) | Kind::Double => {
-                one(self, IOp::Sw, parts[0], off);
-                one(self, IOp::Sw, parts[1], off + 4);
+                one(self, IOp::Sw.into(), parts[0], off);
+                one(self, IOp::Sw.into(), parts[1], off + 4);
             }
-            Kind::Ptr => one(self, IOp::Sw, parts[0], off),
-            Kind::Half | Kind::BFloat => one(self, IOp::Sh, parts[0], off),
-            Kind::Float if Ext::F.enabled() => one(self, IOp::Fsw, parts[0], off),
-            Kind::Float => one(self, IOp::Sw, parts[0], off),
+            Kind::Ptr => one(self, IOp::Sw.into(), parts[0], off),
+            Kind::Half | Kind::BFloat => one(self, IOp::Sh.into(), parts[0], off),
+            Kind::Float if Ext::F.enabled() => one(self, Float::Fsw.into(), parts[0], off),
+            Kind::Float => one(self, IOp::Sw.into(), parts[0], off),
             k => return Self::bad(format!("不能 store {k:?}")),
         }
         Ok(())
@@ -205,7 +206,7 @@ impl Isel<'_> {
             n
         } else {
             let k = self.li(i32::try_from(size).unwrap_or(0));
-            self.rr(IOp::Mul, n, k)
+            self.rr(Zmmul::Mul, n, k)
         };
         let bytes = self.ri(IOp::Addi, bytes, 15);
         let bytes = self.ri(IOp::Andi, bytes, -16);
@@ -264,7 +265,7 @@ impl Isel<'_> {
                 s if s.is_power_of_two() => self.ri(IOp::Slli, i, i32::try_from(s.trailing_zeros()).unwrap_or(0)),
                 s => {
                     let k = self.li(i32::try_from(s).unwrap_or(0));
-                    self.rr(IOp::Mul, i, k)
+                    self.rr(Zmmul::Mul, i, k)
                 }
             };
             acc = self.rr(IOp::Add, acc, scaled);
