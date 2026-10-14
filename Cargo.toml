@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+mlirformat = { version = "0.2.1", default-features = false }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"] }
 regalloc2 = "0.15.2"
 thiserror = "2"
