@@ -624,6 +624,29 @@ impl Module {
                 }
             }
         };
+        // `dense<"0x…">`：元素按各自宽度（字节取整）小端排成的十六进制块；只有一个元素宽就是 splat
+        if let [blob] = flat.as_slice()
+            && let Some(hex) = blob.strip_prefix("\"0x").and_then(|h| h.strip_suffix('"'))
+        {
+            let bytes: Vec<u8> = (0..hex.len() / 2).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)).collect::<Result<_, _>>().map_err(|_| Error::Parse(String::from("dense 十六进制块")))?;
+            let width = |t: Ty| self.types.bits(t).unwrap_or(64).div_ceil(8) as usize;
+            let splat = leaves.first().is_some_and(|&t| bytes.len() == width(t)) && leaves.len() > 1;
+            let mut at = 0;
+            let mut consts = Vec::new();
+            for &t in &leaves {
+                let n = width(t);
+                let chunk = bytes.get(at..at + n).ok_or_else(|| Error::Parse(String::from("dense 十六进制块不够长")))?;
+                if !splat {
+                    at += n;
+                }
+                let v = chunk.iter().rev().fold(0u128, |acc, &b| acc << 8 | u128::from(b));
+                consts.push(match self.types.kind(t) {
+                    Kind::Float | Kind::Double => Const::Float(u64::try_from(v).unwrap_or(0)),
+                    _ => Const::Int(Self::mask(i128::try_from(v).unwrap_or(0), self.types.bits(t).unwrap_or(64))),
+                });
+            }
+            return Ok(self.rebuild(ty, &mut consts.into_iter()));
+        }
         let consts = if flat.len() == 1 {
             leaves.iter().map(|&t| elem(flat[0], t, self)).collect::<Result<Vec<_>, _>>()?
         } else {

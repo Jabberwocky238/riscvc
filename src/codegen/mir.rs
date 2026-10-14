@@ -131,9 +131,44 @@ pub struct MFunc {
 }
 
 impl MFunc {
-    /// 从各块组装：补前驱、平铺指令、算操作数。
+    /// 删死代码：没有副作用、定义的虚拟寄存器没人用的指令（反复做到不再变）。
+    fn dce(blocks: &mut [MBlock], vregs: usize) {
+        loop {
+            let mut used = vec![false; vregs];
+            for b in blocks.iter() {
+                for i in &b.insts {
+                    for r in &i.uses {
+                        if let R::V(v) = r {
+                            used[v.vreg()] = true;
+                        }
+                    }
+                }
+                for v in b.args.iter().flatten() {
+                    used[v.vreg()] = true;
+                }
+            }
+            let mut changed = false;
+            for b in blocks.iter_mut() {
+                let before = b.insts.len();
+                b.insts.retain(|i| {
+                    let pure = matches!(i.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..));
+                    !pure || i.defs.iter().any(|r| match r {
+                        R::V(v) => used[v.vreg()],
+                        R::P(_) => true,
+                    })
+                });
+                changed |= b.insts.len() != before;
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// 从各块组装：删死代码、补前驱、平铺指令、算操作数。
     #[must_use]
     pub fn new(mut blocks: Vec<MBlock>, vregs: usize) -> Self {
+        Self::dce(&mut blocks, vregs);
         for b in &mut blocks {
             b.preds.clear();
         }

@@ -2,26 +2,42 @@
 use super::Error;
 use super::lex::{Tok, Toks};
 
-/// `%hi(…)` 这类修饰符。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Modifier {
-    Hi,
-    Lo,
-    PcrelHi,
-    PcrelLo,
+/// `名字` ⇒ 修饰符枚举 + `TryFrom<&str>`。
+macro_rules! modifiers {
+    ($($v:ident $name:literal,)*) => {
+        /// `%hi(…)` 这类修饰符（同 llvm-mc 的 RISC-V specifier）。
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Modifier { $($v),* }
+
+        impl TryFrom<&str> for Modifier {
+            type Error = Error;
+            fn try_from(s: &str) -> Result<Self, Error> {
+                match s {
+                    $($name => Ok(Self::$v),)*
+                    _ => Err(Error::Syntax(format!("不认识的修饰符 `%{s}`"))),
+                }
+            }
+        }
+    };
 }
 
-impl TryFrom<&str> for Modifier {
-    type Error = Error;
-    fn try_from(s: &str) -> Result<Self, Error> {
-        match s {
-            "hi" => Ok(Self::Hi),
-            "lo" => Ok(Self::Lo),
-            "pcrel_hi" => Ok(Self::PcrelHi),
-            "pcrel_lo" => Ok(Self::PcrelLo),
-            _ => Err(Error::Syntax(format!("不认识的修饰符 `%{s}`"))),
-        }
-    }
+modifiers! {
+    Hi "hi",
+    Lo "lo",
+    PcrelHi "pcrel_hi",
+    PcrelLo "pcrel_lo",
+    GotPcrelHi "got_pcrel_hi",
+    TprelHi "tprel_hi",
+    TprelLo "tprel_lo",
+    TprelAdd "tprel_add",
+    TlsIePcrelHi "tls_ie_pcrel_hi",
+    TlsGdPcrelHi "tls_gd_pcrel_hi",
+    TlsdescHi "tlsdesc_hi",
+    TlsdescLoadLo "tlsdesc_load_lo",
+    TlsdescAddLo "tlsdesc_add_lo",
+    TlsdescCall "tlsdesc_call",
+    Pltpcrel "pltpcrel",
+    Gotpcrel "gotpcrel",
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# 端到端 fixture（入库）⇒ tests/fixtures/：
+#   unit/<名>.c、<名>.<档>.{ll,mlir}：compiler-rt 的 builtins 单元测试（有 main、自检，过了返回 0），O0 / O2
+#   builtins/<名>.O2.{ll,mlir}：被测的 compiler-rt builtins（同 tools/corpus.sh 的编法）
+#   support.o：两边共用的桩（tests/support/support.c，clang -O2）
+# 只留 riscv32 上真有 main 的；⛔ udivmodti4（128 位，范围外，且 16 MB）不要。
+# 对拍见 tests/elf_vs_llvm.rs。用法：tools/programs.sh [LLVM bin 目录]（缺省 ../llvm-project/build/bin）
+set -euo pipefail
+cd "$(dirname "$0")/.."
+BIN=${1:-../llvm-project/build/bin}
+CRT=../llvm-project/compiler-rt
+OUT=tests/fixtures
+rm -rf "$OUT/unit" "$OUT/builtins"
+mkdir -p "$OUT/unit" "$OUT/builtins"
+BASE="--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -I $CRT/lib/builtins"
+mlir() { "$BIN/mlir-translate" --import-llvm "$1" 2>/dev/null | "$BIN/mlir-opt" --mlir-print-op-generic -o "$2"; }
+unit() {
+  f=$1; b=$(basename "$f" .c)
+  [ "$b" = udivmodti4_test ] && return
+  "$BIN/clang" $BASE -fno-builtin -isystem tests/support/include -O2 -S -emit-llvm "$f" -o "$OUT/unit/$b.O2.ll" 2>/dev/null || { rm -f "$OUT/unit/$b.O2.ll"; return; }
+  grep -q 'define[^@]*@main(' "$OUT/unit/$b.O2.ll" || { rm -f "$OUT/unit/$b.O2.ll"; return; }
+  cp "$f" "$OUT/unit/"
+  "$BIN/clang" $BASE -fno-builtin -isystem tests/support/include -O0 -S -emit-llvm "$f" -o "$OUT/unit/$b.O0.ll"
+  for o in O0 O2; do mlir "$OUT/unit/$b.$o.ll" "$OUT/unit/$b.$o.mlir"; done
+}
+builtin() {
+  f=$1; b=$(basename "$f" .c)
+  "$BIN/clang" $BASE -O2 -S -emit-llvm "$f" -o "$OUT/builtins/$b.O2.ll" 2>/dev/null || { rm -f "$OUT/builtins/$b.O2.ll"; return; }
+  mlir "$OUT/builtins/$b.O2.ll" "$OUT/builtins/$b.O2.mlir" 2>/dev/null || rm -f "$OUT/builtins/$b.O2.ll" "$OUT/builtins/$b.O2.mlir"
+}
+export -f unit builtin mlir; export BIN OUT BASE
+ls $CRT/test/builtins/Unit/*_test.c | xargs -P "$(nproc)" -I{} bash -c 'unit {}'
+ls $CRT/lib/builtins/*.c | xargs -P "$(nproc)" -I{} bash -c 'builtin {}'
+"$BIN/clang" $BASE -fno-builtin -isystem tests/support/include -O2 -c tests/support/support.c -o "$OUT/support.o"
+echo "unit: $(ls $OUT/unit/*.c | wc -l) 个程序  builtins: $(ls $OUT/builtins/*.mlir | wc -l)  $(du -sh $OUT | cut -f1)"

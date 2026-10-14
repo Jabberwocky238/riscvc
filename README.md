@@ -57,8 +57,19 @@ cargo test
 
 ```bash
 tools/corpus.sh          # compiler-rt builtins ⇒ target/corpus/{s,ll,mlir}（要对照用的 LLVM：../llvm-project/build/bin）
+tools/programs.sh        # 重新生成 tests/fixtures/{unit,builtins,support.o}（入库）
+tools/fixtures.py        # 重新生成 tests/fixtures/mc（入库）
 cargo test --release     # 没有语料或 LLVM 的测试说 SKIP 并照过
 ```
+
+入库的 fixture（`tests/fixtures/`，取自 llvm-project）：
+
+| 目录 | 内容 | 对拍 |
+| --- | --- | --- |
+| `unit/` | compiler-rt builtins 单元测试 163 个（C 源 + O0 / O2 的 `.ll` / `.mlir`，有 main、自检） | `tests/elf_vs_llvm.rs`：llc + ld.lld 与 riscvc llc + riscvc ld 各链一个 ELF，解释器里从 main 跑，比返回值 |
+| `builtins/` | 被测的 compiler-rt builtins（O2 的 `.ll` / `.mlir`），两边各编各的 | 同上 |
+| `support.o` | 两边共用的最小 libc 桩（`tests/support/`） | — |
+| `mc/` | `llvm/test/MC/RISCV`、`lld/test/ELF/riscv-*` 里 llvm-mc 在 rv32imf 上接受的部分（范围外的先注释掉） | `tests/as_vs_llvm.rs`：与 llvm-mc 的目标文件逐节、逐重定位比 |
 
 ## 状态（2026-10-14）
 
@@ -69,6 +80,8 @@ cargo test --release     # 没有语料或 LLVM 的测试说 SKIP 并照过
 | 链接器 | compiler-rt 167 个目标文件 × docc 的两种脚本，与 ld.lld 的可装载节、入口、全局符号全同；libdope `LoadedElf` 接受 |
 | MLIR 解析 | 334 份通用形式 `.mlir` 全部解析、转成内部 IR |
 | 代码生成 | 334 份全部编过；O0 / O2 各 97 个标量签名的函数、各 4656 次调用，与 llc 的结果全同（C 源里的未定义行为不比） |
+| 端到端 ELF | builtins 单元测试 163 个：O2 160 个、O0 161 个与 llvm 一致；差的是 fp128 常量（`powitf2` / `powixf2`）与 `atomic_test` O2 的块次序 |
+| MC fixture | 281 份里 172 份与 llvm-mc 一致；差的是 TLS / GOT / PLT 重定位、`.reloc`、`.fill` / `.org` / `.uleb128` / `.if*`、`.insn`、寄存器名作符号、`li` 的 `addi + slli` 序列等 |
 
 未做：linker relaxation；返回值放不进寄存器（sret 降级）、栈上传参的被测覆盖、`cmpxchg`、i128、向量运算；
 代码质量（窥孔、跳转表、常量复用）还没和 llc 比过；没上过板。

@@ -36,6 +36,8 @@ pub enum Form {
     Fence,
     /// 没有操作数
     Fixed,
+    /// `rs1, rs2`（`sfence.vma`）
+    Sfence,
     /// `fd, fs1, fs2`
     FR,
     /// `fd, fs1, fs2[, rm]`
@@ -70,6 +72,7 @@ impl Form {
             Self::R4 => 0x0600_007f,
             Self::Fence => 0xf00f_ffff,
             Self::Fixed => 0xffff_ffff,
+            Self::Sfence => 0xfe00_7fff,
         }
     }
 
@@ -152,6 +155,8 @@ ops! {
     Mret "mret" Fixed 0x3020_0073,
     Sret "sret" Fixed 0x1020_0073,
     Wfi "wfi" Fixed 0x1050_0073,
+    Dret "dret" Fixed 0x7b20_0073,
+    SfenceVma "sfence.vma" Sfence 0x1200_0073,
     Csrrw "csrrw" Csr 0x1073,
     Csrrs "csrrs" Csr 0x2073,
     Csrrc "csrrc" Csr 0x3073,
@@ -273,7 +278,7 @@ impl From<Inst> for u32 {
         let (rd, rs1, rs2, rs3) = (u32::from(i.rd), u32::from(i.rs1), u32::from(i.rs2), u32::from(i.rs3));
         let regs = match form {
             Form::U | Form::J => rd << 7,
-            Form::Branch | Form::Store | Form::FStore => rs1 << 15 | rs2 << 20,
+            Form::Branch | Form::Store | Form::FStore | Form::Sfence => rs1 << 15 | rs2 << 20,
             Form::Jalr | Form::Load | Form::FLoad | Form::Imm | Form::Shift | Form::FToX | Form::XToF => rd << 7 | rs1 << 15,
             Form::R | Form::FR | Form::FCmp | Form::FRrm => rd << 7 | rs1 << 15 | rs2 << 20,
             Form::FR1rm | Form::FCvtXF | Form::FCvtFX => rd << 7 | rs1 << 15,
@@ -386,6 +391,7 @@ impl Inst {
             Form::CsrI => format!("{}, {}, {}", x(rd), Csr(self.csr), s.imm(i32::from(rs1))),
             Form::Fence => format!("{}, {}", Style::fence(self.imm >> 4), Style::fence(self.imm & 0xf)),
             Form::Fixed => String::new(),
+            Form::Sfence => format!("{}, {}", x(rs1), x(rs2)),
             Form::FR => format!("{}, {}, {}", f(rd), f(rs1), f(rs2)),
             Form::FRrm => format!("{}, {}, {}{}", f(rd), f(rs1), f(rs2), self.rm_suffix(s)),
             Form::FR1rm => format!("{}, {}{}", f(rd), f(rs1), self.rm_suffix(s)),
@@ -477,6 +483,11 @@ impl Inst {
                 "zext.b"
             }
             (Op::Fence, _, _, _, 0xff) => "fence",
+            (Op::SfenceVma, _, 0, 0, _) => "sfence.vma",
+            (Op::SfenceVma, _, _, 0, _) => {
+                out = x(rs1);
+                "sfence.vma"
+            }
             (Op::FsgnjS | Op::FsgnjnS | Op::FsgnjxS, ..) if rs1 == rs2 => {
                 let _ = write!(out, "{}, {}", f(rd), f(rs1));
                 match self.op {

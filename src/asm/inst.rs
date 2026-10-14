@@ -223,6 +223,9 @@ impl Assembler {
             }
             (Form::Fence, [E(p), E(s)]) => self.emit(i.with_imm(Self::fence_set(p)? << 4 | Self::fence_set(s)?))?,
             (Form::Fixed, []) => self.emit(i)?,
+            (Form::Sfence, []) => self.emit(i)?,
+            (Form::Sfence, [Opnd::X(a)]) => self.emit(i.x(0, a.0, 0))?,
+            (Form::Sfence, [Opnd::X(a), Opnd::X(b)]) => self.emit(i.x(0, a.0, b.0))?,
             (Form::FR, [Opnd::F(rd), Opnd::F(a), Opnd::F(b)]) => self.emit(i.x(rd.0, a.0, b.0))?,
             (Form::FRrm, [Opnd::F(rd), Opnd::F(a), Opnd::F(b), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, b.0) })?,
             (Form::FR1rm, [Opnd::F(rd), Opnd::F(a), rm @ ..]) => self.emit(Inst { rm: Self::rm(rm)?, ..i.x(rd.0, a.0, 0) })?,

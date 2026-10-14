@@ -1,5 +1,6 @@
-//! 汇编器 vs `llvm-mc -filetype=obj`：`target/corpus/s/*.s`（`tools/corpus.sh` 出的 compiler-rt 语料）逐份比
-//! 各节字节、重定位（目标归一成「全局名」或「节 + 偏移」）、全局符号。没有语料 / LLVM 就 SKIP。
+//! 汇编器 vs `llvm-mc -filetype=obj`：逐份比各节字节、重定位（目标归一成「全局名」或「节 + 偏移」）、全局符号。
+//! 语料：`target/corpus/s`（`tools/corpus.sh`，compiler-rt）、`tests/fixtures/mc`（入库，`tools/fixtures.py` 从 LLVM 自带的
+//! MC / lld fixture 生成）。没有语料 / LLVM 就 SKIP。
 mod llvm;
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
 use std::collections::BTreeMap;
@@ -61,22 +62,21 @@ impl Norm {
     }
 }
 
-#[test]
-fn compiler_rt_corpus() {
+fn corpus(sub: &str, how: &str) {
     let Some(llvm) = llvm::Llvm::locate() else { return };
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/corpus/s");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(sub);
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        eprintln!("SKIP：没有语料（先跑 tools/corpus.sh）");
+        eprintln!("SKIP：没有语料（先跑 {how}）");
         return;
     };
     let mut files: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
     files.sort();
     let (mut bad, mut n) = (0, 0);
-    let out = std::env::temp_dir().join(format!("riscvc-as-{}.o", std::process::id()));
+    let out = std::env::temp_dir().join(format!("riscvc-as-{}-{}.o", std::process::id(), sub.replace('/', "-")));
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
         let (_, err) = llvm.run("llvm-mc", &["-triple=riscv32", "-mattr=+m,+f,+zicsr,-relax", "-target-abi=ilp32f", "-filetype=obj", f.to_str().unwrap(), "-o", out.to_str().unwrap()], "");
-        assert!(err.is_empty(), "{}: llvm-mc: {err}", f.display());
+        assert!(!err.contains("error:"), "{}: llvm-mc: {err}", f.display());
         let theirs = Norm::of(&std::fs::read(&out).unwrap());
         n += 1;
         let ours = match riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&text) {
@@ -115,4 +115,14 @@ fn compiler_rt_corpus() {
     std::fs::remove_file(&out).ok();
     eprintln!("{} / {n} 份一致", n - bad);
     assert_eq!(bad, 0);
+}
+
+#[test]
+fn compiler_rt_corpus() {
+    corpus("target/corpus/s", "tools/corpus.sh");
+}
+
+#[test]
+fn llvm_fixtures() {
+    corpus("tests/fixtures/mc", "tools/fixtures.py");
 }

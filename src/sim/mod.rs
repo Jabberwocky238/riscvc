@@ -233,8 +233,8 @@ impl Cpu {
                 (a, b) => (a % b).cast_unsigned(),
             }),
             Op::Remu => self.set(i.rd, if rs2 == 0 { rs1 } else { rs1 % rs2 }),
-            Op::Fence | Op::FenceTso | Op::FenceI | Op::Wfi => {}
-            Op::Ecall | Op::Ebreak | Op::Mret | Op::Sret => return Err(Stop::Trap(w)),
+            Op::Fence | Op::FenceTso | Op::FenceI | Op::Wfi | Op::SfenceVma => {}
+            Op::Ecall | Op::Ebreak | Op::Mret | Op::Sret | Op::Dret => return Err(Stop::Trap(w)),
             Op::Csrrw | Op::Csrrs | Op::Csrrc | Op::Csrrwi | Op::Csrrsi | Op::Csrrci => {
                 if i.op == Op::Csrrw && i.csr == 0xc00 && i.rd == 0 && i.rs1 == 0 {
                     return Err(Stop::Trap(w)); // unimp

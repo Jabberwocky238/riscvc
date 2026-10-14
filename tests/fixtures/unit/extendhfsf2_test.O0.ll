@@ -1,0 +1,344 @@
+; ModuleID = '../llvm-project/compiler-rt/test/builtins/Unit/extendhfsf2_test.c'
+source_filename = "../llvm-project/compiler-rt/test/builtins/Unit/extendhfsf2_test.c"
+target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
+target triple = "riscv32-unknown-unknown-elf"
+
+@.str = private unnamed_addr constant [53 x i8] c"error in test__extendhfsf2(%#.4x) = %f, expected %f\0A\00", align 1
+@assumption_1 = dso_local global [1 x i8] zeroinitializer, align 1
+
+; Function Attrs: noinline nounwind optnone
+define dso_local i32 @test__extendhfsf2(i16 noundef zeroext %a, i32 noundef %expected) #0 {
+entry:
+  %a.addr = alloca i16, align 2
+  %expected.addr = alloca i32, align 4
+  %x = alloca float, align 4
+  %ret = alloca i32, align 4
+  store i16 %a, ptr %a.addr, align 2
+  store i32 %expected, ptr %expected.addr, align 4
+  %0 = load i16, ptr %a.addr, align 2
+  %call = call float @__extendhfsf2(i16 noundef zeroext %0) #2
+  store float %call, ptr %x, align 4
+  %1 = load float, ptr %x, align 4
+  %2 = load i32, ptr %expected.addr, align 4
+  %call1 = call i32 @compareResultF(float noundef %1, i32 noundef %2) #2
+  store i32 %call1, ptr %ret, align 4
+  %3 = load i32, ptr %ret, align 4
+  %tobool = icmp ne i32 %3, 0
+  br i1 %tobool, label %if.then, label %if.end
+
+if.then:                                          ; preds = %entry
+  %4 = load i16, ptr %a.addr, align 2
+  %call2 = call zeroext i16 @toRep16(i16 noundef zeroext %4) #2
+  %conv = zext i16 %call2 to i32
+  %5 = load float, ptr %x, align 4
+  %conv3 = fpext float %5 to double
+  %6 = load i32, ptr %expected.addr, align 4
+  %call4 = call float @fromRep32(i32 noundef %6) #2
+  %conv5 = fpext float %call4 to double
+  %call6 = call i32 (ptr, ...) @printf(ptr noundef @.str, i32 noundef %conv, double noundef %conv3, double noundef %conv5) #2
+  br label %if.end
+
+if.end:                                           ; preds = %if.then, %entry
+  %7 = load i32, ptr %ret, align 4
+  ret i32 %7
+}
+
+declare dso_local float @__extendhfsf2(i16 noundef zeroext) #1
+
+; Function Attrs: noinline nounwind optnone
+define internal i32 @compareResultF(float noundef %result, i32 noundef %expected) #0 {
+entry:
+  %retval = alloca i32, align 4
+  %result.addr = alloca float, align 4
+  %expected.addr = alloca i32, align 4
+  %rep = alloca i32, align 4
+  store float %result, ptr %result.addr, align 4
+  store i32 %expected, ptr %expected.addr, align 4
+  %0 = load float, ptr %result.addr, align 4
+  %call = call i32 @toRep32(float noundef %0) #2
+  store i32 %call, ptr %rep, align 4
+  %1 = load i32, ptr %rep, align 4
+  %2 = load i32, ptr %expected.addr, align 4
+  %cmp = icmp eq i32 %1, %2
+  br i1 %cmp, label %if.then, label %if.else
+
+if.then:                                          ; preds = %entry
+  store i32 0, ptr %retval, align 4
+  br label %return
+
+if.else:                                          ; preds = %entry
+  %3 = load i32, ptr %expected.addr, align 4
+  %cmp1 = icmp eq i32 %3, 2143289344
+  br i1 %cmp1, label %if.then2, label %if.end7
+
+if.then2:                                         ; preds = %if.else
+  %4 = load i32, ptr %rep, align 4
+  %and = and i32 %4, 2139095040
+  %cmp3 = icmp eq i32 %and, 2139095040
+  br i1 %cmp3, label %land.lhs.true, label %if.end
+
+land.lhs.true:                                    ; preds = %if.then2
+  %5 = load i32, ptr %rep, align 4
+  %and4 = and i32 %5, 8388607
+  %cmp5 = icmp ugt i32 %and4, 0
+  br i1 %cmp5, label %if.then6, label %if.end
+
+if.then6:                                         ; preds = %land.lhs.true
+  store i32 0, ptr %retval, align 4
+  br label %return
+
+if.end:                                           ; preds = %land.lhs.true, %if.then2
+  br label %if.end7
+
+if.end7:                                          ; preds = %if.end, %if.else
+  br label %if.end8
+
+if.end8:                                          ; preds = %if.end7
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+return:                                           ; preds = %if.end8, %if.then6, %if.then
+  %6 = load i32, ptr %retval, align 4
+  ret i32 %6
+}
+
+declare dso_local i32 @printf(ptr noundef, ...) #1
+
+; Function Attrs: noinline nounwind optnone
+define internal zeroext i16 @toRep16(i16 noundef zeroext %x) #0 {
+entry:
+  %x.addr = alloca i16, align 2
+  store i16 %x, ptr %x.addr, align 2
+  %0 = load i16, ptr %x.addr, align 2
+  ret i16 %0
+}
+
+; Function Attrs: noinline nounwind optnone
+define internal float @fromRep32(i32 noundef %x) #0 {
+entry:
+  %x.addr = alloca i32, align 4
+  %ret = alloca float, align 4
+  store i32 %x, ptr %x.addr, align 4
+  %call = call ptr @memcpy(ptr noundef %ret, ptr noundef %x.addr, i32 noundef 4) #2
+  %0 = load float, ptr %ret, align 4
+  ret float %0
+}
+
+; Function Attrs: noinline nounwind optnone
+define dso_local i32 @main() #0 {
+entry:
+  %retval = alloca i32, align 4
+  %call = call zeroext i16 @fromRep16(i16 noundef zeroext 32256) #2
+  %call1 = call i32 @test__extendhfsf2(i16 noundef zeroext %call, i32 noundef 2143289344) #2
+  %tobool = icmp ne i32 %call1, 0
+  br i1 %tobool, label %if.then, label %if.end
+
+if.then:                                          ; preds = %entry
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end:                                           ; preds = %entry
+  %call2 = call zeroext i16 @fromRep16(i16 noundef zeroext 32640) #2
+  %call3 = call i32 @test__extendhfsf2(i16 noundef zeroext %call2, i32 noundef 2146435072) #2
+  %tobool4 = icmp ne i32 %call3, 0
+  br i1 %tobool4, label %if.then5, label %if.end6
+
+if.then5:                                         ; preds = %if.end
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end6:                                          ; preds = %if.end
+  %call7 = call zeroext i16 @fromRep16(i16 noundef zeroext 31744) #2
+  %call8 = call i32 @test__extendhfsf2(i16 noundef zeroext %call7, i32 noundef 2139095040) #2
+  %tobool9 = icmp ne i32 %call8, 0
+  br i1 %tobool9, label %if.then10, label %if.end11
+
+if.then10:                                        ; preds = %if.end6
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end11:                                         ; preds = %if.end6
+  %call12 = call zeroext i16 @fromRep16(i16 noundef zeroext -1024) #2
+  %call13 = call i32 @test__extendhfsf2(i16 noundef zeroext %call12, i32 noundef -8388608) #2
+  %tobool14 = icmp ne i32 %call13, 0
+  br i1 %tobool14, label %if.then15, label %if.end16
+
+if.then15:                                        ; preds = %if.end11
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end16:                                         ; preds = %if.end11
+  %call17 = call zeroext i16 @fromRep16(i16 noundef zeroext 0) #2
+  %call18 = call i32 @test__extendhfsf2(i16 noundef zeroext %call17, i32 noundef 0) #2
+  %tobool19 = icmp ne i32 %call18, 0
+  br i1 %tobool19, label %if.then20, label %if.end21
+
+if.then20:                                        ; preds = %if.end16
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end21:                                         ; preds = %if.end16
+  %call22 = call zeroext i16 @fromRep16(i16 noundef zeroext -32768) #2
+  %call23 = call i32 @test__extendhfsf2(i16 noundef zeroext %call22, i32 noundef -2147483648) #2
+  %tobool24 = icmp ne i32 %call23, 0
+  br i1 %tobool24, label %if.then25, label %if.end26
+
+if.then25:                                        ; preds = %if.end21
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end26:                                         ; preds = %if.end21
+  %call27 = call zeroext i16 @fromRep16(i16 noundef zeroext 16968) #2
+  %call28 = call i32 @test__extendhfsf2(i16 noundef zeroext %call27, i32 noundef 1078525952) #2
+  %tobool29 = icmp ne i32 %call28, 0
+  br i1 %tobool29, label %if.then30, label %if.end31
+
+if.then30:                                        ; preds = %if.end26
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end31:                                         ; preds = %if.end26
+  %call32 = call zeroext i16 @fromRep16(i16 noundef zeroext -15800) #2
+  %call33 = call i32 @test__extendhfsf2(i16 noundef zeroext %call32, i32 noundef -1068957696) #2
+  %tobool34 = icmp ne i32 %call33, 0
+  br i1 %tobool34, label %if.then35, label %if.end36
+
+if.then35:                                        ; preds = %if.end31
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end36:                                         ; preds = %if.end31
+  %call37 = call zeroext i16 @fromRep16(i16 noundef zeroext 28258) #2
+  %call38 = call i32 @test__extendhfsf2(i16 noundef zeroext %call37, i32 noundef 1171013632) #2
+  %tobool39 = icmp ne i32 %call38, 0
+  br i1 %tobool39, label %if.then40, label %if.end41
+
+if.then40:                                        ; preds = %if.end36
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end41:                                         ; preds = %if.end36
+  %call42 = call zeroext i16 @fromRep16(i16 noundef zeroext 15360) #2
+  %call43 = call i32 @test__extendhfsf2(i16 noundef zeroext %call42, i32 noundef 1065353216) #2
+  %tobool44 = icmp ne i32 %call43, 0
+  br i1 %tobool44, label %if.then45, label %if.end46
+
+if.then45:                                        ; preds = %if.end41
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end46:                                         ; preds = %if.end41
+  %call47 = call zeroext i16 @fromRep16(i16 noundef zeroext 1024) #2
+  %call48 = call i32 @test__extendhfsf2(i16 noundef zeroext %call47, i32 noundef 947912704) #2
+  %tobool49 = icmp ne i32 %call48, 0
+  br i1 %tobool49, label %if.then50, label %if.end51
+
+if.then50:                                        ; preds = %if.end46
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end51:                                         ; preds = %if.end46
+  %call52 = call zeroext i16 @fromRep16(i16 noundef zeroext 16) #2
+  %call53 = call i32 @test__extendhfsf2(i16 noundef zeroext %call52, i32 noundef 897581056) #2
+  %tobool54 = icmp ne i32 %call53, 0
+  br i1 %tobool54, label %if.then55, label %if.end56
+
+if.then55:                                        ; preds = %if.end51
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end56:                                         ; preds = %if.end51
+  %call57 = call zeroext i16 @fromRep16(i16 noundef zeroext 1) #2
+  %call58 = call i32 @test__extendhfsf2(i16 noundef zeroext %call57, i32 noundef 864026624) #2
+  %tobool59 = icmp ne i32 %call58, 0
+  br i1 %tobool59, label %if.then60, label %if.end61
+
+if.then60:                                        ; preds = %if.end56
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end61:                                         ; preds = %if.end56
+  %call62 = call zeroext i16 @fromRep16(i16 noundef zeroext -32767) #2
+  %call63 = call i32 @test__extendhfsf2(i16 noundef zeroext %call62, i32 noundef -1283457024) #2
+  %tobool64 = icmp ne i32 %call63, 0
+  br i1 %tobool64, label %if.then65, label %if.end66
+
+if.then65:                                        ; preds = %if.end61
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end66:                                         ; preds = %if.end61
+  %call67 = call zeroext i16 @fromRep16(i16 noundef zeroext 1) #2
+  %call68 = call i32 @test__extendhfsf2(i16 noundef zeroext %call67, i32 noundef 864026624) #2
+  %tobool69 = icmp ne i32 %call68, 0
+  br i1 %tobool69, label %if.then70, label %if.end71
+
+if.then70:                                        ; preds = %if.end66
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end71:                                         ; preds = %if.end66
+  %call72 = call zeroext i16 @fromRep16(i16 noundef zeroext 31743) #2
+  %call73 = call i32 @test__extendhfsf2(i16 noundef zeroext %call72, i32 noundef 1199562752) #2
+  %tobool74 = icmp ne i32 %call73, 0
+  br i1 %tobool74, label %if.then75, label %if.end76
+
+if.then75:                                        ; preds = %if.end71
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end76:                                         ; preds = %if.end71
+  %call77 = call zeroext i16 @fromRep16(i16 noundef zeroext 31743) #2
+  %call78 = call i32 @test__extendhfsf2(i16 noundef zeroext %call77, i32 noundef 1199562752) #2
+  %tobool79 = icmp ne i32 %call78, 0
+  br i1 %tobool79, label %if.then80, label %if.end81
+
+if.then80:                                        ; preds = %if.end76
+  store i32 1, ptr %retval, align 4
+  br label %return
+
+if.end81:                                         ; preds = %if.end76
+  store i32 0, ptr %retval, align 4
+  br label %return
+
+return:                                           ; preds = %if.end81, %if.then80, %if.then75, %if.then70, %if.then65, %if.then60, %if.then55, %if.then50, %if.then45, %if.then40, %if.then35, %if.then30, %if.then25, %if.then20, %if.then15, %if.then10, %if.then5, %if.then
+  %0 = load i32, ptr %retval, align 4
+  ret i32 %0
+}
+
+; Function Attrs: noinline nounwind optnone
+define internal zeroext i16 @fromRep16(i16 noundef zeroext %x) #0 {
+entry:
+  %x.addr = alloca i16, align 2
+  store i16 %x, ptr %x.addr, align 2
+  %0 = load i16, ptr %x.addr, align 2
+  ret i16 %0
+}
+
+; Function Attrs: noinline nounwind optnone
+define internal i32 @toRep32(float noundef %x) #0 {
+entry:
+  %x.addr = alloca float, align 4
+  %ret = alloca i32, align 4
+  store float %x, ptr %x.addr, align 4
+  %call = call ptr @memcpy(ptr noundef %ret, ptr noundef %x.addr, i32 noundef 4) #2
+  %0 = load i32, ptr %ret, align 4
+  ret i32 %0
+}
+
+declare dso_local ptr @memcpy(ptr noundef, ptr noundef, i32 noundef) #1
+
+attributes #0 = { noinline nounwind optnone "frame-pointer"="all" "no-builtins" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="generic-rv32" "target-features"="+32bit,+f,+i,+m,+zicsr,+zmmul,-a,-b,-c,-d,-e,-experimental-p,-experimental-smpmpmt,-experimental-svukte,-experimental-xrivosvisni,-experimental-xrivosvizip,-experimental-xsfmclic,-experimental-xsfsclic,-experimental-zibi,-experimental-zicfilp,-experimental-zicfiss,-experimental-zvbc32e,-experimental-zvfbfa,-experimental-zvfofp8min,-experimental-zvkgs,-experimental-zvqdotq,-h,-q,-relax,-sdext,-sdtrig,-sha,-shcounterenw,-shgatpa,-shlcofideleg,-shtvala,-shvsatpa,-shvstvala,-shvstvecd,-smaia,-smcdeleg,-smcntrpmf,-smcsrind,-smctr,-smdbltrp,-smepmp,-smmpm,-smnpm,-smrnmi,-smstateen,-ssaia,-ssccfg,-ssccptr,-sscofpmf,-sscounterenw,-sscsrind,-ssctr,-ssdbltrp,-ssnpm,-sspm,-ssqosid,-ssstateen,-ssstrict,-sstc,-sstvala,-sstvecd,-ssu64xl,-supm,-svade,-svadu,-svbare,-svinval,-svnapot,-svpbmt,-svvptc,-v,-xandesbfhcvt,-xandesperf,-xandesvbfhcvt,-xandesvdot,-xandesvpackfph,-xandesvsinth,-xandesvsintload,-xcalculet,-xcvalu,-xcvbi,-xcvbitmanip,-xcvelw,-xcvmac,-xcvmem,-xcvsimd,-xmipscbop,-xmipscmov,-xmipsexectl,-xmipslsp,-xqccmp,-xqci,-xqcia,-xqciac,-xqcibi,-xqcibm,-xqcicli,-xqcicm,-xqcics,-xqcicsr,-xqciint,-xqciio,-xqcilb,-xqcili,-xqcilia,-xqcilo,-xqcilsm,-xqcisim,-xqcisls,-xqcisync,-xsfcease,-xsfmm128t,-xsfmm16t,-xsfmm32a16f,-xsfmm32a32f,-xsfmm32a8f,-xsfmm32a8i,-xsfmm32t,-xsfmm64a64f,-xsfmm64t,-xsfmmbase,-xsfvcp,-xsfvfbfexp16e,-xsfvfexp16e,-xsfvfexp32e,-xsfvfexpa,-xsfvfexpa64e,-xsfvfnrclipxfqf,-xsfvfwmaccqqq,-xsfvqmaccdod,-xsfvqmaccqoq,-xsifivecdiscarddlone,-xsifivecflushdlone,-xsmtvdot,-xtheadba,-xtheadbb,-xtheadbs,-xtheadcmo,-xtheadcondmov,-xtheadfmemidx,-xtheadmac,-xtheadmemidx,-xtheadmempair,-xtheadsync,-xtheadvdot,-xventanacondops,-xwchc,-za128rs,-za64rs,-zaamo,-zabha,-zacas,-zalasr,-zalrsc,-zama16b,-zawrs,-zba,-zbb,-zbc,-zbkb,-zbkc,-zbkx,-zbs,-zca,-zcb,-zcd,-zce,-zcf,-zclsd,-zcmop,-zcmp,-zcmt,-zdinx,-zfa,-zfbfmin,-zfh,-zfhmin,-zfinx,-zhinx,-zhinxmin,-zic64b,-zicbom,-zicbop,-zicboz,-ziccamoa,-ziccamoc,-ziccif,-zicclsm,-ziccrse,-zicntr,-zicond,-zifencei,-zihintntl,-zihintpause,-zihpm,-zilsd,-zimop,-zk,-zkn,-zknd,-zkne,-zknh,-zkr,-zks,-zksed,-zksh,-zkt,-ztso,-zvbb,-zvbc,-zve32f,-zve32x,-zve64d,-zve64f,-zve64x,-zvfbfmin,-zvfbfwma,-zvfh,-zvfhmin,-zvkb,-zvkg,-zvkn,-zvknc,-zvkned,-zvkng,-zvknha,-zvknhb,-zvks,-zvksc,-zvksed,-zvksg,-zvksh,-zvkt,-zvl1024b,-zvl128b,-zvl16384b,-zvl2048b,-zvl256b,-zvl32768b,-zvl32b,-zvl4096b,-zvl512b,-zvl64b,-zvl65536b,-zvl8192b" }
+attributes #1 = { "frame-pointer"="all" "no-builtins" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="generic-rv32" "target-features"="+32bit,+f,+i,+m,+zicsr,+zmmul,-a,-b,-c,-d,-e,-experimental-p,-experimental-smpmpmt,-experimental-svukte,-experimental-xrivosvisni,-experimental-xrivosvizip,-experimental-xsfmclic,-experimental-xsfsclic,-experimental-zibi,-experimental-zicfilp,-experimental-zicfiss,-experimental-zvbc32e,-experimental-zvfbfa,-experimental-zvfofp8min,-experimental-zvkgs,-experimental-zvqdotq,-h,-q,-relax,-sdext,-sdtrig,-sha,-shcounterenw,-shgatpa,-shlcofideleg,-shtvala,-shvsatpa,-shvstvala,-shvstvecd,-smaia,-smcdeleg,-smcntrpmf,-smcsrind,-smctr,-smdbltrp,-smepmp,-smmpm,-smnpm,-smrnmi,-smstateen,-ssaia,-ssccfg,-ssccptr,-sscofpmf,-sscounterenw,-sscsrind,-ssctr,-ssdbltrp,-ssnpm,-sspm,-ssqosid,-ssstateen,-ssstrict,-sstc,-sstvala,-sstvecd,-ssu64xl,-supm,-svade,-svadu,-svbare,-svinval,-svnapot,-svpbmt,-svvptc,-v,-xandesbfhcvt,-xandesperf,-xandesvbfhcvt,-xandesvdot,-xandesvpackfph,-xandesvsinth,-xandesvsintload,-xcalculet,-xcvalu,-xcvbi,-xcvbitmanip,-xcvelw,-xcvmac,-xcvmem,-xcvsimd,-xmipscbop,-xmipscmov,-xmipsexectl,-xmipslsp,-xqccmp,-xqci,-xqcia,-xqciac,-xqcibi,-xqcibm,-xqcicli,-xqcicm,-xqcics,-xqcicsr,-xqciint,-xqciio,-xqcilb,-xqcili,-xqcilia,-xqcilo,-xqcilsm,-xqcisim,-xqcisls,-xqcisync,-xsfcease,-xsfmm128t,-xsfmm16t,-xsfmm32a16f,-xsfmm32a32f,-xsfmm32a8f,-xsfmm32a8i,-xsfmm32t,-xsfmm64a64f,-xsfmm64t,-xsfmmbase,-xsfvcp,-xsfvfbfexp16e,-xsfvfexp16e,-xsfvfexp32e,-xsfvfexpa,-xsfvfexpa64e,-xsfvfnrclipxfqf,-xsfvfwmaccqqq,-xsfvqmaccdod,-xsfvqmaccqoq,-xsifivecdiscarddlone,-xsifivecflushdlone,-xsmtvdot,-xtheadba,-xtheadbb,-xtheadbs,-xtheadcmo,-xtheadcondmov,-xtheadfmemidx,-xtheadmac,-xtheadmemidx,-xtheadmempair,-xtheadsync,-xtheadvdot,-xventanacondops,-xwchc,-za128rs,-za64rs,-zaamo,-zabha,-zacas,-zalasr,-zalrsc,-zama16b,-zawrs,-zba,-zbb,-zbc,-zbkb,-zbkc,-zbkx,-zbs,-zca,-zcb,-zcd,-zce,-zcf,-zclsd,-zcmop,-zcmp,-zcmt,-zdinx,-zfa,-zfbfmin,-zfh,-zfhmin,-zfinx,-zhinx,-zhinxmin,-zic64b,-zicbom,-zicbop,-zicboz,-ziccamoa,-ziccamoc,-ziccif,-zicclsm,-ziccrse,-zicntr,-zicond,-zifencei,-zihintntl,-zihintpause,-zihpm,-zilsd,-zimop,-zk,-zkn,-zknd,-zkne,-zknh,-zkr,-zks,-zksed,-zksh,-zkt,-ztso,-zvbb,-zvbc,-zve32f,-zve32x,-zve64d,-zve64f,-zve64x,-zvfbfmin,-zvfbfwma,-zvfh,-zvfhmin,-zvkb,-zvkg,-zvkn,-zvknc,-zvkned,-zvkng,-zvknha,-zvknhb,-zvks,-zvksc,-zvksed,-zvksg,-zvksh,-zvkt,-zvl1024b,-zvl128b,-zvl16384b,-zvl2048b,-zvl256b,-zvl32768b,-zvl32b,-zvl4096b,-zvl512b,-zvl64b,-zvl65536b,-zvl8192b" }
+attributes #2 = { nobuiltin "no-builtins" }
+
+!llvm.module.flags = !{!0, !1, !2, !4, !5}
+!llvm.ident = !{!6}
+
+!0 = !{i32 1, !"wchar_size", i32 4}
+!1 = !{i32 1, !"target-abi", !"ilp32f"}
+!2 = !{i32 6, !"riscv-isa", !3}
+!3 = !{!"rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0"}
+!4 = !{i32 7, !"frame-pointer", i32 2}
+!5 = !{i32 8, !"SmallDataLimit", i32 0}
+!6 = !{!"clang version 22.1.8"}
