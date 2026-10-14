@@ -1,4 +1,4 @@
-//! 浮点：`float` 用 F 扩展；`double` 没有硬件（FLEN = 32），全走 compiler-rt 的软浮点。
+//! 浮点：`float` 用 F 扩展（`f` feature 没开就同 double 走软浮点）；`double` 没有硬件（FLEN = 32），全走 compiler-rt。
 //! 比较的软化同 LLVM 的 `softenSetCCOperands`：无序版本借有序函数对 NaN 的返回值。
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::MOp;
@@ -28,17 +28,17 @@ impl Isel<'_> {
 
     pub(super) fn fbinary(&mut self, op: BinOp, a: ValId, b: ValId) -> Result<Vec<R>, Error> {
         let t = self.ty(a);
-        if self.double(t) {
+        if let Some(sfx) = self.soft(t) {
             let name = match op {
-                BinOp::FAdd => "__adddf3",
-                BinOp::FSub => "__subdf3",
-                BinOp::FMul => "__muldf3",
-                BinOp::FDiv => "__divdf3",
-                BinOp::FRem => "fmod",
-                _ => return Self::bad(format!("double 不支持 {op:?}")),
+                BinOp::FAdd => format!("__add{sfx}3"),
+                BinOp::FSub => format!("__sub{sfx}3"),
+                BinOp::FMul => format!("__mul{sfx}3"),
+                BinOp::FDiv => format!("__div{sfx}3"),
+                BinOp::FRem => String::from(if sfx == "df" { "fmod" } else { "fmodf" }),
+                _ => return Self::bad(format!("软浮点不支持 {op:?}")),
             };
-            let (x, y) = (self.get(a)?, self.get(b)?);
-            return self.libcall(name, &[(x, PAIR.to_vec()), (y, PAIR.to_vec())], &PAIR);
+            let (x, y, ps) = (self.get(a)?, self.get(b)?, self.parts(t)?);
+            return self.libcall(&name, &[(x, ps.clone()), (y, ps.clone())], &ps);
         }
         if !matches!(self.kind(t), Kind::Float) {
             return Self::bad(format!("浮点运算不支持 {:?}", self.kind(t)));
@@ -56,6 +56,11 @@ impl Isel<'_> {
     }
 
     pub(super) fn fneg(&mut self, a: ValId) -> Result<Vec<R>, Error> {
+        if self.soft(self.ty(a)) == Some("sf") {
+            let x = self.get1(a)?;
+            let sign = self.li(i32::MIN);
+            return Ok(vec![self.rr(IOp::Xor, x, sign)]);
+        }
         if self.double(self.ty(a)) {
             let (lo, hi) = self.pair(a)?;
             let sign = self.li(i32::MIN);
@@ -72,8 +77,8 @@ impl Isel<'_> {
             FPred::True => return Ok(self.li(1)),
             _ => {}
         }
-        if self.double(self.ty(a)) {
-            return self.fcmp_double(p, a, b);
+        if let Some(sfx) = self.soft(self.ty(a)) {
+            return self.fcmp_soft(sfx, p, a, b);
         }
         let (x, y) = (self.get1(a)?, self.get1(b)?);
         let not = |s: &mut Self, r: R| s.ri(IOp::Xori, r, 1);
@@ -120,26 +125,26 @@ impl Isel<'_> {
         })
     }
 
-    /// double 比较：一个库函数的返回值与 0 比（`ueq` / `one` 要两个）。
-    fn fcmp_double(&mut self, p: FPred, a: ValId, b: ValId) -> Result<R, Error> {
-        let (x, y) = (self.get(a)?, self.get(b)?);
-        let call = |s: &mut Self, name: &str| -> Result<R, Error> { Ok(s.libcall(name, &[(x.clone(), PAIR.to_vec()), (y.clone(), PAIR.to_vec())], &[Part::X])?[0]) };
+    /// 软浮点比较：一个库函数（`__eq{sfx}2` …）的返回值与 0 比（`ueq` / `one` 要两个）。
+    fn fcmp_soft(&mut self, sfx: &str, p: FPred, a: ValId, b: ValId) -> Result<R, Error> {
+        let (x, y, ps) = (self.get(a)?, self.get(b)?, self.parts(self.ty(a))?);
+        let call = |s: &mut Self, name: &str| -> Result<R, Error> { Ok(s.libcall(&format!("__{name}{sfx}2"), &[(x.clone(), ps.clone()), (y.clone(), ps.clone())], &[Part::X])?[0]) };
         let (name, cmp) = match p {
-            FPred::Oeq => ("__eqdf2", IPredSoft::Eq),
-            FPred::Une => ("__nedf2", IPredSoft::Ne),
-            FPred::Olt => ("__ltdf2", IPredSoft::Lt),
-            FPred::Ole => ("__ledf2", IPredSoft::Le),
-            FPred::Ogt => ("__gtdf2", IPredSoft::Gt),
-            FPred::Oge => ("__gedf2", IPredSoft::Ge),
-            FPred::Uno => ("__unorddf2", IPredSoft::Ne),
-            FPred::Ord => ("__unorddf2", IPredSoft::Eq),
-            FPred::Ult => ("__gedf2", IPredSoft::Lt),
-            FPred::Ule => ("__gtdf2", IPredSoft::Le),
-            FPred::Ugt => ("__ledf2", IPredSoft::Gt),
-            FPred::Uge => ("__ltdf2", IPredSoft::Ge),
+            FPred::Oeq => ("eq", IPredSoft::Eq),
+            FPred::Une => ("ne", IPredSoft::Ne),
+            FPred::Olt => ("lt", IPredSoft::Lt),
+            FPred::Ole => ("le", IPredSoft::Le),
+            FPred::Ogt => ("gt", IPredSoft::Gt),
+            FPred::Oge => ("ge", IPredSoft::Ge),
+            FPred::Uno => ("unord", IPredSoft::Ne),
+            FPred::Ord => ("unord", IPredSoft::Eq),
+            FPred::Ult => ("ge", IPredSoft::Lt),
+            FPred::Ule => ("gt", IPredSoft::Le),
+            FPred::Ugt => ("le", IPredSoft::Gt),
+            FPred::Uge => ("lt", IPredSoft::Ge),
             FPred::Ueq | FPred::One => {
-                let e = call(self, "__eqdf2")?;
-                let u = call(self, "__unorddf2")?;
+                let e = call(self, "eq")?;
+                let u = call(self, "unord")?;
                 let (e, u) = (IPredSoft::Eq.test(self, e), IPredSoft::Ne.test(self, u));
                 return Ok(if p == FPred::Ueq {
                     self.rr(IOp::Or, e, u)
@@ -155,28 +160,30 @@ impl Isel<'_> {
         Ok(cmp.test(self, r))
     }
 
-    /// 与浮点相关的转换。
+    /// 与浮点相关的转换。软浮点（double；F 没开时 float）调 compiler-rt，名字的后缀按两边的类型拼。
     pub(super) fn fcast(&mut self, op: CastOp, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
         let from = self.ty(a);
         let x = self.get(a)?;
         let wbits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
+        let (pf, pt) = (self.parts(from)?, self.parts(to)?);
         Ok(match op {
-            CastOp::FpTrunc if self.double(from) && matches!(self.kind(to), Kind::Float) => self.libcall("__truncdfsf2", &[(x, PAIR.to_vec())], &[Part::F])?,
-            CastOp::FpExt if matches!(self.kind(from), Kind::Float) && self.double(to) => self.libcall("__extendsfdf2", &[(x, vec![Part::F])], &PAIR)?,
+            CastOp::FpTrunc if self.double(from) && matches!(self.kind(to), Kind::Float) => self.libcall("__truncdfsf2", &[(x, pf)], &pt)?,
+            CastOp::FpExt if matches!(self.kind(from), Kind::Float) && self.double(to) => self.libcall("__extendsfdf2", &[(x, pf)], &pt)?,
             CastOp::FpToSi | CastOp::FpToUi => {
                 let signed = op == CastOp::FpToSi;
                 let w = wbits(self, to);
-                match (self.double(from), w > 32) {
-                    (false, false) => {
+                let u = if signed { "" } else { "uns" };
+                match (self.soft(from), w > 32) {
+                    (None, false) => {
                         let r = self.fx(if signed { IOp::FcvtWS } else { IOp::FcvtWuS }, x, Rm::Rtz);
                         vec![self.mask(r, w)]
                     }
-                    (false, true) => self.libcall(if signed { "__fixsfdi" } else { "__fixunssfdi" }, &[(x, vec![Part::F])], &PAIR)?,
-                    (true, false) => {
-                        let r = self.libcall(if signed { "__fixdfsi" } else { "__fixunsdfsi" }, &[(x, PAIR.to_vec())], &[Part::X])?;
+                    (None, true) => self.libcall(&format!("__fix{u}sfdi"), &[(x, pf)], &PAIR)?,
+                    (Some(sfx), false) => {
+                        let r = self.libcall(&format!("__fix{u}{sfx}si"), &[(x, pf)], &[Part::X])?;
                         vec![self.mask(r[0], w)]
                     }
-                    (true, true) => self.libcall(if signed { "__fixdfdi" } else { "__fixunsdfdi" }, &[(x, PAIR.to_vec())], &PAIR)?,
+                    (Some(sfx), true) => self.libcall(&format!("__fix{u}{sfx}di"), &[(x, pf)], &PAIR)?,
                 }
             }
             CastOp::SiToFp | CastOp::UiToFp => {
@@ -190,15 +197,16 @@ impl Isel<'_> {
                 } else {
                     vec![x[0]]
                 };
-                match (self.double(to), w > 32) {
-                    (false, false) => {
+                let u = if signed { "" } else { "un" };
+                let sfx = self.soft(to).unwrap_or("sf");
+                match (self.soft(to), w > 32) {
+                    (None, false) => {
                         let d = self.fr();
                         self.emit(MOp::Reg(if signed { IOp::FcvtSW } else { IOp::FcvtSWu }, Rm::Dyn as u8), vec![d], src);
                         vec![d]
                     }
-                    (false, true) => self.libcall(if signed { "__floatdisf" } else { "__floatundisf" }, &[(src, PAIR.to_vec())], &[Part::F])?,
-                    (true, false) => self.libcall(if signed { "__floatsidf" } else { "__floatunsidf" }, &[(src, vec![Part::X])], &PAIR)?,
-                    (true, true) => self.libcall(if signed { "__floatdidf" } else { "__floatundidf" }, &[(src, PAIR.to_vec())], &PAIR)?,
+                    (_, true) => self.libcall(&format!("__float{u}di{sfx}"), &[(src, PAIR.to_vec())], &pt)?,
+                    (Some(_), false) => self.libcall(&format!("__float{u}si{sfx}"), &[(src, vec![Part::X])], &pt)?,
                 }
             }
             _ => return Self::bad(format!("不支持的转换 {op:?}：{:?} ⇒ {:?}", self.kind(from), self.kind(to))),

@@ -2,7 +2,7 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{IPred, Intr, Kind, Ty, ValId};
-use crate::isa::{Op as IOp, Rm};
+use crate::isa::{Ext, Op as IOp, Rm};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
@@ -94,6 +94,8 @@ impl Isel<'_> {
     #[allow(clippy::too_many_lines, reason = "一个 intrinsic 一支")]
     pub(super) fn intrinsic(&mut self, i: &Intr, args: &[ValId], rt: Option<Ty>) -> Result<Vec<R>, Error> {
         let first_double = args.first().is_some_and(|a| matches!(self.kind(self.ty(*a)), Kind::Double));
+        // F 没开时的 float：一个整数部件，按位做 / 调 libm
+        let soft_float = args.first().is_some_and(|a| self.soft(self.ty(*a)) == Some("sf"));
         Ok(match i {
             Intr::Nop | Intr::VaEnd => Vec::new(),
             Intr::Expect => self.get(args[0])?,
@@ -320,6 +322,38 @@ impl Isel<'_> {
                     }
                 }
             }
+            Intr::Fabs if soft_float => {
+                let x = self.get1(args[0])?;
+                let t = self.ri(IOp::Slli, x, 1);
+                vec![self.ri(IOp::Srli, t, 1)]
+            }
+            Intr::Copysign if soft_float => {
+                let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
+                let t = self.ri(IOp::Slli, a, 1);
+                let mag = self.ri(IOp::Srli, t, 1);
+                let s = self.ri(IOp::Srli, b, 31);
+                let s = self.ri(IOp::Slli, s, 31);
+                vec![self.rr(IOp::Or, mag, s)]
+            }
+            Intr::Fma | Intr::FMulAdd | Intr::Sqrt | Intr::MinNum | Intr::MaxNum if soft_float => {
+                let ps = args.iter().map(|a| Ok((self.get(*a)?, vec![Part::X]))).collect::<Result<Vec<_>, Error>>()?;
+                match i {
+                    // 软浮点下 fmuladd = 先乘后加（同 LLVM，⛔ 不是 fma）
+                    Intr::FMulAdd => {
+                        let p = self.libcall("__mulsf3", &ps[..2], &[Part::X])?;
+                        self.libcall("__addsf3", &[(p, vec![Part::X]), ps[2].clone()], &[Part::X])?
+                    }
+                    _ => {
+                        let name = match i {
+                            Intr::Fma => "fmaf",
+                            Intr::Sqrt => "sqrtf",
+                            Intr::MinNum => "fminf",
+                            _ => "fmaxf",
+                        };
+                        self.libcall(name, &ps, &[Part::X])?
+                    }
+                }
+            }
             Intr::Fabs if first_double => {
                 let (lo, hi) = self.pair(args[0])?;
                 let t = self.ri(IOp::Slli, hi, 1);
@@ -494,7 +528,7 @@ impl Isel<'_> {
 
     /// `is.fpclass`：LLVM 的类别位（0 sNaN 1 qNaN 2 −inf 3 −normal 4 −subnormal 5 −0 6 +0 7 +subnormal 8 +normal 9 +inf）。
     fn fpclass(&mut self, a: ValId, mask: u32) -> Result<R, Error> {
-        if matches!(self.kind(self.ty(a)), Kind::Float) {
+        if matches!(self.kind(self.ty(a)), Kind::Float) && Ext::F.enabled() {
             // RISC-V fclass：0 −inf 1 −normal 2 −subnormal 3 −0 4 +0 5 +subnormal 6 +normal 7 +inf 8 sNaN 9 qNaN
             const MAP: [u32; 10] = [8, 9, 0, 1, 2, 3, 4, 5, 6, 7];
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));
@@ -504,19 +538,21 @@ impl Isel<'_> {
             let t = self.ri(IOp::Andi, c, m);
             return Ok(self.rr(IOp::Sltu, R::ZERO, t));
         }
-        // double：拆位判
-        let (lo, hi) = self.pair(a)?;
+        // 拆位判：double（指数 11 位）；F 没开时的 float（指数 8 位）
+        let single = matches!(self.kind(self.ty(a)), Kind::Float);
+        let (lo, hi) = if single { (R::ZERO, self.get1(a)?) } else { self.pair(a)? };
+        let (ebits, mbits) = if single { (8, 23) } else { (11, 20) };
         let sign = self.ri(IOp::Srli, hi, 31);
         let e = self.ri(IOp::Slli, hi, 1);
-        let exp = self.ri(IOp::Srli, e, 21);
-        let mh = self.ri(IOp::Slli, hi, 12);
+        let exp = self.ri(IOp::Srli, e, 32 - ebits);
+        let mh = self.ri(IOp::Slli, hi, 32 - mbits);
         let mant = self.rr(IOp::Or, mh, lo);
         let mant_nz = self.rr(IOp::Sltu, R::ZERO, mant);
-        let max = self.li(0x7ff);
+        let max = self.li((1 << ebits) - 1);
         let dexp = self.rr(IOp::Xor, exp, max);
         let exp_max = self.ri(IOp::Sltiu, dexp, 1);
         let exp_zero = self.ri(IOp::Sltiu, exp, 1);
-        let quiet = self.ri(IOp::Srli, hi, 19);
+        let quiet = self.ri(IOp::Srli, hi, mbits - 1);
         let quiet = self.ri(IOp::Andi, quiet, 1);
         let not = |s: &mut Self, r: R| s.ri(IOp::Xori, r, 1);
         let and = |s: &mut Self, a: R, b: R| s.rr(IOp::And, a, b);

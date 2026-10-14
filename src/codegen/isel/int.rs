@@ -146,6 +146,12 @@ impl Isel<'_> {
                 let h = self.rr(IOp::Sub, ah, bh);
                 (lo, self.rr(IOp::Sub, h, borrow))
             }
+            // 没有 Zmmul：整个调 __muldi3（同 llc；拆开算的 mulhu 自己就要调它）
+            BinOp::Mul if !IOp::Mul.enabled() => {
+                let (bl, bh) = self.pair(b)?;
+                let r = self.libcall("__muldi3", &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
+                (r[0], r[1])
+            }
             BinOp::Mul => {
                 let (bl, bh) = self.pair(b)?;
                 let lo = self.rr(IOp::Mul, al, bl);
@@ -395,6 +401,8 @@ impl Isel<'_> {
             CastOp::Bitcast => {
                 let x = self.get(a)?;
                 match (self.kind(from), self.kind(to)) {
+                    // 软浮点的 float 本来就在整数寄存器里
+                    (Kind::Float, _) | (_, Kind::Float) if !crate::isa::Ext::F.enabled() => x,
                     (Kind::Float, Kind::Int(32)) => {
                         let d = self.xr();
                         self.emit(MOp::Reg(IOp::FmvXW, 7), vec![d], x);

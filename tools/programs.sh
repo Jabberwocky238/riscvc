@@ -2,7 +2,8 @@
 # 端到端 fixture（入库）⇒ tests/fixtures/：
 #   unit/<名>.c、<名>.<档>.{ll,mlir}：compiler-rt 的 builtins 单元测试（有 main、自检，过了返回 0），O0 / O2
 #   builtins/<名>.O2.{ll,mlir}：被测的 compiler-rt builtins（同 tools/corpus.sh 的编法）
-#   support.o：两边共用的桩（tests/support/support.c，clang -O2）
+#   support/<abi>/{support,mulsi3}.o：两边共用的桩（tests/support/support.c + compiler-rt 的 riscv/mulsi3.S），
+#     按调用约定各一份：ilp32f（rv32if）、ilp32（rv32i）；都不用 M（关了 m 的配置也能链）
 # 只留 riscv32 上真有 main 的；⛔ udivmodti4（128 位，范围外，且 16 MB）不要。
 # 对拍见 tests/elf_vs_llvm.rs。用法：tools/programs.sh [LLVM bin 目录]（缺省 ../llvm-project/build/bin）
 set -euo pipefail
@@ -31,5 +32,12 @@ builtin() {
 export -f unit builtin mlir; export BIN OUT BASE
 ls $CRT/test/builtins/Unit/*_test.c | xargs -P "$(nproc)" -I{} bash -c 'unit {}'
 ls $CRT/lib/builtins/*.c | xargs -P "$(nproc)" -I{} bash -c 'builtin {}'
-"$BIN/clang" $BASE -fno-builtin -isystem tests/support/include -O2 -c tests/support/support.c -o "$OUT/support.o"
+rm -rf "$OUT/support" "$OUT/support.o"
+for v in "ilp32f rv32if_zicsr" "ilp32 rv32i_zicsr"; do
+  set -- $v
+  mkdir -p "$OUT/support/$1"
+  SUP="--target=riscv32-unknown-elf -march=$2 -mabi=$1 -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -O2"
+  "$BIN/clang" $SUP -isystem tests/support/include -c tests/support/support.c -o "$OUT/support/$1/support.o"
+  "$BIN/clang" $SUP -c $CRT/lib/builtins/riscv/mulsi3.S -o "$OUT/support/$1/mulsi3.o"
+done
 echo "unit: $(ls $OUT/unit/*.c | wc -l) 个程序  builtins: $(ls $OUT/builtins/*.mlir | wc -l)  $(du -sh $OUT | cut -f1)"

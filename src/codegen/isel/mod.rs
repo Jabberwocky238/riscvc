@@ -21,6 +21,7 @@ mod mem;
 use super::abi::{Assign, Loc, Part};
 use super::mir::{Base, MBlock, MInst, MOp, R};
 use super::Error;
+use crate::isa::Ext;
 use crate::ir::{Block as IBlock, Const, Function, IPred, Inst, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::isa::Op as IOp;
 use regalloc2::{Block, RegClass, VReg};
@@ -188,6 +189,15 @@ impl<'m> Isel<'m> {
 
     // ---- 小工具 -------------------------------------------------------------------------
 
+    /// 软浮点类型：compiler-rt 函数名的后缀（`df` = double，F 没开时 `sf` = float）；硬件做的 ⇒ `None`。
+    fn soft(&self, t: Ty) -> Option<&'static str> {
+        match self.kind(t) {
+            Kind::Double => Some("df"),
+            Kind::Float if !Ext::F.enabled() => Some("sf"),
+            _ => None,
+        }
+    }
+
     fn types(&self) -> &'m Types {
         &self.m.types
     }
@@ -225,7 +235,9 @@ impl<'m> Isel<'m> {
             Kind::Int(w) if *w <= 32 => vec![Part::X],
             Kind::Int(w) if *w <= 64 => vec![Part::Lo, Part::Hi],
             Kind::Ptr | Kind::Half | Kind::BFloat => vec![Part::X],
-            Kind::Float => vec![Part::F],
+            Kind::Float if Ext::F.enabled() => vec![Part::F],
+            // 没有 F（ilp32）：float 是一个整数部件
+            Kind::Float => vec![Part::X],
             Kind::Double => vec![Part::Lo, Part::Hi],
             Kind::Array(n, e) => self.parts(*e)?.repeat(usize::try_from(*n).unwrap_or(0)),
             Kind::Vector(n, e) => self.parts(*e)?.repeat(*n as usize),
@@ -356,6 +368,7 @@ impl<'m> Isel<'m> {
             (Const::Int(v), Kind::Int(w)) if *w <= 32 => vec![self.li(*v as u32 as i32)],
             (Const::Int(v), Kind::Int(_)) => vec![self.li(*v as u32 as i32), self.li((*v >> 32) as u32 as i32)],
             (Const::Int(v), Kind::Ptr) => vec![self.li(*v as u32 as i32)],
+            (Const::Float(bits), Kind::Float) if !Ext::F.enabled() => vec![self.li(*bits as u32 as i32)],
             (Const::Float(bits), Kind::Float) => {
                 let x = self.li(*bits as u32 as i32);
                 let d = self.fr();

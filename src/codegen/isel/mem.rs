@@ -3,7 +3,7 @@
 use super::{Error, FrameObj, Isel, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{Index, Kind, Ty, ValId};
-use crate::isa::{Inst, Op as IOp, Form};
+use crate::isa::{Ext, Form, Inst, Op as IOp};
 
 /// 一个标量叶子：类型与它在聚合里的字节偏移。
 type Leaf = (Ty, u64);
@@ -89,7 +89,7 @@ impl Isel<'_> {
                 }
                 words.push(acc);
             }
-            if matches!(self.kind(t), Kind::Float) {
+            if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
                 let d = self.fr();
                 self.emit(MOp::Reg(IOp::FmvWX, 7), vec![d], vec![words[0]]);
                 return Ok(vec![d]);
@@ -109,7 +109,8 @@ impl Isel<'_> {
             Kind::Int(_) | Kind::Double => vec![one(self, IOp::Lw, false, off), one(self, IOp::Lw, false, off + 4)],
             Kind::Ptr => vec![one(self, IOp::Lw, false, off)],
             Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu, false, off)],
-            Kind::Float => vec![one(self, IOp::Flw, true, off)],
+            Kind::Float if Ext::F.enabled() => vec![one(self, IOp::Flw, true, off)],
+            Kind::Float => vec![one(self, IOp::Lw, false, off)],
             k => return Self::bad(format!("不能 load {k:?}")),
         })
     }
@@ -138,7 +139,7 @@ impl Isel<'_> {
             s.emit(MOp::Store(op, b, o), Vec::new(), uses);
         };
         if align < natural && size > 1 {
-            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) {
+            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && Ext::F.enabled() {
                 let x = self.xr();
                 self.emit(MOp::Reg(IOp::FmvXW, 7), vec![x], vec![parts[0]]);
                 vec![x]
@@ -164,7 +165,8 @@ impl Isel<'_> {
             }
             Kind::Ptr => one(self, IOp::Sw, parts[0], off),
             Kind::Half | Kind::BFloat => one(self, IOp::Sh, parts[0], off),
-            Kind::Float => one(self, IOp::Fsw, parts[0], off),
+            Kind::Float if Ext::F.enabled() => one(self, IOp::Fsw, parts[0], off),
+            Kind::Float => one(self, IOp::Sw, parts[0], off),
             k => return Self::bad(format!("不能 store {k:?}")),
         }
         Ok(())

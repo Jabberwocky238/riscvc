@@ -2,71 +2,36 @@
 name = "riscvc"
 version = "0.1.0"
 edition = "2024"
+description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
+license = "MIT"
+repository = "https://github.com/Jabberwocky238/riscvc.rs"
+readme = "README.md"
+keywords = ["riscv", "compiler", "assembler", "linker", "mlir"]
+categories = ["compilers", "development-tools"]
+# fixture（31 MB）与对照脚本不进 crates.io 的包
+exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 
-# 一个 feature = 一个编译选项。两类：
-# - 目标扩展（同 -march）：没开的扩展，汇编器不认、译码不认、解释器陷入，代码生成改走 compiler-rt 的 libcall
-# - 组件：`isa`（指令表、译码、打印）总在，不是 feature
+# 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 全开。没开的扩展：汇编器不认、译码不认、
+# 解释器陷入，代码生成改走 compiler-rt（乘除 libcall、软浮点）。组件（汇编器、链接器、代码生成 …）总在，不是 feature。
 [features]
-default = ["m", "f", "asm", "link", "objdump", "sim", "codegen", "cli"]
-
-# ---- 目标扩展（-march）----
+default = ["m", "f"]
 # M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
 m = ["zmmul"]
 # Zmmul：只有乘法；没开 ⇒ 乘法调 __mulsi3
 zmmul = []
-# F：单精度浮点 + ilp32f 调用约定（蕴含 zicsr）；没开 ⇒ 软浮点、ilp32
+# F：单精度浮点 + ilp32f 调用约定（蕴含 zicsr）；没开 ⇒ ilp32 + 软浮点
 f = ["zicsr"]
 # Zicsr：CSR 指令
 zicsr = []
 
-# ---- 组件 ----
-# GNU 汇编器（src/asm）
-asm = ["dep:object"]
-# 链接器（src/link）
-link = ["dep:object"]
-# 反汇编 ELF（riscvc objdump）
-objdump = ["dep:object"]
-# RV32IMF 解释器（src/sim）
-sim = ["dep:object"]
-# MLIR 前端：llvm 方言、内部 IR、插件接口（src/llvm、src/ir、src/plugin）
-mlir = ["dep:mlirformat"]
-# 代码生成（src/codegen，riscvc llc）
-codegen = ["mlir", "dep:regalloc2"]
-# 命令行 riscvc（子命令随上面各组件开关）
-cli = ["dep:clap"]
-
 [dependencies]
-clap = { version = "4.6.7", features = ["derive"], optional = true }
-mlirformat = { version = "0.2.1", default-features = false, optional = true }
-object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
-regalloc2 = { version = "0.15.2", optional = true }
+clap = { version = "4.6.7", features = ["derive"] }
+mlirformat = { version = "0.2.1", default-features = false }
+object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"] }
+regalloc2 = "0.15.2"
 thiserror = "2"
 
-[[bin]]
-name = "riscvc"
-path = "src/main.rs"
-required-features = ["cli"]
-
-[[test]]
-name = "as_vs_llvm"
-required-features = ["asm"]
-
-[[test]]
-name = "disasm_vs_llvm"
-required-features = ["objdump"]
-
-[[test]]
-name = "ld_vs_lld"
-required-features = ["asm", "link"]
-
+# 实参按 ilp32f 放（float 进 fa 寄存器）
 [[test]]
 name = "llc_vs_llc"
-required-features = ["codegen", "asm", "link", "sim"]
-
-[[test]]
-name = "elf_vs_llvm"
-required-features = ["codegen", "asm", "link", "sim"]
-
-[[test]]
-name = "plugin"
-required-features = ["codegen", "asm", "link", "sim"]
+required-features = ["f"]

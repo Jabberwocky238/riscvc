@@ -46,14 +46,8 @@ impl Llc {
         }
     }
 
-    /// 生成的汇编 ⇒ 目标文件（要 `asm` 组件）。
-    #[cfg(feature = "asm")]
+    /// 生成的汇编 ⇒ 目标文件。
     fn object(asm: &str) -> Result<Vec<u8>, String> {
         crate::asm::Assembler::new(crate::asm::Options { attributes: None, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
-    }
-
-    #[cfg(not(feature = "asm"))]
-    fn object(_: &str) -> Result<Vec<u8>, String> {
-        Err(String::from("出 .o 要 asm 组件（cargo build --features asm）；没开就出 .s"))
     }
 }

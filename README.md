@@ -81,21 +81,17 @@ LLVM（`jw238/docc/llvm-project/build/bin`）只当**对照**，⛔ 不是依赖
 ```bash
 cargo build --release
 cargo test
-cargo build --release --no-default-features --features "m,f,asm,link,cli"   # 按需裁剪
+cargo build --release --no-default-features --features zicsr               # rv32i：无 M、无 F（软浮点）
 ```
 
-一个 feature = 一个编译选项（`Cargo.toml`），`default` 全开：
+一个 feature = 一个编译选项 = 一个目标扩展（`Cargo.toml`），`default` 全开；组件（汇编器、链接器、代码生成、命令行 …）总在：
 
 | feature | 是什么 | 关掉之后 |
 | --- | --- | --- |
 | `m` | M 扩展（蕴含 `zmmul`） | 汇编器不认 `div` / `rem*`、译码印 `<unknown>`；代码生成调 `__divsi3` 一类 |
 | `zmmul` | 只有乘法 | 同上，`mul` / `mulh*` 调 `__mulsi3` / `__muldi3` |
-| `f` | F 扩展 + ilp32f（蕴含 `zicsr`） | 汇编器 / 译码不认浮点指令，`e_flags` 不带单精度 ABI；⚠ 代码生成的软浮点还没做（遇到 float 会报错） |
+| `f` | F 扩展 + ilp32f（蕴含 `zicsr`） | 汇编器 / 译码不认浮点指令，`e_flags` 不带单精度 ABI；代码生成走 ilp32 + 软浮点（`__addsf3` 一类） |
 | `zicsr` | CSR 指令 | 不认 `csr*` 与 `frcsr` 一类伪指令 |
-| `asm` / `link` / `objdump` / `sim` | 汇编器 / 链接器 / 反汇编 / 解释器 | 不编这个组件（与命令行的子命令） |
-| `mlir` | llvm 方言、内部 IR、插件接口 | — |
-| `codegen` | 代码生成（蕴含 `mlir`） | 没有 `riscvc llc` |
-| `cli` | 命令行 `riscvc` | 只有库 |
 
 `.riscv.attributes` 的架构串（`Ext::march()`）与对照用的 `-mattr`（`Ext::mattr()`）都从开了的扩展推出来。
 
