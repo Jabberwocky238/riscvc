@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT"
@@ -41,7 +41,7 @@ xthead = ["xtheadba", "xtheadbb", "xtheadbs", "xtheadcmo", "xtheadcondmov", "xth
 members = [".", "macros"]
 
 [dependencies]
-riscvc-macros = { path = "macros", version = "0.1.0" }
+riscvc-macros = { path = "macros", version = "0.1.1" }
 clap = { version = "4.6.7", features = ["derive"] }
 mlirformat = { version = "0.2.1", default-features = false }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"] }
