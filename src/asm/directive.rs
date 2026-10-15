@@ -134,6 +134,12 @@ impl Assembler<'_> {
                     let e = a.expr(self)?;
                     let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 只做常数（跨节的差要 SET_ULEB128 重定位，没做）")))?;
                     let bytes = if word == ".uleb128" { Self::uleb(k.cast_unsigned()) } else { Self::sleb(k) };
+                    // 带标号的：记下，节里有可松弛点时可能要出 SET_ULEB128 / SUB_ULEB128
+                    if word == ".uleb128" && !matches!(e, super::Expr::Num(_)) {
+                        let at = self.here();
+                        self.sections[self.cur].leb_items.push((at, at + u64::try_from(bytes.len()).unwrap_or_default()));
+                        self.note(Fix::Uleb, e);
+                    }
                     self.bytes(&bytes)?;
                 }
             }
@@ -220,10 +226,13 @@ impl Assembler<'_> {
                 self.attributes.push((tag, value));
             }
             ".option" => match rest.split(',').next().map(str::trim) {
-                Some("push") => self.options.push((self.exact, self.pic)),
-                Some("pop") => (self.exact, self.pic) = self.options.pop().ok_or_else(|| Error::Syntax(String::from(".option pop 没有配对的 push")))?,
-                Some("exact") => self.exact = true,
-                Some("noexact") => self.exact = false,
+                Some("push") => self.options.push((self.exact, self.pic, self.relax_on)),
+                Some("pop") => (self.exact, self.pic, self.relax_on) = self.options.pop().ok_or_else(|| Error::Syntax(String::from(".option pop 没有配对的 push")))?,
+                Some("relax") => self.relax_on = true,
+                Some("norelax") => self.relax_on = false,
+                // exact 连带 norelax（同 RISCVAsmParser）
+                Some("exact") => (self.exact, self.relax_on) = (true, false),
+                Some("noexact") => (self.exact, self.relax_on) = (false, true),
                 Some("pic") => self.pic = true,
                 Some("nopic") => self.pic = false,
                 Some("rvc") => return Err(Error::Syntax(String::from("不做压缩指令（.option rvc）"))),
@@ -304,6 +313,26 @@ impl Assembler<'_> {
         s.align = s.align.max(align);
         if max.is_some_and(|m| pad > u64::try_from(m).unwrap_or(0)) {
             return Ok(());
+        }
+        // 节里已有可松弛点之后、代码节的对齐（> 2 字节）：填对齐量 − 2 字节的 nop、出 R_RISCV_ALIGN（同 RISCVAsmBackend::relaxAlign；
+        // 这时 .option norelax 也照出）
+        if s.code() && fill.is_none() && align > 2 && !s.relax_items.is_empty() {
+            let size = align - 2;
+            let at = here;
+            s.relax_items.push((at, at + size));
+            let line = self.line;
+            s.fixups.push(super::fixup::Fixup { offset: at, kind: Fix::Align(size), expr: super::Expr::Num(0), line, relax: false });
+            let mut bytes = Vec::new();
+            if size % 2 == 1 {
+                bytes.push(0);
+            }
+            if size % 4 >= 2 {
+                bytes.extend_from_slice(&[0x01, 0x00]);
+            }
+            for _ in 0..size / 4 {
+                bytes.extend_from_slice(&0x13u32.to_le_bytes());
+            }
+            return self.bytes(&bytes);
         }
         let mut bytes = Vec::new();
         if s.code() && fill.is_none() {

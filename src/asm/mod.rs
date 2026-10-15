@@ -52,11 +52,14 @@ pub struct Options {
     pub include: Vec<std::path::PathBuf>,
     /// 写 `.riscv.attributes`（clang -c 的做法；llvm-mc 只在有 `.attribute` 时写）。
     pub attributes: Option<String>,
+    /// `-mrelax`（缺省开，同 llvm-mc 在 riscv32 上）：可松弛的修补点出重定位 + `R_RISCV_RELAX`、
+    /// 跨过它们的标号差不就地算、代码节里的对齐出 `R_RISCV_ALIGN`。`-mno-relax` = 关。
+    pub relax: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { float_abi: crate::feature::Float::ENABLED, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None }
+        Self { float_abi: crate::feature::Float::ENABLED, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None, relax: true }
     }
 }
 
@@ -71,6 +74,10 @@ pub struct Section {
     /// `SHT_NOBITS` 的大小（`data` 不用）。
     pub nobits: u64,
     pub fixups: Vec<fixup::Fixup>,
+    /// 可松弛的地方（起, 止）：可松弛指令、带 `R_RISCV_ALIGN` 的对齐。跨过它们的 PC 相对量与标号差不能就地算（同 MC）。
+    pub relax_items: Vec<(u64, u64)>,
+    /// 带标号的 `.uleb128`（起, 止）。
+    pub leb_items: Vec<(u64, u64)>,
 }
 
 impl Section {
@@ -144,8 +151,10 @@ pub struct Assembler<'e> {
     exact: bool,
     /// `.option pic`：`la` 走 GOT。
     pic: bool,
-    /// `.option push` 存的（exact, pic）。
-    options: Vec<(bool, bool)>,
+    /// `.option relax` / `norelax`：此刻出的指令可不可松弛（缺省跟 `Options::relax`）。
+    relax_on: bool,
+    /// `.option push` 存的（exact, pic, relax）。
+    options: Vec<(bool, bool, bool)>,
     /// `.reloc 位置, 类型, 目标`（行号报错用）。
     directs: Vec<(Expr, u32, Expr, usize)>,
 }
@@ -178,6 +187,7 @@ impl expr::Names for Assembler<'_> {
 impl<'e> Assembler<'e> {
     #[must_use]
     pub fn new(opts: Options) -> Self {
+        let relax = opts.relax;
         let mut asm = Self {
             opts,
             exts: crate::ext::builtin(),
@@ -194,6 +204,7 @@ impl<'e> Assembler<'e> {
             attributes: Vec::new(),
             line: 0,
             exact: false,
+            relax_on: relax,
             pic: false,
             options: Vec::new(),
             directs: Vec::new(),
@@ -357,7 +368,7 @@ impl<'e> Assembler<'e> {
         let ty = ty.unwrap_or(dty);
         let entsize = entsize.unwrap_or(0);
         let _ = (SHF_MERGE, SHF_STRINGS);
-        self.sections.push(Section { name: String::from(name), ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new() });
+        self.sections.push(Section { name: String::from(name), ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new() });
         self.cur = self.sections.len() - 1;
     }
 
@@ -416,10 +427,30 @@ impl<'e> Assembler<'e> {
 
     /// 在当前位置记一个修补点（不出字节；同一条指令上的第二个重定位）。
     fn note(&mut self, kind: fixup::Fix, e: Expr) {
-        let e = self.pin(&e);
         let offset = self.here();
+        self.note_at(offset, kind, e);
+    }
+
+    /// 在当前节的 `offset` 处记一个修补点；开着松弛时按种类登记可松弛点（同 RISCVMCCodeEmitter）。
+    pub(super) fn note_at(&mut self, offset: u64, kind: fixup::Fix, e: Expr) {
+        use fixup::Fix;
+        let e = self.pin(&e);
         let line = self.line;
-        self.sections[self.cur].fixups.push(fixup::Fixup { offset, kind, expr: e, line });
+        let symbolic = || self.eval(&e, 0).map_or(true, |v| v.constant().is_none());
+        let relaxable = self.relax_on
+            && match kind {
+                Fix::Call | Fix::Hi20 | Fix::Lo12I | Fix::Lo12S | Fix::PcrelHi20 | Fix::PcrelLo12I | Fix::PcrelLo12S => true,
+                Fix::Reloc(t) | Fix::PcHi(t) => { use object::elf as e; matches!(t, e::R_RISCV_TPREL_HI20 | e::R_RISCV_TPREL_LO12_I | e::R_RISCV_TPREL_LO12_S | e::R_RISCV_TPREL_ADD | e::R_RISCV_GOT_HI20 | e::R_RISCV_TLSDESC_HI20) },
+                // 条件分支只是候选（可能扩成 b<cc> + jal）：算可松弛点，但不带 R_RISCV_RELAX
+                Fix::Jal | Fix::Branch => symbolic(),
+                _ => false,
+            };
+        if relaxable {
+            let len = if kind == Fix::Call { 8 } else { 4 };
+            self.sections[self.cur].relax_items.push((offset, offset + len));
+        }
+        let relax = relaxable && kind != Fix::Branch;
+        self.sections[self.cur].fixups.push(fixup::Fixup { offset, kind, expr: e, line, relax });
     }
 
     /// 新的 `.Lpcrel_hiN` 标号，定义在当前位置。

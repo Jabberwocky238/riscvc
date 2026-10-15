@@ -185,6 +185,7 @@ riscvc as [OPTIONS] -o <OUTPUT> <INPUT>
 | `--preprocess` | treat the input as `.S` regardless of its extension (by default only an upper-case `.S` is preprocessed) |
 | `--soft-float` | `-mabi=ilp32`: do not set `EF_RISCV_FLOAT_ABI_SINGLE` (default follows the `f` feature) |
 | `--arch-attribute <ARCH>` | write a `.riscv.attributes` section with this arch string, like `clang -c` does |
+| `--no-relax` | `-mno-relax`: emit no `R_RISCV_RELAX` / `R_RISCV_ALIGN` (default is relaxation on, like `llvm-mc` for riscv32) |
 
 Supported: all base / enabled-extension instructions and their standard pseudo-instructions (`li`, `la`, `call`,
 `tail`, `mv`, `not`, `neg`, `seqz`, `beqz`, `j`, `ret`, `fmv.s`, `csrr`, …), `%hi` / `%lo` / `%pcrel_hi` /
@@ -286,7 +287,7 @@ Main entry points:
 | --- | --- |
 | `riscvc::plugin::Registry` | parse MLIR (`parse`), run passes by name (`run`), register dialects / passes |
 | `riscvc::ir::Module::compile` | internal IR → RV32 assembly text |
-| `riscvc::asm::Assembler` | assembly text → ELF object (`Options`: float ABI, preprocessing, defines, include dirs, attributes); `.extensions(&[…])` adds custom instructions |
+| `riscvc::asm::Assembler` | assembly text → ELF object (`Options`: float ABI, preprocessing, defines, include dirs, attributes, relax); `.extensions(&[…])` adds custom instructions |
 | `riscvc::link::Linker::link` | `(name, bytes)` objects → executable ELF (`Options`: script, entry, strip, allow-undefined, no-relax) |
 | `riscvc::ext::Disasm` | iterator of disassembled lines over a code buffer, with optional extensions and a print `Style` |
 | `riscvc::sim::Cpu` | RV32 interpreter: `load` an ELF, `run` / `step`, or `run_on` / `step_on` with custom extensions and MMIO `Device`s; registers `x`, `f`, `pc`, `csr`, sparse `mem` |
@@ -406,17 +407,17 @@ it replaces:
 
 ## Status
 
-As of 2026-10-14:
+As of 2026-10-15:
 
 | Area | Result |
 | --- | --- |
 | Decode / print | 200,000 random words × 3 print styles: identical to llvm-objdump |
-| Assembler | 334 compiler-rt files (O0 / O2, `-mno-relax`): section bytes, relocations, global symbols identical to llvm-mc |
+| Assembler | 334 compiler-rt files (O0 / O2), both `-mno-relax` and `+relax` (`R_RISCV_RELAX` / `R_RISCV_ALIGN`, `.option relax` / `norelax`): section bytes, relocations, global symbols identical to llvm-mc |
 | Linker | 167 compiler-rt objects × 2 linker scripts: identical to ld.lld (loadable sections incl. empty ones, program headers incl. `PT_GNU_RELRO` / `PT_RISCV_ATTRIBUTES`, entry, globals); llvm-mc `+relax` objects (535 `R_RISCV_RELAX`, 8 `R_RISCV_ALIGN`, merge string sections) identical to ld.lld both with and without `--no-relax` |
 | MLIR parsing | 334 generic-form `.mlir` files parse and convert to the internal IR |
 | Code generation | all 334 compile; O0 and O2: 97 scalar-signature functions each, 4,656 calls each, results identical to llc (undefined behaviour in the C sources excluded) |
 | End-to-end ELF | 163 builtins unit tests: all match LLVM at O0 and O2, except 2 fp128 tests (out of scope, skipped) |
-| MC fixtures | 272 of 279 identical to llvm-mc; remaining: long-branch relaxation of conditional branches pushed out by `.fill`, subsections (`.text 1`), `.reloc` without a symbol, cross-section `.uleb128` (`SET/SUB_ULEB128`) |
+| MC fixtures | 276 of 279 identical to llvm-mc (with and without relaxation); remaining: long-branch relaxation of conditional branches pushed out by `.fill`, alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
 
 Not done yet: `sret` lowering (return values that do not fit in registers), test coverage of stack-passed
 arguments, `cmpxchg`, `i128` / `fp128`, vector operations; code quality (peepholes, jump tables, constant

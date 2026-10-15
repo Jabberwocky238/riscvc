@@ -53,12 +53,12 @@ impl Assembler<'_> {
             .map(|op| match op {
                 Opnd::X(r) => Operand::X(r.0),
                 Opnd::F(r) => Operand::F(r.0),
-                Opnd::E(e) => match (self.eval(e, 0).ok().and_then(|v| v.constant()), e) {
+                Opnd::E(e) => match (self.folded(e), e) {
                     (Some(k), _) => Operand::Imm(k),
                     (None, Expr::Sym(n)) => Operand::Sym(n.clone()),
                     (None, e) => Operand::Expr(self.pin(e)),
                 },
-                Opnd::M(e, base) => Operand::Mem(self.eval(e, 0).ok().and_then(|v| v.constant()).map_or_else(|| self.pin(e), Expr::Num), base.0),
+                Opnd::M(e, base) => Operand::Mem(self.folded(e).map_or_else(|| self.pin(e), Expr::Num), base.0),
             })
             .collect();
         let raw = Self::raw_args(rest);
@@ -71,8 +71,7 @@ impl Assembler<'_> {
                 let start = self.here();
                 for f in fixups {
                     let (kind, e) = Self::field(f.field, &f.expr)?;
-                    let (line, expr) = (self.line, self.pin(&e));
-                    self.sections[self.cur].fixups.push(super::fixup::Fixup { offset: start + f.offset as u64, kind, expr, line });
+                    self.note_at(start + f.offset as u64, kind, e);
                 }
                 self.bytes(&b)?;
             }
@@ -85,6 +84,14 @@ impl Assembler<'_> {
             }
         }
         Ok(true)
+    }
+
+    /// 汇编时就能定的常数；开着松弛时常数上的 `%hi` / `%lo` 不算（要出 0 号符号 + 常数的重定位，同 llvm-mc）。
+    fn folded(&self, e: &Expr) -> Option<i64> {
+        if self.relax_on && matches!(e.modifier(), Some((Modifier::Lo | Modifier::Hi, _))) {
+            return None;
+        }
+        self.eval(e, 0).ok()?.constant()
     }
 
     /// 扩展给的位段 + 表达式（最外层的修饰符）⇒ 内部的修补点种类。
@@ -404,7 +411,7 @@ impl Assembler<'_> {
             Fix::U20 => Base::U,
             _ => Base::Imm,
         };
-        match self.eval(e, 0)?.constant().map(|k| Self::rv32(form, k)) {
+        match self.folded(e).map(|k| Self::rv32(form, k)) {
             Some(k) if form.fits(k) => self.word(w | form.scatter(i32::try_from(k).unwrap_or_default())),
             Some(k) => Err(Error::Syntax(format!("立即数 {k} 超出范围"))),
             None => {
@@ -459,7 +466,8 @@ impl Assembler<'_> {
         let fix = match e.modifier() {
             None => None,
             // 常数上的 %lo / %hi 现在就折（`li a0, %lo(0x123456)`）
-            Some((Modifier::Lo | Modifier::Hi, inner)) if self.eval(inner, 0)?.constant().is_some() => None,
+            // 开着松弛时常数上的也出重定位（0 号符号 + 常数，同 llvm-mc）
+            Some((Modifier::Lo | Modifier::Hi, inner)) if !self.relax_on && self.eval(inner, 0)?.constant().is_some() => None,
             Some((Modifier::Lo, _)) => Some(if store { Fix::Lo12S } else { Fix::Lo12I }),
             Some((Modifier::PcrelLo, _)) => Some(if store { Fix::PcrelLo12S } else { Fix::PcrelLo12I }),
             Some((Modifier::TprelLo, _)) => Some(Fix::Reloc(if store { elf::R_RISCV_TPREL_LO12_S } else { elf::R_RISCV_TPREL_LO12_I })),
@@ -531,7 +539,7 @@ impl Assembler<'_> {
     fn li(&mut self, rd: X, e: &Expr) -> Result<(), Error> {
         // `li rd, %lo(sym)` / `%pcrel_lo(标号)` ⇒ `addi rd, zero, …`
         match e.modifier() {
-            Some((Modifier::Lo, inner)) if self.eval(inner, 0)?.constant().is_none() => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::Lo12I, inner.clone()),
+            Some((Modifier::Lo, inner)) if self.relax_on || self.eval(inner, 0)?.constant().is_none() => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::Lo12I, inner.clone()),
             Some((Modifier::PcrelLo, inner)) => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::PcrelLo12I, inner.clone()),
             _ => {}
         }

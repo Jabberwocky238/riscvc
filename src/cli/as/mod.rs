@@ -23,6 +23,9 @@ pub struct As {
     /// 写 `.riscv.attributes`（同 clang -c；值是架构串）。
     #[arg(long)]
     arch_attribute: Option<String>,
+    /// `-mno-relax`：⛔ 不出 `R_RISCV_RELAX` / `R_RISCV_ALIGN`（缺省同 llvm-mc 开着松弛）。
+    #[arg(long)]
+    no_relax: bool,
 }
 
 impl As {
@@ -41,6 +44,7 @@ impl As {
             defines,
             include,
             attributes: self.arch_attribute.clone(),
+            relax: !self.no_relax,
         };
         let bytes = crate::asm::Assembler::new(opts).assemble(&text).map_err(|e| format!("{}：{e}", self.input.display()))?;
         super::write(&self.output, &bytes)

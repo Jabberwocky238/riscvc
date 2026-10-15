@@ -26,6 +26,10 @@ pub enum Fix {
     Call,
     /// `.byte` / `.half` / `.word` / `.quad`：字节数。
     Data(u8),
+    /// 代码对齐（开着松弛）：出 `R_RISCV_ALIGN`，加数 = 填的 nop 字节数。
+    Align(u64),
+    /// `.uleb128 A − B`（字节已按汇编时的值写好）：跨过可松弛点 ⇒ 出 `SET_ULEB128` / `SUB_ULEB128`。
+    Uleb,
     /// 一定出这种重定位（TLS、`%pltpcrel` 一类：汇编时解析不了）。
     Reloc(u32),
     /// `auipc` 的 GOT / TLS 高位（一定出重定位；`%pcrel_lo` 可以配它）。
@@ -37,6 +41,8 @@ pub struct Fixup {
     pub kind: Fix,
     pub expr: Expr,
     pub line: usize,
+    /// 出重定位后再跟一条 `R_RISCV_RELAX`（一定出重定位）。
+    pub relax: bool,
 }
 
 /// 一条重定位（写 ELF 用）。
@@ -145,6 +151,59 @@ impl Assembler<'_> {
         Value { syms, k }
     }
 
+    /// 节里 [lo, hi] 之间整个落着一个可松弛点（同 MC：跨过它的差在汇编时定不下来）；节里有可松弛点时，
+    /// 带标号的 `.uleb128` 也算（MC 的 LEB 片段不折）。
+    fn crosses(&self, section: usize, lo: u64, hi: u64) -> bool {
+        let s = &self.sections[section];
+        let inside = |&(a, b): &(u64, u64)| a >= lo && b <= hi;
+        s.relax_items.iter().any(inside) || (!s.relax_items.is_empty() && s.leb_items.iter().any(inside))
+    }
+
+    /// 同节的「A − B (+ k)」跨过可松弛点 ⇒ 不折，A、B 留在值里（同 MC 的 AttemptToFoldSymbolOffsetDifference）：
+    /// 数据出 ADD / SUB，`%hi` / `%lo` 之类就报错。
+    fn unfold(&self, e: &Expr, v: Value) -> Value {
+        match self.label_terms(e, 0).as_slice() {
+            [(a, 1), (b, -1)] | [(b, -1), (a, 1)]
+                if v.syms.is_empty()
+                    && let (Some((sa, oa)), Some((sb, ob))) = (self.label(a), self.label(b))
+                    && sa == sb
+                    && self.crosses(sa, oa.min(ob), oa.max(ob)) =>
+            {
+                Value { syms: vec![(a.clone(), 1), (b.clone(), -1)], k: v.k - (oa.cast_signed() - ob.cast_signed()) }
+            }
+            _ => v,
+        }
+    }
+
+    /// PC 相对的目标在本节、能就地解析、且和修补点之间没有可松弛点 ⇒ 目标偏移。
+    fn local_pcrel(&self, section: usize, v: &Value, pc: u64) -> Option<u64> {
+        let target = self.local_target(section, v)?;
+        (!self.crosses(section, pc.min(target), pc.max(target))).then_some(target)
+    }
+
+    /// 表达式里的标号与系数（不折同节的差；`.set` 展开）：判断「A − B」是否跨过可松弛点用。加减以外的 ⇒ 认不出（空名）。
+    fn label_terms(&self, e: &Expr, depth: usize) -> Vec<(String, i64)> {
+        if depth > 100 {
+            return vec![(String::new(), 0)];
+        }
+        let scale = |v: Vec<(String, i64)>, c: i64| v.into_iter().map(|(n, k)| (n, k * c)).collect::<Vec<_>>();
+        match e {
+            Expr::Sym(name) => match self.symbols.get(name).map(|s| &s.def) {
+                Some(Def::Equ(inner)) => self.label_terms(inner, depth + 1),
+                _ => vec![(name.clone(), 1)],
+            },
+            Expr::Neg(a) => scale(self.label_terms(a, depth + 1), -1),
+            Expr::Bin(op @ (super::expr::BinOp::Add | super::expr::BinOp::Sub), a, b) => {
+                let mut v = self.label_terms(a, depth + 1);
+                let c = if *op == super::expr::BinOp::Sub { -1 } else { 1 };
+                v.extend(scale(self.label_terms(b, depth + 1), c));
+                v
+            }
+            Expr::Num(_) => Vec::new(),
+            _ => vec![(String::new(), 0)],
+        }
+    }
+
     /// 已定义的标号 ⇒ （节, 偏移）。
     pub(crate) fn label(&self, name: &str) -> Option<(usize, u64)> {
         match self.symbols.get(name).map(|s| &s.def) {
@@ -196,7 +255,8 @@ impl Assembler<'_> {
             };
             relocs.push(Reloc { section, offset, r_type, symbol: String::from(symbol), addend });
         }
-        for r in &relocs {
+        // 0 号符号（RELAX / ALIGN、常数目标）⛔ 不建符号
+        for r in relocs.iter().filter(|r| !r.symbol.is_empty()) {
             let sym = self.symbol(&r.symbol);
             sym.used = true;
             // TLS 重定位引用的符号是 TLS 的（同 llvm-mc）
@@ -210,10 +270,24 @@ impl Assembler<'_> {
     }
 
     fn fixup(&mut self, section: usize, f: &Fixup, all: &[Fixup], relocs: &mut Vec<Reloc>) -> Result<(), Error> {
-        let v = self.eval(&f.expr, 0)?;
+        let before = relocs.len();
+        self.fixup_inner(section, f, all, relocs)?;
+        // 要松弛的：重定位之后跟一条 R_RISCV_RELAX（0 号符号）
+        if f.relax && relocs.len() > before {
+            relocs.push(Reloc { section, offset: f.offset, r_type: elf::R_RISCV_RELAX, symbol: String::new(), addend: 0 });
+        }
+        Ok(())
+    }
+
+    fn fixup_inner(&mut self, section: usize, f: &Fixup, all: &[Fixup], relocs: &mut Vec<Reloc>) -> Result<(), Error> {
+        let v = self.unfold(&f.expr, self.eval(&f.expr, 0)?);
         let pc = f.offset;
+        // 常数也能出（0 号符号 + 常数）：松弛时的 %hi / %lo
         let reloc = |r_type: u32, v: &Value| -> Result<Reloc, Error> {
-            let (name, addend) = v.single().ok_or_else(|| Error::Syntax(format!("{:?} 的表达式重定位表达不了：{:?}", f.kind, v)))?;
+            let (name, addend) = match v.constant() {
+                Some(k) => ("", k),
+                None => v.single().ok_or_else(|| Error::Syntax(format!("{:?} 的表达式重定位表达不了：{:?}", f.kind, v)))?,
+            };
             Ok(Reloc { section, offset: pc, r_type, symbol: String::from(name), addend })
         };
         let need_const = |v: &Value| v.constant().ok_or_else(|| Error::Syntax(format!("{:?} 要常数，见 {:?}", f.kind, v)));
@@ -231,9 +305,10 @@ impl Assembler<'_> {
                 }
                 self.patch(section, pc, form.scatter(i32::try_from(k).unwrap_or_default()));
             }
+            Fix::Align(n) => relocs.push(Reloc { section, offset: pc, r_type: elf::R_RISCV_ALIGN, symbol: String::new(), addend: n.cast_signed() }),
             Fix::Hi20 | Fix::Lo12I | Fix::Lo12S => match v.constant() {
-                Some(k) => self.patch(section, pc, Self::hi_lo(f.kind, k)),
-                None => relocs.push(reloc(
+                Some(k) if !f.relax => self.patch(section, pc, Self::hi_lo(f.kind, k)),
+                _ => relocs.push(reloc(
                     match f.kind {
                         Fix::Hi20 => elf::R_RISCV_HI20,
                         Fix::Lo12I => elf::R_RISCV_LO12_I,
@@ -252,7 +327,7 @@ impl Assembler<'_> {
                 }
                 self.patch(section, pc, form.scatter(i32::try_from(d).unwrap_or_default()));
             }
-            Fix::Branch | Fix::Jal | Fix::Call | Fix::PcrelHi20 => match self.local_target(section, &v) {
+            Fix::Branch | Fix::Jal | Fix::Call | Fix::PcrelHi20 => match self.local_pcrel(section, &v, pc).filter(|_| !f.relax) {
                 Some(target) => {
                     let d = target.cast_signed() - pc.cast_signed();
                     match f.kind {
@@ -287,8 +362,8 @@ impl Assembler<'_> {
                 // auipc 在别的节、或是 GOT / TLS 的高位 ⇒ 只能出重定位（链接器配对）
                 let hi = all.iter().find(|h| s == section && h.offset == at && matches!(h.kind, Fix::PcrelHi20));
                 let target = match hi {
-                    Some(hi) => self.local_target(section, &self.eval(&hi.expr, 0)?),
-                    None => None,
+                    Some(hi) if !hi.relax && !f.relax => self.local_pcrel(section, &self.eval(&hi.expr, 0)?, hi.offset),
+                    _ => None,
                 };
                 match target {
                     Some(target) => {
@@ -302,6 +377,12 @@ impl Assembler<'_> {
                         symbol: String::from(label),
                         addend: 0,
                     }),
+                }
+            }
+            Fix::Uleb => {
+                if let [(a, 1), (b, -1)] | [(b, -1), (a, 1)] = v.syms.as_slice() {
+                    relocs.push(Reloc { section, offset: pc, r_type: elf::R_RISCV_SET_ULEB128, symbol: a.clone(), addend: v.k });
+                    relocs.push(Reloc { section, offset: pc, r_type: elf::R_RISCV_SUB_ULEB128, symbol: b.clone(), addend: 0 });
                 }
             }
             Fix::Data(n) => {

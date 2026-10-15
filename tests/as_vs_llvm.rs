@@ -55,7 +55,6 @@ impl Norm {
         let globals = file
             .symbols()
             .filter(|s| s.is_global() || s.is_undefined())
-            .filter(|s| !s.name().unwrap_or("").is_empty())
             .map(|s| {
                 let object::SymbolFlags::Elf { st_info, st_other } = s.flags() else { panic!() };
                 (String::from(s.name().unwrap()), (s.section_index().map(name).unwrap_or_default(), s.address(), s.size(), st_info, st_other))
@@ -65,7 +64,8 @@ impl Norm {
     }
 }
 
-fn corpus(sub: &str, how: &str) {
+/// `relax`：两边都开松弛（llvm-mc `+relax` 对 `Options { relax: true }`）。
+fn corpus(sub: &str, how: &str, relax: bool) {
     let Some(llvm) = llvm::Llvm::locate() else { return };
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(sub);
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -76,15 +76,22 @@ fn corpus(sub: &str, how: &str) {
     files.sort();
     let (mut bad, mut n) = (0, 0);
     // 对照的 llvm-mc 开同样的扩展（cargo feature）
-    let mattr = format!("-mattr={},-relax", riscvc::feature::Target::mattr());
-    let out = std::env::temp_dir().join(format!("riscvc-as-{}-{}.o", std::process::id(), sub.replace('/', "-")));
+    let mattr = format!("-mattr={},{}relax", riscvc::feature::Target::mattr(), if relax { '+' } else { '-' });
+    let out = std::env::temp_dir().join(format!("riscvc-as-{}-{}-{relax}.o", std::process::id(), sub.replace('/', "-")));
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
         let (_, err) = llvm.run("llvm-mc", &["-triple=riscv32", &mattr, "-target-abi=ilp32f", "-filetype=obj", f.to_str().unwrap(), "-o", out.to_str().unwrap()], "");
-        assert!(!err.contains("error:"), "{}: llvm-mc: {err}", f.display());
-        let theirs = Norm::of(&std::fs::read(&out).unwrap());
         n += 1;
-        let ours = match riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&text) {
+        // llvm-mc 拒绝的（+relax 下 `%hi(A − B)` 跨可松弛点 …）：riscvc 也得拒绝
+        if err.contains("error:") {
+            if riscvc::asm::Assembler::new(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text).is_ok() {
+                bad += 1;
+                eprintln!("{}: llvm-mc 报错、riscvc 没报：{err}", f.display());
+            }
+            continue;
+        }
+        let theirs = Norm::of(&std::fs::read(&out).unwrap());
+        let ours = match riscvc::asm::Assembler::new(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text) {
             Ok(bytes) => Norm::of(&bytes),
             Err(e) => {
                 bad += 1;
@@ -127,17 +134,27 @@ fn corpus(sub: &str, how: &str) {
 
 #[test]
 fn compiler_rt_corpus() {
-    corpus("target/corpus/s", "tools/corpus.sh");
+    corpus("target/corpus/s", "tools/corpus.sh", false);
+}
+
+#[test]
+fn compiler_rt_corpus_relax() {
+    corpus("target/corpus/s", "tools/corpus.sh", true);
 }
 
 #[test]
 fn llvm_fixtures() {
-    corpus("tests/fixtures/mc", "tools/fixtures.py");
+    corpus("tests/fixtures/mc", "tools/fixtures.py", false);
+}
+
+#[test]
+fn llvm_fixtures_relax() {
+    corpus("tests/fixtures/mc", "tools/fixtures.py", true);
 }
 
 /// 玄铁：`tests/fixtures/mc-xthead`（LLVM 的 XThead fixture，`cargo test --features xthead`）。
 #[cfg(feature = "xthead")]
 #[test]
 fn xthead_fixtures() {
-    corpus("tests/fixtures/mc-xthead", "tools/fixtures.py");
+    corpus("tests/fixtures/mc-xthead", "tools/fixtures.py", false);
 }
