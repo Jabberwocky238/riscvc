@@ -4,7 +4,7 @@
 //! 桩（`tests/fixtures/support/<abi>/`）两边共用一份。
 //! 目标跟着 feature 走：llc 的 `-mattr` / `-target-abi` 取 [`Ext::mattr`] / [`Ext::abi`]，`.ll` 里每个函数写死的
 //! `target-features` 去掉、`target-abi` 换掉（同一份 IR，换目标对拍；没开 M / F 时两边都走 libcall / 软浮点）。
-//! 两个 ELF 都在 `src/sim` 里从 `main` 跑，比停机方式与 a0。两边都没定义的函数（有的 builtins 要 atomic / unwind 库、
+//! 两个 ELF 都在 `src/sim.rs` 里从 `main` 跑，比停机方式与 a0。两边都没定义的函数（有的 builtins 要 atomic / unwind 库、
 //! 有的测试要 libm）落到共用的桩：一条 `ebreak` 停机。
 //! 没有对照用的 LLVM（llc、ld.lld）就 SKIP。
 mod llvm;

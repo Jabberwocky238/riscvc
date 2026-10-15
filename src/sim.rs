@@ -1,6 +1,6 @@
 //! RV32 解释器：装 ELF、设寄存器、跑到返回。给代码生成做对拍用（同一份输入，两份编译产物比结果）。
 //!
-//! 核心只执行 RV32I；M / Zmmul / F / Zicsr 的语义在 `src/feature/<名>/`，与自定义扩展一样经 [`Extension`] 执行：
+//! 核心只执行 RV32I；M / Zmmul / F / Zicsr 的语义在 `src/feature/`，与自定义扩展一样经 [`Extension`] 执行：
 //! [`Cpu::step_on`] / [`Cpu::run_on`] 先问给的扩展、再问内置扩展（按 cargo feature），访存先问 [`Device`]（MMIO）；
 //! [`Cpu::step`] / [`Cpu::run`] = 只挂内置扩展。
 use crate::ext::{Device, Exec, Extension};

@@ -1,4 +1,4 @@
-//! 命令行：一条子命令一个目录（`src/cli/<名>/`：`#[derive(clap::Args)]` 的参数结构体 + `run(&self) -> ExitCode`）。
+//! 命令行：一条子命令一个文件（`src/cli/<名>.rs`：`#[derive(clap::Args)]` 的参数结构体 + `run(&self) -> ExitCode`）。
 //! 这里只有树根与分派；`main.rs` 只有 `Cli::parse().command.run()`。
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;

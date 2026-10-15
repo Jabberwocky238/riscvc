@@ -1,4 +1,4 @@
-//! RV32I（与特权指令）：基础格式 [`Base`] 与基础指令表（`#[derive(Isa)]` 生成）；语义在解释器核心（`src/sim`）。
+//! RV32I（与特权指令）：基础格式 [`Base`] 与基础指令表（`#[derive(Isa)]` 生成）；语义在解释器核心（`src/sim.rs`）。
 use super::inst::{Fields, Layout, field, sext};
 use super::{Inst, Style};
 use crate::asm::Expr;

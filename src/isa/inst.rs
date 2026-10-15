@@ -1,5 +1,5 @@
 //! 指令表的通用部分：格式（[`Layout`]：操作数在哪几位、怎么编 / 译 / 印 / 汇编）、表（[`Table`]，`#[derive(Isa)]`
-//! 生成）、一条指令（[`Inst`]）。⛔ 这里不认任何具体格式：RV32I 的在 [`super::Base`]，扩展的在 `src/feature/<名>/`。
+//! 生成）、一条指令（[`Inst`]）。⛔ 这里不认任何具体格式：RV32I 的在 [`super::Base`]，扩展的在 `src/feature/`。
 use super::{F, Opcode, Rm, X};
 use crate::ext::{Args, Fixup};
 use core::fmt;

@@ -9,7 +9,7 @@
 //! Device::load / store  地址落在设备上就由它答（MMIO），否则落到稀疏内存                   sim
 //! ```
 //!
-//! ⭐ 写一张标准格式的指令表：`#[derive(Isa)]`（`crate::macros`）+ [`Std<表>`]，见 `src/feature/zmmul`。
+//! ⭐ 写一张标准格式的指令表：`#[derive(Isa)]`（`crate::macros`）+ [`Std<表>`]，见 `src/feature/zmmul.rs`。
 //! 先问扩展、再走标准表：扩展可以占用标准表里没有的编码（RISC-V 的 custom-0..3、低两位不是 `11` 的长指令）。
 use crate::asm::Expr;
 use crate::isa::{Inst, Style, Table};
