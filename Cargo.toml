@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT"
