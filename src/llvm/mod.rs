@@ -7,10 +7,10 @@
 //! intr.gen.rs  LLVMIntrinsicOps.td  204 个 `llvm.intr.*`          ← 只用来类型化转换（输入是通用形式，不必注册）
 //! ```
 //!
-//! 重生成（LLVM 22.1.8 的 .td，mlirformat ≥ 0.2.1）：
+//! 重生成（LLVM 22.1.8 的 .td；mlirformat ≥ 0.2.2 内置 TableGen，不要 llvm-tblgen）：
 //! ```text
 //! mlirformat tblgen $LLVM/mlir/include/mlir/Dialect/LLVMIR/LLVMOps.td -I $LLVM/mlir/include \
-//!     --llvm-tblgen $LLVM/build/bin/llvm-tblgen --params llvm=crate::llvm::Llvm::params -o src/llvm   # 改名 ops.gen.rs
+//!     --params llvm=crate::llvm::Llvm::params -o src/llvm   # 改名 ops.gen.rs
 //! （LLVMIntrinsicOps.td 同一条命令，改名 intr.gen.rs）
 //! ```
 #[path = "intr.gen.rs"]
