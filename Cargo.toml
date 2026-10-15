@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT"
-repository = "https://github.com/Jabberwocky238/riscvc.rs"
+repository = "https://github.com/Jabberwocky238/riscvc"
 readme = "README.md"
 keywords = ["riscv", "compiler", "assembler", "linker", "mlir"]
 categories = ["compilers", "development-tools"]

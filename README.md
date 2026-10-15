@@ -23,8 +23,8 @@ crt.S        ─ riscvc as  ─▶ crt.o ─────────────
 ```
 
 > The crates.io release lags behind `main`. To get the latest code:
-> `cargo add riscvc --git https://github.com/Jabberwocky238/riscvc.rs` or
-> `cargo install --git https://github.com/Jabberwocky238/riscvc.rs riscvc`.
+> `cargo add riscvc --git https://github.com/Jabberwocky238/riscvc` or
+> `cargo install --git https://github.com/Jabberwocky238/riscvc riscvc`.
 
 ## Table of contents
 
