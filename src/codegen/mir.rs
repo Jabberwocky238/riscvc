@@ -2,6 +2,12 @@
 //! 实现 regalloc2 的 `Function`。
 use crate::isa::{Opcode, Rv32i as IOp};
 use regalloc2::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
+use smallvec::SmallVec;
+
+/// 一条指令的寄存器（内联放 3 个：调用、`select` 这种多的才上堆）。
+pub type Regs = SmallVec<[R; 3]>;
+/// 与 [`Regs`] 一一对应的约束。
+pub type Rules = SmallVec<[Rule; 3]>;
 
 /// 一个寄存器引用：虚拟寄存器（交给 regalloc2），或不参与分配的物理寄存器（`zero` / `sp`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +69,8 @@ pub enum MOp {
     Unreachable,
     /// `unimp`（`llvm.trap`）。
     Trap,
+    /// `ebreak`（`llvm.debugtrap`，同 llc）。
+    Break,
     /// `fence`
     Fence,
     /// 动态调整 `sp`：`sub sp, sp, rs`（动态 alloca）后，`rd = sp + 出参区大小`。
@@ -86,22 +94,29 @@ pub enum Rule {
 #[derive(Clone, Debug)]
 pub struct MInst {
     pub op: MOp,
-    pub defs: Vec<R>,
-    pub uses: Vec<R>,
+    pub defs: Regs,
+    pub uses: Regs,
     /// 分配约束，与 `defs` / `uses` 一一对应（经 [`MInst::def_on`] / [`MInst::use_on`] 成对加）。
-    pub def_rules: Vec<Rule>,
-    pub use_rules: Vec<Rule>,
+    pub def_rules: Rules,
+    pub use_rules: Rules,
     /// 调用的破坏集。
     pub clobbers: PRegSet,
     /// regalloc2 看到的操作数（`finish` 时由上面几项算出）。
-    pub operands: Vec<Operand>,
+    pub operands: SmallVec<[Operand; 4]>,
 }
 
 impl MInst {
     #[must_use]
-    pub fn new(op: MOp, defs: Vec<R>, uses: Vec<R>) -> Self {
-        let (nd, nu) = (defs.len(), uses.len());
-        Self { op, defs, uses, def_rules: vec![Rule::Any; nd], use_rules: vec![Rule::Any; nu], clobbers: PRegSet::empty(), operands: Vec::new() }
+    pub fn new(op: MOp, defs: &[R], uses: &[R]) -> Self {
+        Self {
+            op,
+            defs: Regs::from_slice(defs),
+            uses: Regs::from_slice(uses),
+            def_rules: Rules::from_elem(Rule::Any, defs.len()),
+            use_rules: Rules::from_elem(Rule::Any, uses.len()),
+            clobbers: PRegSet::empty(),
+            operands: SmallVec::new(),
+        }
     }
 
     /// 加一个定义。
@@ -130,7 +145,7 @@ impl MInst {
 
     /// 算 regalloc2 的操作数：只收虚拟寄存器（物理的 `zero` / `sp` 不参与分配）。
     fn finish(&mut self) {
-        let mut ops = Vec::new();
+        let mut ops = SmallVec::new();
         for (r, rule) in self.defs.iter().zip(&self.def_rules) {
             if let R::V(v) = *r {
                 ops.push(match *rule {
@@ -153,8 +168,9 @@ impl MInst {
 
     /// 纯的：只算出 `defs`，没有别的作用（定义没人用就能删）。
     #[must_use]
+    /// ⚠ 没有定义的（`csrw` / `fsflags` 一类只写状态的）不算。
     pub fn pure(&self) -> bool {
-        matches!(self.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..) | MOp::Select(_))
+        !self.defs.is_empty() && matches!(self.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..) | MOp::Select(_))
     }
 
     /// 定义的唯一一个虚拟寄存器（没有固定约束）：pass 能改名、能顶替的那种。

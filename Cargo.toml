@@ -17,7 +17,7 @@ exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 default = ["toolchain", "m", "f"]
 # ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
 # ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
-toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:regalloc2", "dep:xxhash-rust", "thiserror/std"]
+toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:regalloc2", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
 # M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
 m = ["zmmul"]
 # Zmmul：只有乘法；没开 ⇒ 乘法调 __mulsi3
@@ -49,6 +49,8 @@ clap = { version = "4.6.7", features = ["derive"], optional = true }
 mlirformat = { version = "0.2.1", default-features = false, optional = true }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
 regalloc2 = { version = "0.15.2", optional = true }
+# 机器指令的寄存器表内联存放（regalloc2 本来就依赖它）
+smallvec = { version = "1.6.1", optional = true }
 thiserror = { version = "2", default-features = false }
 # SHF_MERGE 去重的分片哈希（同 lld：llvm::xxh3_64bits）
 xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }

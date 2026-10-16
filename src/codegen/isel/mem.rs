@@ -58,7 +58,7 @@ impl Isel<'_> {
             }
             b => {
                 let d = self.xr();
-                self.emit(MOp::Addr(b, off as i32), vec![d], Vec::new());
+                self.emit(MOp::Addr(b, off as i32), &[d], &[]);
                 d
             }
         }
@@ -73,7 +73,7 @@ impl Isel<'_> {
 
     /// 读一个标量叶子 ⇒ 部件。
     fn load_leaf(&mut self, t: Ty, base: Base, off: i64, align: u64) -> Result<Vec<R>, Error> {
-        let size = self.types().size(t);
+        let size = self.store_size(t);
         let natural = size.min(4);
         if align < natural && size > 1 {
             // 对齐不够：逐字节读、拼
@@ -84,7 +84,7 @@ impl Isel<'_> {
                 for i in 0..n {
                     let (b, o) = self.fit(base, off + i64::try_from(4 * w + i).unwrap_or(0));
                     let d = self.xr();
-                    self.emit(MOp::Load(IOp::Lbu.into(), b, o), vec![d], Self::uses_of(b));
+                    self.emit(MOp::Load(IOp::Lbu.into(), b, o), &[d], &Self::uses_of(b));
                     let sh = if i == 0 { d } else { self.ri(IOp::Slli, d, i32::try_from(8 * i).unwrap_or(0)) };
                     acc = if i == 0 { sh } else { self.rr(IOp::Or, acc, sh) };
                 }
@@ -92,7 +92,7 @@ impl Isel<'_> {
             }
             if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
                 let d = self.fr();
-                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![words[0]]);
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[words[0]]);
                 return Ok(vec![d]);
             }
             return Ok(words);
@@ -100,19 +100,53 @@ impl Isel<'_> {
         let one = |s: &mut Self, op: Opcode, float: bool, at: i64| {
             let (b, o) = s.fit(base, at);
             let d = if float { s.fr() } else { s.xr() };
-            s.emit(MOp::Load(op, b, o), vec![d], Self::uses_of(b));
+            s.emit(MOp::Load(op, b, o), &[d], &Self::uses_of(b));
             d
         };
         Ok(match self.kind(t) {
-            Kind::Int(w) if *w <= 8 => vec![one(self, IOp::Lbu.into(), false, off)],
-            Kind::Int(w) if *w <= 16 => vec![one(self, IOp::Lhu.into(), false, off)],
-            Kind::Int(w) if *w <= 32 => vec![one(self, IOp::Lw.into(), false, off)],
-            Kind::Int(_) | Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
+            // 整数只读 ⌈w/8⌉ 字节（同 LLVM 的 getTypeStoreSize）：每个 32 位部件按 4 / 2 / 1 字节的块拼，读的块零扩展 ⇒ 结果零扩展
+            &Kind::Int(w) => (0..u64::from(w).div_ceil(32))
+                .map(|part| {
+                    let mut acc = R::ZERO;
+                    for (at, n) in Self::chunks((u64::from(w).div_ceil(8) - 4 * part).min(4)) {
+                        let op = match n {
+                            1 => IOp::Lbu,
+                            2 => IOp::Lhu,
+                            _ => IOp::Lw,
+                        };
+                        let d = one(self, op.into(), false, off + i64::try_from(4 * part + at).unwrap_or(0));
+                        let d = if at == 0 { d } else { self.ri(IOp::Slli, d, i32::try_from(8 * at).unwrap_or(0)) };
+                        acc = if acc == R::ZERO { d } else { self.rr(IOp::Or, acc, d) };
+                    }
+                    acc
+                })
+                .collect(),
+            Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
             Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
             Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu.into(), false, off)],
             Kind::Float if crate::feature::Float::ENABLED => vec![one(self, Float::Flw.into(), true, off)],
             Kind::Float => vec![one(self, IOp::Lw.into(), false, off)],
             k => return Self::bad(format!("不能 load {k:?}")),
+        })
+    }
+
+    /// 读写的字节数（同 LLVM 的 getTypeStoreSize：整数 ⌈w/8⌉，其余 = 分配大小）。
+    /// ⚠ riscvc-e3 的 `Types::store_size` 提交后换成它（语义相同）。
+    fn store_size(&self, t: Ty) -> u64 {
+        match self.kind(t) {
+            &Kind::Int(w) => u64::from(w).div_ceil(8),
+            _ => self.types().size(t),
+        }
+    }
+
+    /// 一个 32 位部件里的 `n` 个字节（1..=4）拆成从低到高的块：（字节偏移, 块长 4 / 2 / 1）。
+    fn chunks(n: u64) -> impl Iterator<Item = (u64, u64)> {
+        let (mut at, mut left) = (0, n);
+        core::iter::from_fn(move || {
+            let k = [4, 2, 1].into_iter().find(|&k| k <= left)?;
+            let c = (at, k);
+            (at, left) = (at + k, left - k);
+            Some(c)
         })
     }
 
@@ -131,18 +165,18 @@ impl Isel<'_> {
     }
 
     fn store_leaf(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
-        let size = self.types().size(t);
+        let size = self.store_size(t);
         let natural = size.min(4);
         let one = |s: &mut Self, op: Opcode, v: R, at: i64| {
             let (b, o) = s.fit(base, at);
             let mut uses = vec![v];
             uses.extend(Self::uses_of(b));
-            s.emit(MOp::Store(op, b, o), Vec::new(), uses);
+            s.emit(MOp::Store(op, b, o), &[], &uses);
         };
         if align < natural && size > 1 {
             let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
                 let x = self.xr();
-                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![x], vec![parts[0]]);
+                self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[parts[0]]);
                 vec![x]
             } else {
                 parts.to_vec()
@@ -157,10 +191,22 @@ impl Isel<'_> {
             return Ok(());
         }
         match self.kind(t) {
-            Kind::Int(w) if *w <= 8 => one(self, IOp::Sb.into(), parts[0], off),
-            Kind::Int(w) if *w <= 16 => one(self, IOp::Sh.into(), parts[0], off),
-            Kind::Int(w) if *w <= 32 => one(self, IOp::Sw.into(), parts[0], off),
-            Kind::Int(_) | Kind::Double => {
+            // 整数只写 ⌈w/8⌉ 字节（⛔ i24 写成 4 字节、i42 写成 8 字节：踩到后面的内存）
+            &Kind::Int(w) => {
+                for (part, &word) in parts.iter().enumerate() {
+                    let part = part as u64;
+                    for (at, n) in Self::chunks((u64::from(w).div_ceil(8) - 4 * part).min(4)) {
+                        let op = match n {
+                            1 => IOp::Sb,
+                            2 => IOp::Sh,
+                            _ => IOp::Sw,
+                        };
+                        let v = if at == 0 { word } else { self.ri(IOp::Srli, word, i32::try_from(8 * at).unwrap_or(0)) };
+                        one(self, op.into(), v, off + i64::try_from(4 * part + at).unwrap_or(0));
+                    }
+                }
+            }
+            Kind::Double => {
                 one(self, IOp::Sw.into(), parts[0], off);
                 one(self, IOp::Sw.into(), parts[1], off + 4);
             }
@@ -201,7 +247,8 @@ impl Isel<'_> {
             return Ok(());
         }
         // 动态：字节数向上取 16，sp 往下挪，地址 = sp + 出参区
-        let n = self.get1(count)?;
+        // 个数可能是 i64：rv32 上只看低半（同 llc）
+        let n = self.low(count)?;
         let bytes = if size == 1 {
             n
         } else {
@@ -211,7 +258,7 @@ impl Isel<'_> {
         let bytes = self.ri(IOp::Addi, bytes, 15);
         let bytes = self.ri(IOp::Andi, bytes, -16);
         let d = self.xr();
-        self.emit(MOp::SpAlloc, vec![d], vec![bytes]);
+        self.emit(MOp::SpAlloc, &[d], &[bytes]);
         self.dynamic_sp = true;
         self.set(Some(r), vec![d]);
         Ok(())
@@ -257,7 +304,8 @@ impl Isel<'_> {
         let mut acc = self.materialize(b, 0);
         for (v, stride) in terms {
             let w = self.types().bits(self.ty(v)).unwrap_or(32);
-            let i = self.get1(v)?;
+            // 下标可能是 i64：指针 32 位，只看低半（同 llc）
+            let i = self.low(v)?;
             let i = if w < 32 { self.sext(i, w) } else { i };
             let scaled = match stride {
                 0 => continue,

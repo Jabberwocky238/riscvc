@@ -28,7 +28,7 @@ impl Selected {
             b.insts.pop();
             let call = b.insts.pop().expect("上面看过有两条");
             let MOp::Call(Some(sym)) = call.op else { unreachable!() };
-            let mut tail = MInst::new(MOp::Tail(sym), Vec::new(), Vec::new());
+            let mut tail = MInst::new(MOp::Tail(sym), &[], &[]);
             for (u, rule) in call.uses.into_iter().zip(call.use_rules) {
                 tail.use_on(u, rule);
             }

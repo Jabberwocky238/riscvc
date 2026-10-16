@@ -157,7 +157,7 @@ impl Isel<'_> {
             BinOp::Shl | BinOp::LShr | BinOp::AShr => match self.const_i32(b) {
                 Some(c) => self.shift64_const(op, al, ah, c & 63),
                 None => {
-                    let s = self.get1(b)?;
+                    let s = self.low(b)?;
                     self.shift64_var(op, al, ah, s)
                 }
             },
@@ -399,7 +399,7 @@ impl Isel<'_> {
         let bits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
         Ok(match op {
             CastOp::Trunc => {
-                let x = self.get1(a)?;
+                let x = self.low(a)?;
                 let w = bits(self, to);
                 if w > 32 {
                     let (l, h) = self.pair(a)?;
@@ -414,7 +414,7 @@ impl Isel<'_> {
             }
             CastOp::SExt => {
                 let wf = bits(self, from);
-                let x = self.get1(a)?;
+                let x = self.low(a)?;
                 let s = self.sext(x, wf);
                 let wt = bits(self, to);
                 if wt > 32 {
@@ -429,7 +429,7 @@ impl Isel<'_> {
                 let w = bits(self, to);
                 if w > 32 { vec![x, R::ZERO] } else { vec![self.mask(x, w)] }
             }
-            CastOp::IntToPtr => vec![self.get1(a)?],
+            CastOp::IntToPtr => vec![self.low(a)?],
             CastOp::AddrSpaceCast => self.get(a)?,
             CastOp::Bitcast => {
                 let x = self.get(a)?;
@@ -438,12 +438,12 @@ impl Isel<'_> {
                     (Kind::Float, _) | (_, Kind::Float) if !crate::feature::Float::ENABLED => x,
                     (Kind::Float, Kind::Int(32)) => {
                         let d = self.xr();
-                        self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![d], x);
+                        self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[d], &x);
                         vec![d]
                     }
                     (Kind::Int(32), Kind::Float) => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], x);
+                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &x);
                         vec![d]
                     }
                     _ => x,
@@ -456,17 +456,28 @@ impl Isel<'_> {
     /// `select c, a, b`：整数部件 `b ^ ((a ^ b) & -c)`，浮点部件搬到整数寄存器做同样的事。
     /// `select c, a, b`：一条 [`MOp::Select`]（条件是同一块里的整数比较 ⇒ 直接并进分支，同 `br`）。
     pub(super) fn select_value(&mut self, c: ValId, a: ValId, b: ValId) -> Result<Vec<R>, Error> {
+        let (ta, fb) = (self.get(a)?, self.get(b)?);
+        // 向量的条件（`<n x i1>`）：逐 lane 挑，每 lane 占值的 1/n 个部件（⚠ 并进分支的比较没算出来，⛔ 先 get）
+        if !self.fused.contains_key(&c)
+            && let lanes = self.get(c)?
+            && lanes.len() > 1
+        {
+            if ta.len() != fb.len() || ta.len() % lanes.len() != 0 {
+                return Self::bad(format!("select 的 {} 条 lane 对不上 {} / {} 个部件", lanes.len(), ta.len(), fb.len()));
+            }
+            let k = ta.len() / lanes.len();
+            return Ok(lanes.iter().enumerate().flat_map(|(i, &l)| self.select_parts(IOp::Bne, l, R::ZERO, &ta[i * k..(i + 1) * k], &fb[i * k..(i + 1) * k])).collect());
+        }
         let (op, x, y) = match self.fused.get(&c).copied() {
             Some((p, l, r)) => self.compare_branch(p, l, r)?,
             None => (IOp::Bne, self.get1(c)?, R::ZERO),
         };
-        let (ta, fb) = (self.get(a)?, self.get(b)?);
         Ok(self.select_parts(op, x, y, &ta, &fb))
     }
 
     /// `op x, y` 成立取 `a` 的各部件，否则取 `b` 的：一条 [`MOp::Select`]（目的寄存器逐个绑在真值上）。
     pub(super) fn select_parts(&mut self, op: IOp, x: R, y: R, a: &[R], b: &[R]) -> Vec<R> {
-        let mut inst = MInst::new(MOp::Select(op), Vec::new(), vec![x, y]);
+        let mut inst = MInst::new(MOp::Select(op), &[], &[x, y]);
         let mut out = Vec::new();
         for (k, &t) in a.iter().enumerate() {
             let t = self.virt(t);

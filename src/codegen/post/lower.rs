@@ -6,14 +6,11 @@ use crate::codegen::mir::{Base, MFunc, MInst, MOp, R};
 use crate::feature::Float;
 use crate::isa::{Inst, Opcode, Rv32i as IOp, X};
 use regalloc2::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
+use smallvec::SmallVec;
 
 /// `t6`：不参与分配，大偏移、成环的搬运、栈到栈的搬运借它。
 const SCRATCH: u8 = 31;
 
-/// 12 位有符号立即数放得下。
-fn fits(k: i32) -> bool {
-    (-2048..2048).contains(&k)
-}
 
 /// 一次寄存器搬运（`src = None` ⇒ 从 [`SCRATCH`] 搬）。
 struct Move {
@@ -62,6 +59,11 @@ impl<'a> Lower<'a> {
 
     // ---- 出指令 -------------------------------------------------------------------------
 
+    /// 12 位有符号立即数放得下。
+    const fn fits(k: i32) -> bool {
+        -2048 <= k && k < 2048
+    }
+
     fn push(&mut self, i: PInst) {
         self.blocks[self.cur].insts.push(i);
     }
@@ -91,7 +93,7 @@ impl<'a> Lower<'a> {
 
     /// `rd = base + off`。
     fn addr(&mut self, rd: u8, base: u8, off: i32) {
-        if fits(off) {
+        if Self::fits(off) {
             self.rri(IOp::Addi, rd, base, off);
         } else {
             self.push(PInst::Li(rd, off));
@@ -101,7 +103,7 @@ impl<'a> Lower<'a> {
 
     /// 访存的（基址, 偏移）：偏移放不进 12 位 ⇒ 先算进 t6。
     fn reach(&mut self, base: u8, off: i32) -> (u8, i32) {
-        if fits(off) {
+        if Self::fits(off) {
             return (base, off);
         }
         self.push(PInst::Li(SCRATCH, off));
@@ -122,7 +124,7 @@ impl<'a> Lower<'a> {
     fn adjust_sp(&mut self, by: i32) {
         match by {
             0 => {}
-            k if fits(k) => self.rri(IOp::Addi, X::SP.0, X::SP.0, k),
+            k if Self::fits(k) => self.rri(IOp::Addi, X::SP.0, X::SP.0, k),
             k => {
                 self.push(PInst::Li(SCRATCH, k));
                 self.rrr(IOp::Add, X::SP.0, X::SP.0, SCRATCH);
@@ -193,9 +195,10 @@ impl<'a> Lower<'a> {
     }
 
     /// 一组同时发生的搬运：先搬目的寄存器不再被谁读的；剩下的成环 ⇒ 环上一个源先存进 t6。
-    fn parallel(&mut self, mut moves: Vec<Move>) {
+    fn parallel(&mut self, mut moves: SmallVec<[Move; 2]>) {
         while !moves.is_empty() {
-            match (0..moves.len()).find(|&k| !moves.iter().any(|o| o.src == Some(moves[k].dst))) {
+            // ⚠ 寄存器按（号, 类）认：x12 与 f12 不是同一个
+            match (0..moves.len()).find(|&k| !moves.iter().any(|o| o.float == moves[k].float && o.src == Some(moves[k].dst))) {
                 Some(k) => {
                     let m = moves.remove(k);
                     match (m.src, m.float) {
@@ -205,9 +208,9 @@ impl<'a> Lower<'a> {
                     }
                 }
                 None => {
-                    let src = moves[0].src.expect("成环的搬运都还读着寄存器");
-                    if moves[0].float { self.rrr(Float::FmvXW, SCRATCH, src, 0) } else { self.mov(SCRATCH, src, false) }
-                    for o in moves.iter_mut().filter(|o| o.src == Some(src)) {
+                    let (src, float) = (moves[0].src.expect("成环的搬运都还读着寄存器"), moves[0].float);
+                    if float { self.rrr(Float::FmvXW, SCRATCH, src, 0) } else { self.mov(SCRATCH, src, false) }
+                    for o in moves.iter_mut().filter(|o| o.float == float && o.src == Some(src)) {
                         o.src = None;
                     }
                 }
@@ -218,7 +221,7 @@ impl<'a> Lower<'a> {
     // ---- 指令 ---------------------------------------------------------------------------
 
     /// 一条机器指令各寄存器分到的物理寄存器号（defs 在前、uses 在后）。
-    fn regs(inst: &MInst, allocs: &[Allocation]) -> (Vec<u8>, Vec<u8>) {
+    fn regs(inst: &MInst, allocs: &[Allocation]) -> (SmallVec<[u8; 3]>, SmallVec<[u8; 3]>) {
         let mut k = 0;
         let mut reg = |r: &R| match r {
             R::V(_) => {
@@ -265,7 +268,7 @@ impl<'a> Lower<'a> {
             MOp::Load(op, b, off) => {
                 let (base, adj) = self.base(*b, &u, 0);
                 // 整数读：大偏移时用目的寄存器算地址，⛔ 不占 t6
-                if matches!(op, Opcode::I(_)) && !fits(adj + off) {
+                if matches!(op, Opcode::I(_)) && !Self::fits(adj + off) {
                     self.addr(d[0], base, adj + off);
                     self.load(*op, d[0], d[0], 0);
                 } else {
@@ -292,6 +295,7 @@ impl<'a> Lower<'a> {
             MOp::Select(op) => self.select(*op, inst, &d, &u),
             MOp::Unreachable => self.blocks[self.cur].term = Term::Unreachable,
             MOp::Trap => self.push(PInst::Trap),
+            MOp::Break => self.real(Inst::new(IOp::Ebreak)),
             // `fence rw, rw`
             MOp::Fence => self.real(Inst::new(IOp::Fence).with_imm(0x33)),
             MOp::SpAlloc => {
@@ -306,7 +310,7 @@ impl<'a> Lower<'a> {
     /// `select`：目的寄存器已绑在真值上 ⇒ `op a, b` 成立直接去后半块，不成立先经一个块把假值搬进去。
     fn select(&mut self, op: IOp, inst: &MInst, d: &[u8], u: &[u8]) {
         let n = d.len();
-        let moves: Vec<Move> = (0..n)
+        let moves: SmallVec<[Move; 2]> = (0..n)
             .map(|k| Move { dst: d[k], src: Some(u[2 + n + k]), float: matches!(inst.defs[k], R::V(v) if v.class() == RegClass::Float) })
             .filter(|m| m.src != Some(m.dst))
             .collect();

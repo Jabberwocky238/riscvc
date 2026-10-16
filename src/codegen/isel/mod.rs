@@ -132,7 +132,7 @@ impl<'m> Isel<'m> {
         for b in 0..n {
             if !order.contains(&b) {
                 s.cur = s.bmap[b];
-                s.emit(MOp::Unreachable, Vec::new(), Vec::new());
+                s.emit(MOp::Unreachable, &[], &[]);
             }
         }
         for &b in &order {
@@ -259,7 +259,7 @@ impl<'m> Isel<'m> {
         self.blocks[self.cur].insts.push(inst);
     }
 
-    fn emit(&mut self, op: MOp, defs: Vec<R>, uses: Vec<R>) {
+    fn emit(&mut self, op: MOp, defs: &[R], uses: &[R]) {
         self.push(MInst::new(op, defs, uses));
     }
 
@@ -271,7 +271,7 @@ impl<'m> Isel<'m> {
             return self.soft_muldiv(op, a, b);
         }
         let d = self.xr();
-        self.emit(MOp::Reg(op, 7), vec![d], vec![a, b]);
+        self.emit(MOp::Reg(op, 7), &[d], &[a, b]);
         d
     }
 
@@ -299,7 +299,7 @@ impl<'m> Isel<'m> {
     /// `op rd, a, imm`
     fn ri(&mut self, op: IOp, a: R, imm: i32) -> R {
         let d = self.xr();
-        self.emit(MOp::Imm(op, imm), vec![d], vec![a]);
+        self.emit(MOp::Imm(op, imm), &[d], &[a]);
         d
     }
 
@@ -309,7 +309,7 @@ impl<'m> Isel<'m> {
             return R::ZERO;
         }
         let d = self.xr();
-        self.emit(MOp::Li(v), vec![d], Vec::new());
+        self.emit(MOp::Li(v), &[d], &[]);
         d
     }
 
@@ -319,7 +319,7 @@ impl<'m> Isel<'m> {
             R::V(v) => v,
             R::P(_) => {
                 let d = self.xr();
-                self.emit(MOp::Imm(IOp::Addi, 0), vec![d], vec![r]);
+                self.emit(MOp::Imm(IOp::Addi, 0), &[d], &[r]);
                 let R::V(v) = d else { unreachable!() };
                 v
             }
@@ -345,7 +345,17 @@ impl<'m> Isel<'m> {
         Self::bad(format!("值 %{} 还没算出来（块次序不是支配次序？）", v.0))
     }
 
+    /// 单部件的值（≤ 32 位的整数、指针、float）。⛔ 两个部件的（i64 / double）报错：要低半的明说 [`Self::low`]，
+    /// ⛔ 默默只拿低半（i64 饱和运算曾经因此全错）。
     fn get1(&mut self, v: ValId) -> Result<R, Error> {
+        match self.get(v)?[..] {
+            [r] => Ok(r),
+            ref parts => Self::bad(format!("值 %{} 有 {} 个部件，这里只收一个", v.0, parts.len())),
+        }
+    }
+
+    /// 低 32 位（截断、移位量、整数转指针：只要低半的地方）。
+    fn low(&mut self, v: ValId) -> Result<R, Error> {
         Ok(self.get(v)?[0])
     }
 
@@ -364,7 +374,7 @@ impl<'m> Isel<'m> {
                 .map(|p| match p {
                     Part::F => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![R::ZERO]);
+                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[R::ZERO]);
                         d
                     }
                     _ => R::ZERO,
@@ -377,14 +387,14 @@ impl<'m> Isel<'m> {
             (Const::Float(bits), Kind::Float) => {
                 let x = self.li(*bits as u32 as i32);
                 let d = self.fr();
-                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![d], vec![x]);
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[x]);
                 vec![d]
             }
             (Const::Float(bits), Kind::Double) => vec![self.li(*bits as u32 as i32), self.li((*bits >> 32) as u32 as i32)],
             (Const::Float(bits), Kind::Half | Kind::BFloat) => vec![self.li(*bits as u32 as i32)],
             (Const::Global(name, off), _) => {
                 let d = self.xr();
-                self.emit(MOp::La(name.clone(), *off), vec![d], Vec::new());
+                self.emit(MOp::La(name.clone(), *off), &[d], &[]);
                 vec![d]
             }
             (Const::Agg(items), Kind::Struct(fields, _)) => {
@@ -429,7 +439,7 @@ impl<'m> Isel<'m> {
             }
             Op::CondBr(c, t, f) => self.cond_br(*c, t, f)?,
             Op::Switch(v, d, cases) => self.switch(*v, d, cases)?,
-            Op::Unreachable => self.emit(MOp::Unreachable, Vec::new(), Vec::new()),
+            Op::Unreachable => self.emit(MOp::Unreachable, &[], &[]),
             Op::Bin(op, a, b) => {
                 let parts = self.binary(*op, *a, *b)?;
                 self.set(r, parts);
@@ -499,7 +509,7 @@ impl<'m> Isel<'m> {
                 self.set(r, parts);
             }
             Op::CmpXchg(..) => return Self::bad("cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）"),
-            Op::Fence => self.emit(MOp::Fence, Vec::new(), Vec::new()),
+            Op::Fence => self.emit(MOp::Fence, &[], &[]),
         }
         Ok(())
     }
@@ -519,7 +529,7 @@ impl<'m> Isel<'m> {
 
     /// 本块以无条件跳转收尾。
     fn jump(&mut self, to: usize, args: Vec<VReg>) {
-        self.emit(MOp::Jump(Block::new(to)), Vec::new(), Vec::new());
+        self.emit(MOp::Jump(Block::new(to)), &[], &[]);
         let b = &mut self.blocks[self.cur];
         b.succs = vec![Block::new(to)];
         b.args = vec![args];
@@ -550,7 +560,7 @@ impl<'m> Isel<'m> {
 
     /// 本块以条件跳转收尾：`op a, b` 成立去 `t`。
     fn branch(&mut self, op: IOp, a: R, b: R, t: usize, f: usize) {
-        self.emit(MOp::Branch(op, Block::new(t), Block::new(f)), Vec::new(), vec![a, b]);
+        self.emit(MOp::Branch(op, Block::new(t), Block::new(f)), &[], &[a, b]);
         let blk = &mut self.blocks[self.cur];
         blk.succs = vec![Block::new(t), Block::new(f)];
         blk.args = vec![Vec::new(), Vec::new()];
@@ -597,7 +607,7 @@ impl<'m> Isel<'m> {
     /// 入口：取参数（寄存器上的一条 `Args` 定义、栈上的从入参区读），可变参数记下第一个没用的 a 寄存器。
     fn entry(&mut self, blk: &IBlock) -> Result<(), Error> {
         let mut assign = Assign::default();
-        let mut args = MInst::new(MOp::Args, Vec::new(), Vec::new());
+        let mut args = MInst::new(MOp::Args, &[], &[]);
         let mut loads = Vec::new();
         if self.sret_demoted()? {
             // 返回值放不进寄存器：调用方把地址放在 a0
@@ -611,7 +621,7 @@ impl<'m> Isel<'m> {
         // ⚠ 先推 `Args`（定义寄存器上的参数）、再读栈上的、再做零扩展：⛔ 先用后定义
         let mut params = Vec::new();
         for &p in &blk.params {
-            let parts = self.parts(self.ty(p))?;
+            let parts = if self.boxed(self.ty(p)) { vec![Part::F] } else { self.parts(self.ty(p))? };
             let locs = assign.parts(&parts, false);
             let mut regs = Vec::new();
             for (part, loc) in parts.iter().zip(locs) {
@@ -627,9 +637,11 @@ impl<'m> Isel<'m> {
         self.push(args);
         for (d, part, off) in loads {
             let op = if part == Part::F { Opcode::from(Float::Flw) } else { Opcode::from(IOp::Lw) };
-            self.emit(MOp::Load(op, Base::Incoming, off), vec![d], Vec::new());
+            self.emit(MOp::Load(op, Base::Incoming, off), &[d], &[]);
         }
         for (i, (&p, regs)) in blk.params.iter().zip(params).enumerate() {
+            // half / bfloat：从 NaN-box 的浮点寄存器拿回 16 位
+            let regs = if self.boxed(self.ty(p)) { vec![self.unbox(regs[0])] } else { regs };
             // 窄整数：调用方按 signext / zeroext 扩展过，这里统一成零扩展
             let regs = match self.types().bits(self.ty(p)) {
                 Some(w) if w < 32 && self.f.params.get(i).is_some_and(|p| p.attrs.signext) => vec![self.mask(regs[0], w)],

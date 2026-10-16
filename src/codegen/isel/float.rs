@@ -17,7 +17,7 @@ impl Isel<'_> {
     fn ff(&mut self, op: impl Into<Opcode>, a: R, b: R, rm: Rm) -> R {
         let op: Opcode = op.into();
         let d = self.fr();
-        self.emit(MOp::Reg(op, rm as u8), vec![d], vec![a, b]);
+        self.emit(MOp::Reg(op, rm as u8), &[d], &[a, b]);
         d
     }
 
@@ -25,7 +25,7 @@ impl Isel<'_> {
     fn fx(&mut self, op: impl Into<Opcode>, uses: Vec<R>, rm: Rm) -> R {
         let op: Opcode = op.into();
         let d = self.xr();
-        self.emit(MOp::Reg(op, rm as u8), vec![d], uses);
+        self.emit(MOp::Reg(op, rm as u8), &[d], &uses);
         d
     }
 
@@ -205,7 +205,7 @@ impl Isel<'_> {
                 match (self.soft(to), w > 32) {
                     (None, false) => {
                         let d = self.fr();
-                        self.emit(MOp::Reg(if signed { Float::FcvtSW } else { Float::FcvtSWu }.into(), Rm::Dyn as u8), vec![d], src);
+                        self.emit(MOp::Reg(if signed { Float::FcvtSW } else { Float::FcvtSWu }.into(), Rm::Dyn as u8), &[d], &src);
                         vec![d]
                     }
                     (_, true) => self.libcall(&format!("__float{u}di{sfx}"), &[(src, PAIR.to_vec())], &pt)?,

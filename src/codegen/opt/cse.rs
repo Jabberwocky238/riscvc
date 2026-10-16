@@ -5,12 +5,12 @@
 //! ⛔ 不复用的：读 CSR（`rdcycle` 一类每次不同）、相对当前 `sp` 的出参区地址（动态 alloca 会挪 `sp`）。
 use super::fold::Fold;
 use super::{DomTree, MInst, MOp, Pipeline, R};
-use crate::codegen::mir::Rule;
+use crate::codegen::mir::{Regs, Rule, Rules};
 use crate::isa::Opcode;
 use std::collections::HashMap;
 
 /// 一条纯指令的身份：操作 + 操作数。
-type Key = (MOp, Vec<R>);
+type Key = (MOp, Regs);
 
 /// 复用的范围。
 enum Scope {
@@ -47,7 +47,7 @@ impl Pipeline<'_> {
             match f {
                 Fold::Same(r) => self.rename.insert(d, r),
                 Fold::Into(op, uses) => {
-                    i.use_rules = vec![Rule::Any; uses.len()];
+                    i.use_rules = Rules::from_elem(Rule::Any, uses.len());
                     i.op = op;
                     i.uses = uses;
                 }

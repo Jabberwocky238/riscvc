@@ -24,7 +24,7 @@ impl Isel<'_> {
     /// 发一次调用：`target` 为 `None` 时最后一个 use 是目标地址。回返回值的部件。
     fn emit_call(&mut self, target: Option<String>, indirect: Option<R>, actuals: Vec<Actual>, ret: &[Part]) -> Result<Vec<R>, Error> {
         let mut assign = Assign::default();
-        let mut inst = MInst::new(MOp::Call(target), Vec::new(), Vec::new());
+        let mut inst = MInst::new(MOp::Call(target), &[], &[]);
         let ret_regs = Abi::returns(ret).ok_or_else(|| Error::Select(String::from("返回值放不进寄存器的调用还没做（sret 降级）")))?;
         for a in actuals {
             let locs = assign.parts(&a.parts, a.variadic);
@@ -36,7 +36,7 @@ impl Isel<'_> {
                     }
                     Loc::Stack(off) => {
                         let op = if part == Part::F { Opcode::from(Float::Fsw) } else { Opcode::from(IOp::Sw) };
-                        self.emit(MOp::Store(op, Base::Outgoing, off), Vec::new(), vec![r]);
+                        self.emit(MOp::Store(op, Base::Outgoing, off), &[], &[r]);
                     }
                 }
             }
@@ -84,15 +84,22 @@ impl Isel<'_> {
                 }
                 regs
             };
-            let parts = if attrs.byval.is_some() { vec![Part::X] } else { self.parts(t)? };
+            let (regs, parts) = match attrs.byval {
+                Some(_) => (regs, vec![Part::X]),
+                None if self.boxed(t) => (vec![self.nan_box(regs[0])], vec![Part::F]),
+                None => (regs, self.parts(t)?),
+            };
             actuals.push(Actual { regs, parts, variadic: i >= params.len() });
         }
-        let ret_parts = self.parts(ret)?;
+        let ret_parts = if self.boxed(ret) { vec![Part::F] } else { self.parts(ret)? };
         let (target, indirect) = match callee {
             Callee::Direct(name) => (Some(name.clone()), None),
             Callee::Indirect(v) => (None, Some(self.get1(*v)?)),
         };
         let out = self.emit_call(target, indirect, actuals, &ret_parts)?;
+        if self.boxed(ret) {
+            return Ok(vec![self.unbox(out[0])]);
+        }
         // 窄整数返回值：被调方可能按 signext 扩展过，统一回零扩展
         Ok(match self.types().bits(ret) {
             Some(w) if w < 32 && !ret_attrs.zeroext => vec![self.mask(out[0], w)],
@@ -113,17 +120,39 @@ impl Isel<'_> {
         for at in (0..size).step_by(usize::try_from(step).unwrap_or(1)) {
             let d = self.xr();
             let at = i32::try_from(at).unwrap_or(0);
-            self.emit(MOp::Load(lop, Base::Reg(base_reg), at), vec![d], vec![base_reg]);
-            self.emit(MOp::Store(sop, Base::Frame(obj), at), Vec::new(), vec![d]);
+            self.emit(MOp::Load(lop, Base::Reg(base_reg), at), &[d], &[base_reg]);
+            self.emit(MOp::Store(sop, Base::Frame(obj), at), &[], &[d]);
         }
         let d = self.xr();
-        self.emit(MOp::Addr(Base::Frame(obj), 0), vec![d], Vec::new());
+        self.emit(MOp::Addr(Base::Frame(obj), 0), &[d], &[]);
         Ok(d)
     }
 
     /// `return`。
+    /// 16 位浮点（half / bfloat）开了 F 时按 LLVM 的约定过调用边界（参数、返回值）：NaN-box（高 16 位全 1）进 fa 寄存器。
+    /// 平时它是整数寄存器里零扩展的 16 位。
+    pub(super) fn boxed(&self, t: Ty) -> bool {
+        crate::feature::Float::ENABLED && matches!(self.kind(t), Kind::Half | Kind::BFloat)
+    }
+
+    /// 整数寄存器里的 16 位 ⇒ NaN-box 的浮点寄存器。
+    pub(super) fn nan_box(&mut self, x: R) -> R {
+        let k = self.li(0xffff_0000u32.cast_signed());
+        let o = self.rr(IOp::Or, x, k);
+        let f = self.fr();
+        self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[f], &[o]);
+        f
+    }
+
+    /// 浮点寄存器里 NaN-box 的 16 位 ⇒ 整数寄存器里零扩展的 16 位。
+    pub(super) fn unbox(&mut self, f: R) -> R {
+        let x = self.xr();
+        self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[f]);
+        self.mask(x, 16)
+    }
+
     pub(super) fn ret(&mut self, v: Option<ValId>) -> Result<(), Error> {
-        let mut inst = MInst::new(MOp::Ret, Vec::new(), Vec::new());
+        let mut inst = MInst::new(MOp::Ret, &[], &[]);
         if let Some(v) = v {
             let t = self.ty(v);
             let mut regs = self.get(v)?;
@@ -132,7 +161,12 @@ impl Isel<'_> {
             {
                 regs[0] = self.sext(regs[0], w);
             }
-            let parts = self.parts(t)?;
+            let parts = if self.boxed(t) {
+                regs = vec![self.nan_box(regs[0])];
+                vec![Part::F]
+            } else {
+                self.parts(t)?
+            };
             match Abi::returns(&parts) {
                 Some(pregs) => {
                     for (r, p) in regs.into_iter().zip(pregs) {

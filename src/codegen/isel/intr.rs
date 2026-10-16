@@ -83,6 +83,30 @@ impl Isel<'_> {
         self.bswap32(x)
     }
 
+    /// 64 位的饱和加减：溢出（借位）就换成界值。有符号的界看被加数的符号：非负 ⇒ MAX，负 ⇒ MIN。
+    fn sat64(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
+        let (a, b) = (self.pair(args[0])?, self.pair(args[1])?);
+        let (r, over, bound) = match i {
+            Intr::UAddSat => {
+                let r = self.add64(a, b);
+                let m = self.li(-1);
+                (r, self.ltu64(r, a), [m, m])
+            }
+            Intr::USubSat => (self.sub64(a, b), self.ltu64(a, b), [R::ZERO, R::ZERO]),
+            _ => {
+                let sub = *i == Intr::SSubSat;
+                let r = if sub { self.sub64(a, b) } else { self.add64(a, b) };
+                let over = if sub { self.sign_of_and(a.1, b.1, a.1, r.1) } else { self.sign_of_and(r.1, a.1, r.1, b.1) };
+                let sa = self.ri(IOp::Srai, a.1, 31);
+                let lo = self.ri(IOp::Xori, sa, -1);
+                let k = self.li(i32::MAX);
+                let hi = self.rr(IOp::Xor, sa, k);
+                (r, over, [lo, hi])
+            }
+        };
+        Ok(self.pick(over, &bound, &[r.0, r.1]))
+    }
+
     /// 64 位的 `*.with.overflow`：（结果两半, 溢出 0 / 1）。
     fn overflow64(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
         let (a, b) = (self.pair(args[0])?, self.pair(args[1])?);
@@ -164,9 +188,12 @@ impl Isel<'_> {
         self.ri(IOp::Srli, t, 31)
     }
 
-    /// 二元 intrinsic 的两个窄整数操作数（有符号的先扩展）。
+    /// 二元 intrinsic 的两个窄整数操作数（≤ 32 位；有符号的先扩展）。
     fn two(&mut self, args: &[ValId], signed: bool) -> Result<(R, R, u32), Error> {
         let w = self.bits_of(args[0]);
+        if w > 32 {
+            return Self::bad(format!("i{w} 的这个 intrinsic 还没做"));
+        }
         let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
         Ok(if signed { (self.sext(a, w), self.sext(b, w), w) } else { (a, b, w) })
     }
@@ -176,6 +203,13 @@ impl Isel<'_> {
         let first_double = args.first().is_some_and(|a| matches!(self.kind(self.ty(*a)), Kind::Double));
         // F 没开时的 float：一个整数部件，按位做 / 调 libm
         let soft_float = args.first().is_some_and(|a| self.soft(self.ty(*a)) == Some("sf"));
+        // 向量的位操作还没逐 lane 做：⛔ 只算第一条 lane
+        if matches!(i, Intr::Ctlz | Intr::Cttz | Intr::Ctpop | Intr::Bswap | Intr::Bitreverse | Intr::Abs | Intr::Fshl | Intr::Fshr)
+            && let Some(a) = args.first()
+            && matches!(self.kind(self.ty(*a)), Kind::Vector(..))
+        {
+            return Self::bad(format!("向量的 {i:?} 还没做"));
+        }
         Ok(match i {
             Intr::Nop | Intr::VaEnd => Vec::new(),
             Intr::Expect => self.get(args[0])?,
@@ -276,6 +310,7 @@ impl Isel<'_> {
                 let (a, b) = (self.get(args[0])?, self.get(args[1])?);
                 self.pick(c, &a, &b)
             }
+            Intr::SAddSat | Intr::SSubSat | Intr::UAddSat | Intr::USubSat if self.bits_of(args[0]) == 64 => self.sat64(i, args)?,
             Intr::SAddSat | Intr::SSubSat => {
                 let (a, b, w) = self.two(args, true)?;
                 let sub = *i == Intr::SSubSat;
@@ -499,24 +534,25 @@ impl Isel<'_> {
                 };
                 let dst = self.get1(args[0])?;
                 let src = self.get1(args[1])?;
-                let len = self.get1(args[2])?;
+                // 长度可能是 i64（`llvm.memcpy.p0.p0.i64`）：size_t 32 位，只看低半（同 llc）
+                let len = self.low(args[2])?;
                 self.libcall(name, &[(vec![dst], vec![Part::X]), (vec![src], vec![Part::X]), (vec![len], vec![Part::X])], &[Part::X])?;
                 Vec::new()
             }
             Intr::Trap | Intr::DebugTrap => {
-                self.emit(MOp::Trap, Vec::new(), Vec::new());
+                self.emit(if *i == Intr::Trap { MOp::Trap } else { MOp::Break }, &[], &[]);
                 Vec::new()
             }
             Intr::StackSave => {
                 self.dynamic_sp = true;
                 let d = self.xr();
-                self.emit(MOp::SpSave, vec![d], Vec::new());
+                self.emit(MOp::SpSave, &[d], &[]);
                 vec![d]
             }
             Intr::StackRestore => {
                 self.dynamic_sp = true;
                 let p = self.get1(args[0])?;
-                self.emit(MOp::SpRestore, Vec::new(), vec![p]);
+                self.emit(MOp::SpRestore, &[], &[p]);
                 Vec::new()
             }
             Intr::VaStart => {
@@ -525,14 +561,14 @@ impl Isel<'_> {
                 let k = i32::from(18 - first);
                 let off = if k > 0 { -4 * k } else { self.varargs_stack };
                 let d = self.xr();
-                self.emit(MOp::Addr(Base::Incoming, off), vec![d], Vec::new());
+                self.emit(MOp::Addr(Base::Incoming, off), &[d], &[]);
                 let (b, o) = self.address(args[0])?;
                 let o = i32::try_from(o).unwrap_or(0);
                 let mut uses = vec![d];
                 if let Base::Reg(r) = b {
                     uses.push(r);
                 }
-                self.emit(MOp::Store(IOp::Sw.into(), b, o), Vec::new(), uses);
+                self.emit(MOp::Store(IOp::Sw.into(), b, o), &[], &uses);
                 Vec::new()
             }
             Intr::VaCopy => {
@@ -542,13 +578,13 @@ impl Isel<'_> {
                 if let Base::Reg(r) = sb {
                     uses.push(r);
                 }
-                self.emit(MOp::Load(IOp::Lw.into(), sb, i32::try_from(so).unwrap_or(0)), vec![v], uses);
+                self.emit(MOp::Load(IOp::Lw.into(), sb, i32::try_from(so).unwrap_or(0)), &[v], &uses);
                 let (db, doff) = self.address(args[0])?;
                 let mut uses = vec![v];
                 if let Base::Reg(r) = db {
                     uses.push(r);
                 }
-                self.emit(MOp::Store(IOp::Sw.into(), db, i32::try_from(doff).unwrap_or(0)), Vec::new(), uses);
+                self.emit(MOp::Store(IOp::Sw.into(), db, i32::try_from(doff).unwrap_or(0)), &[], &uses);
                 Vec::new()
             }
             Intr::Libm(name) => {
@@ -586,7 +622,7 @@ impl Isel<'_> {
         let (s, inv) = match self.const_i32(args[2]) {
             Some(c) => (self.li(c & 63), self.li(63 - (c & 63))),
             None => {
-                let s = self.get1(args[2])?;
+                let s = self.low(args[2])?;
                 let s = self.ri(IOp::Andi, s, 63);
                 (s, self.ri(IOp::Xori, s, 63))
             }
@@ -621,7 +657,7 @@ impl Isel<'_> {
     fn fop(&mut self, op: impl Into<Opcode>, uses: Vec<R>) -> R {
         let op: Opcode = op.into();
         let d = self.fr();
-        self.emit(MOp::Reg(op, Rm::Dyn as u8), vec![d], uses);
+        self.emit(MOp::Reg(op, Rm::Dyn as u8), &[d], &uses);
         d
     }
 
@@ -633,7 +669,7 @@ impl Isel<'_> {
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));
             let x = self.get1(a)?;
             let c = self.xr();
-            self.emit(MOp::Reg(Float::FclassS.into(), 7), vec![c], vec![x]);
+            self.emit(MOp::Reg(Float::FclassS.into(), 7), &[c], &[x]);
             let t = self.ri(IOp::Andi, c, m);
             return Ok(self.rr(IOp::Sltu, R::ZERO, t));
         }

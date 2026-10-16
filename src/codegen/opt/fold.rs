@@ -14,6 +14,8 @@
 //! 条件跳转与 `select` 的条件（同 SelectionDAG 把 setcc 并进 brcond）：`bne c, zero` 里 `c` 是比较算出来的 0/1 ⇒
 //! 直接拿比较的操作数跳（`seqz x` ⇒ `beq x, zero`、`slt a, b` ⇒ `blt a, b`、`xori c, 1` ⇒ 反条件 …）。
 use super::{MInst, MOp, R};
+use crate::codegen::mir::Regs;
+use smallvec::smallvec;
 use crate::feature::Zmmul;
 use crate::isa::{Opcode, Rv32i as IOp};
 use regalloc2::VReg;
@@ -24,13 +26,13 @@ pub enum Fold {
     /// 就是这个寄存器（定义可删）。
     Same(R),
     /// 换成这条指令（操作数）。
-    Into(MOp, Vec<R>),
+    Into(MOp, Regs),
 }
 
 impl Fold {
     /// 一个常数（0 ⇒ `zero`）。
     fn constant(k: i32) -> Self {
-        if k == 0 { Self::Same(R::ZERO) } else { Self::Into(MOp::Li(k), Vec::new()) }
+        if k == 0 { Self::Same(R::ZERO) } else { Self::Into(MOp::Li(k), Regs::new()) }
     }
 }
 
@@ -40,15 +42,15 @@ pub struct Known {
     consts: HashMap<VReg, i32>,
     offsets: HashMap<VReg, (R, i32)>,
     /// 整数运算的定义（找条件的来历用）。
-    defs: HashMap<VReg, (MOp, Vec<R>)>,
-}
-
-/// 12 位有符号立即数放得下。
-fn fits(k: i64) -> bool {
-    (-2048..2048).contains(&k)
+    defs: HashMap<VReg, (MOp, Regs)>,
 }
 
 impl Known {
+    /// 12 位有符号立即数放得下。
+    const fn fits(k: i64) -> bool {
+        -2048 <= k && k < 2048
+    }
+
     fn value(&self, r: R) -> Option<i32> {
         match r {
             R::P(0) => Some(0),
@@ -148,8 +150,8 @@ impl Known {
             IOp::Addi => {
                 let R::V(v) = a else { return None };
                 let &(base, k0) = self.offsets.get(&v)?;
-                let sum = i32::try_from(i64::from(k0) + i64::from(k)).ok().filter(|s| fits(i64::from(*s)))?;
-                Some(Fold::Into(MOp::Imm(IOp::Addi, sum), vec![base]))
+                let sum = i32::try_from(i64::from(k0) + i64::from(k)).ok().filter(|s| Self::fits(i64::from(*s)))?;
+                Some(Fold::Into(MOp::Imm(IOp::Addi, sum), smallvec![base]))
             }
             _ => None,
         }
@@ -189,7 +191,7 @@ impl Known {
             IOp::Sra => (IOp::Srai, k & 31),
             _ => return None,
         };
-        fits(i64::from(k)).then(|| Fold::Into(MOp::Imm(op, k), vec![a]))
+        Self::fits(i64::from(k)).then(|| Fold::Into(MOp::Imm(op, k), smallvec![a]))
     }
 
     /// `mul rd, a, b`。
@@ -206,7 +208,7 @@ impl Known {
         match k {
             0 => Some(Fold::Same(R::ZERO)),
             1 => Some(Fold::Same(a)),
-            k if k > 0 && k.cast_unsigned().is_power_of_two() => Some(Fold::Into(MOp::Imm(IOp::Slli, k.trailing_zeros().cast_signed()), vec![a])),
+            k if k > 0 && k.cast_unsigned().is_power_of_two() => Some(Fold::Into(MOp::Imm(IOp::Slli, k.trailing_zeros().cast_signed()), smallvec![a])),
             _ => None,
         }
     }

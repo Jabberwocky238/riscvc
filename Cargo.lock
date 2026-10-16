@@ -270,6 +270,7 @@ dependencies = [
  "object",
  "regalloc2",
  "riscvc-macros",
+ "smallvec",
  "thiserror",
  "xxhash-rust",
 ]

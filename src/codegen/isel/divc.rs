@@ -63,36 +63,44 @@ impl Udiv {
     }
 }
 
-/// 有符号除以 `d` 的魔数与移位（同 LLVM 的 `SignedDivisionByConstantInfo::get`）。
-fn sdiv_magic(d: i32) -> (i32, u32) {
-    let ad = d.unsigned_abs();
-    let min = 1u32 << 31;
-    let t = min + (d.cast_unsigned() >> 31);
-    let anc = t - 1 - t % ad;
-    let mut p = 31;
-    let (mut q1, mut r1) = (min / anc, min % anc);
-    let (mut q2, mut r2) = (min / ad, min % ad);
-    loop {
-        p += 1;
-        q1 = q1.wrapping_shl(1);
-        r1 = r1.wrapping_shl(1);
-        if r1 >= anc {
-            q1 = q1.wrapping_add(1);
-            r1 = r1.wrapping_sub(anc);
+/// 有符号除以 `d` 的魔数与移位（[`Sdiv::new`]）。
+struct Sdiv {
+    magic: i32,
+    shift: u32,
+}
+
+impl Sdiv {
+    /// 同 LLVM 的 `SignedDivisionByConstantInfo::get`。
+    fn new(d: i32) -> Self {
+        let ad = d.unsigned_abs();
+        let min = 1u32 << 31;
+        let t = min + (d.cast_unsigned() >> 31);
+        let anc = t - 1 - t % ad;
+        let mut p = 31;
+        let (mut q1, mut r1) = (min / anc, min % anc);
+        let (mut q2, mut r2) = (min / ad, min % ad);
+        loop {
+            p += 1;
+            q1 = q1.wrapping_shl(1);
+            r1 = r1.wrapping_shl(1);
+            if r1 >= anc {
+                q1 = q1.wrapping_add(1);
+                r1 = r1.wrapping_sub(anc);
+            }
+            q2 = q2.wrapping_shl(1);
+            r2 = r2.wrapping_shl(1);
+            if r2 >= ad {
+                q2 = q2.wrapping_add(1);
+                r2 = r2.wrapping_sub(ad);
+            }
+            let delta = ad - r2;
+            if !(q1 < delta || (q1 == delta && r1 == 0)) {
+                break;
+            }
         }
-        q2 = q2.wrapping_shl(1);
-        r2 = r2.wrapping_shl(1);
-        if r2 >= ad {
-            q2 = q2.wrapping_add(1);
-            r2 = r2.wrapping_sub(ad);
-        }
-        let delta = ad - r2;
-        if !(q1 < delta || (q1 == delta && r1 == 0)) {
-            break;
-        }
+        let magic = q2.wrapping_add(1).cast_signed();
+        Self { magic: if d < 0 { magic.wrapping_neg() } else { magic }, shift: p - 32 }
     }
-    let magic = q2.wrapping_add(1).cast_signed();
-    (if d < 0 { magic.wrapping_neg() } else { magic }, p - 32)
 }
 
 impl Isel<'_> {
@@ -137,7 +145,7 @@ impl Isel<'_> {
             }
             _ if !Zmmul::Mulh.enabled() => None,
             d => {
-                let (magic, shift) = sdiv_magic(d);
+                let Sdiv { magic, shift } = Sdiv::new(d);
                 let m = self.li(magic);
                 let mut q = self.rr(Zmmul::Mulh, x, m);
                 if d > 0 && magic < 0 {
