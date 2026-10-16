@@ -35,6 +35,11 @@ pub trait Table: Copy + PartialEq + fmt::Debug + fmt::Display + FromStr + 'stati
     fn ext(&self) -> &str;
     fn name(&self) -> &str;
     fn bits(&self) -> u32;
+    /// 低 7 位（主操作码）是 `op` 的那些（译码只在这里找；缺省全表）。
+    fn by_opcode(op: u32) -> &'static [Self] {
+        let _ = op;
+        Self::ALL
+    }
     /// 这次编译认不认（扩展的 cargo feature 开了没有）。
     fn enabled(&self) -> bool;
     fn mask(&self) -> u32;
@@ -144,7 +149,7 @@ impl<O: Table> TryFrom<u32> for Inst<O> {
     type Error = ();
     /// 按这张表译一个字（只认开了的）：命中多条时取掩码位最多的（`fence.tso` 胜过 `fence`）。
     fn try_from(w: u32) -> Result<Self, ()> {
-        let op = O::ALL.iter().copied().filter(|op| op.enabled() && w & op.mask() == op.bits()).max_by_key(|op| op.mask().count_ones()).ok_or(())?;
+        let op = O::by_opcode(w & 0x7f).iter().copied().filter(|op| op.enabled() && w & op.mask() == op.bits()).max_by_key(|op| op.mask().count_ones()).ok_or(())?;
         Ok(op.decode(w).ok_or(())?.with_op(op))
     }
 }

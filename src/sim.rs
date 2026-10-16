@@ -140,8 +140,9 @@ impl Cpu {
             self.steps += 1;
             return Ok(());
         }
+        // 扩展都不认 ⇒ RV32I（⛔ 再问一遍扩展）
         let w = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
-        self.pc = self.exec(devs, w, 4)?;
+        self.pc = self.exec_base(w, 4, devs)?;
         self.steps += 1;
         Ok(())
     }
@@ -157,6 +158,11 @@ impl Cpu {
             let next = cx.next;
             return Ok(next.unwrap_or_else(|| self.pc.wrapping_add(len)));
         }
+        self.exec_base(w, len, devs)
+    }
+
+    /// RV32I 的一条（`exec` 去掉扩展那一步）。
+    fn exec_base(&mut self, w: u32, len: u32, devs: &mut [&mut dyn Device]) -> Result<u32, Stop> {
         let i = Inst::<Op>::try_from(w).map_err(|()| Stop::Trap(w))?;
         let (rs1, rs2) = (self.x[i.rs1 as usize], self.x[i.rs2 as usize]);
         let imm = i.imm.cast_unsigned();

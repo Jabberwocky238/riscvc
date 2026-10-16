@@ -117,6 +117,23 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
     let names: Vec<&LitStr> = rows.iter().map(|(_, r)| &r.name).collect();
     let forms: Vec<&Ident> = rows.iter().map(|(_, r)| &r.form).collect();
     let bits: Vec<&Expr> = rows.iter().map(|(_, r)| &r.bits).collect();
+    // 按低 7 位（主操作码）分桶：固定位是整数字面量的进它的桶，不是的（算出来的）进每个桶都查的兜底
+    let literal = |e: &Expr| match e {
+        Expr::Lit(l) => match &l.lit {
+            syn::Lit::Int(i) => i.base10_parse::<u32>().ok(),
+            _ => None,
+        },
+        _ => None,
+    };
+    let mut buckets: std::collections::BTreeMap<u32, Vec<&Ident>> = std::collections::BTreeMap::new();
+    let mut rest: Vec<&Ident> = Vec::new();
+    for (i, b) in idents.iter().zip(&bits) {
+        match literal(b) {
+            Some(v) => buckets.entry(v & 0x7f).or_default().push(i),
+            None => rest.push(i),
+        }
+    }
+    let arms = buckets.iter().map(|(op, vs)| quote! { #op => &[#(Self::#vs,)* #(Self::#rest),*], });
     let mut out = quote! {
         impl #ty {
             /// 全部指令。
@@ -132,6 +149,7 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
             fn ext(&self) -> &str { #name }
             fn name(&self) -> &str { match self { #(Self::#idents => #names),* } }
             fn bits(&self) -> u32 { match self { #(Self::#idents => #bits),* } }
+            fn by_opcode(op: u32) -> &'static [Self] { match op { #(#arms)* _ => &[#(Self::#rest),*] } }
             fn enabled(&self) -> bool { Self::ENABLED }
             fn mask(&self) -> u32 { ::riscvc::isa::Layout::mask(self.form()) }
             fn encode(&self, f: &::riscvc::isa::Fields) -> u32 { ::riscvc::isa::Layout::encode(self.form(), f) }
