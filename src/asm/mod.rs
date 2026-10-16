@@ -448,7 +448,7 @@ impl<'e> Assembler<'e> {
         let here = self.here();
         let fixed = self.sections[self.cur].fixups.last().is_some_and(|f| f.offset == here);
         // `.option exact`：⛔ 压（同 llvm-mc）
-        match crate::feature::Compressed::compress(w).filter(|_| self.mode.rvc && !self.mode.exact && !fixed) {
+        match (self.mode.rvc && !self.mode.exact && !fixed).then(|| crate::feature::Compressed::compress(w)).flatten() {
             Some(h) => self.bytes(&h.to_le_bytes()),
             None => self.bytes(&w.to_le_bytes()),
         }

@@ -28,6 +28,11 @@ impl Assembler<'_> {
     /// 解析修补点、写 ELF。
     pub(super) fn finish(mut self) -> Result<Vec<u8>, Error> {
         self.layout()?;
+        // 可松弛点 / LEB 按起点排好（布局放宽时重记过；crosses 二分要有序）
+        for s in &mut self.sections {
+            s.relax_items.sort_unstable();
+            s.leb_items.sort_unstable();
+        }
         let relocs = self.resolve()?;
         let attrs = self.attributes_section();
         // 节号（与下面 reserve 的次序一致）：各节，有重定位的紧跟它的 .rela

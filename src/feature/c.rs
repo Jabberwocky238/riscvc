@@ -427,7 +427,8 @@ impl Compressed {
         if w == 0xc000_1073 {
             return Some(0);
         }
-        let i = Inst::<Opcode>::try_from(w).ok()?;
+        // 压缩表只涉及 RV32I 与 F：分表译（各自按主操作码分桶），⛔ 走整个操作码并集
+        let i = Inst::<IOp>::try_from(w).map(|i| i.with_op(Opcode::I(i.op))).or_else(|()| Inst::<Float>::try_from(w).map(|i| i.with_op(Opcode::F(i.op)))).ok()?;
         PATS.iter().filter(|p| p.op == i.op).find_map(|p| {
             let mut c = CInst { row: 0, rd: 0, rs1: 0, rs2: 0, imm: i.imm };
             let mut set = [None::<u8>; 3];

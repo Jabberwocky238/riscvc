@@ -157,10 +157,11 @@ impl Assembler<'_> {
 
     /// 节里 [lo, hi] 之间整个落着一个可松弛点（同 MC：跨过它的差在汇编时定不下来）；节里有可松弛点时，
     /// 带标号的 `.uleb128` 也算（MC 的 LEB 片段不折）。
+    /// ⚠ 两张表按起点有序、互不重叠（[`Assembler::finish`] 排过）⇒ 二分：起点 ≥ lo 的第一个，终点也最小（⛔ 每个修补点扫整节）。
     fn crosses(&self, section: usize, lo: u64, hi: u64) -> bool {
         let s = &self.sections[section];
-        let inside = |&(a, b): &(u64, u64)| a >= lo && b <= hi;
-        s.relax_items.iter().any(inside) || (!s.relax_items.is_empty() && s.leb_items.iter().any(inside))
+        let inside = |items: &[(u64, u64)]| items.get(items.partition_point(|&(a, _)| a < lo)).is_some_and(|&(_, b)| b <= hi);
+        inside(&s.relax_items) || (!s.relax_items.is_empty() && inside(&s.leb_items))
     }
 
     /// 同节的「A − B (+ k)」跨过可松弛点 ⇒ 不折，A、B 留在值里（同 MC 的 AttemptToFoldSymbolOffsetDifference）：

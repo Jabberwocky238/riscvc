@@ -289,10 +289,12 @@ struct Template;
 impl Template {
     /// 模板对上了 ⇒ 展开（`$名` 换成原文）。
     fn expand(pattern: &str, expansion: &str, mnemonic: &str, args: &Args<'_>) -> Option<String> {
-        let (pm, params) = pattern.split_once(char::is_whitespace).unwrap_or((pattern, ""));
-        if pm != mnemonic {
+        // 先比助记符（几乎都对不上，⛔ 每条都切一遍模板）
+        let rest = pattern.strip_prefix(mnemonic)?;
+        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
             return None;
         }
+        let params = rest.trim_start();
         let params: Vec<&str> = params.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
         if params.len() != args.ops.len() {
             return None;
