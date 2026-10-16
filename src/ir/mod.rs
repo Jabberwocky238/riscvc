@@ -67,6 +67,8 @@ pub enum Intr {
     Ctpop,
     Bswap,
     Bitreverse,
+    /// `ptrmask(p, m)`：`p & m`（clang 给 `va_arg` 的 8 字节对齐用）。
+    PtrMask,
     Abs,
     SMax,
     SMin,

@@ -222,6 +222,7 @@ fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
         "ctpop" => Intr::Ctpop,
         "bswap" => Intr::Bswap,
         "bitreverse" => Intr::Bitreverse,
+        "ptrmask" => Intr::PtrMask,
         "abs" => Intr::Abs,
         "smax" => Intr::SMax,
         "smin" => Intr::SMin,

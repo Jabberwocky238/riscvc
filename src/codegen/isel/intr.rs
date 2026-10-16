@@ -3,7 +3,7 @@ use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{IPred, Intr, Kind, Ty, ValId};
 use crate::feature::{Zmmul, Float};
-use crate::isa::{Opcode, Rv32i as IOp, Rm};
+use crate::isa::{Opcode, Rv32i as IOp, Rm, Table};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
@@ -64,17 +64,96 @@ impl Isel<'_> {
         self.rr(IOp::Or, a, b)
     }
 
-    /// 按 0 / 1 的 `c` 在两组部件里挑（整数部件）：`b ^ ((a ^ b) & -c)`。
+    /// 按 0 / 1 的 `c` 在两组部件里挑。
     pub(super) fn pick(&mut self, c: R, a: &[R], b: &[R]) -> Vec<R> {
-        let m = self.rr(IOp::Sub, R::ZERO, c);
-        a.iter()
-            .zip(b)
-            .map(|(&x, &y)| {
-                let d = self.rr(IOp::Xor, x, y);
-                let d = self.rr(IOp::And, d, m);
-                self.rr(IOp::Xor, d, y)
-            })
-            .collect()
+        self.select_parts(IOp::Bne, c, R::ZERO, a, b)
+    }
+
+    /// 位反转（32 位）：相邻 1 / 2 / 4 位两两交换，再按字节反转（同 LLVM 没有 Zbb 时的展开）。
+    fn rev32(&mut self, x: R) -> R {
+        let mut x = x;
+        for (s, m) in [(1, 0x5555_5555u32), (2, 0x3333_3333), (4, 0x0f0f_0f0f)] {
+            let m = self.li(m.cast_signed());
+            let a = self.ri(IOp::Srli, x, s);
+            let a = self.rr(IOp::And, a, m);
+            let b = self.rr(IOp::And, x, m);
+            let b = self.ri(IOp::Slli, b, s);
+            x = self.rr(IOp::Or, a, b);
+        }
+        self.bswap32(x)
+    }
+
+    /// 64 位的 `*.with.overflow`：（结果两半, 溢出 0 / 1）。
+    fn overflow64(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
+        let (a, b) = (self.pair(args[0])?, self.pair(args[1])?);
+        let sign = |s: &mut Self, x: R| s.ri(IOp::Srli, x, 31);
+        let (r, ovf) = match i {
+            Intr::UAddOv => {
+                let r = self.add64(a, b);
+                (r, self.ltu64(r, a))
+            }
+            Intr::USubOv => (self.sub64(a, b), self.ltu64(a, b)),
+            // 有符号加减：结果与两个操作数的符号关系（高半的符号位）
+            Intr::SAddOv => {
+                let r = self.add64(a, b);
+                let t = self.sign_of_and(r.1, a.1, r.1, b.1);
+                (r, t)
+            }
+            Intr::SSubOv => {
+                let r = self.sub64(a, b);
+                let t = self.sign_of_and(a.1, b.1, a.1, r.1);
+                (r, t)
+            }
+            Intr::UMulOv => {
+                let r = self.mul64(a, b)?;
+                (r, self.umul64_overflow(a, b))
+            }
+            _ => {
+                // 有符号乘：两边取绝对值做无符号乘；积放不进 63 位就溢出，⚠ 积为负时 2⁶³ 本身还放得下
+                let r = self.mul64(a, b)?;
+                let (sa, sb) = (self.ri(IOp::Srai, a.1, 31), self.ri(IOp::Srai, b.1, 31));
+                let abs = |s: &mut Self, (l, h): (R, R), m: R| {
+                    let (l, h) = (s.rr(IOp::Xor, l, m), s.rr(IOp::Xor, h, m));
+                    s.sub64((l, h), (m, m))
+                };
+                let (ua, ub) = (abs(self, a, sa), abs(self, b, sb));
+                let wide = self.umul64_overflow(ua, ub);
+                let p = self.mul64(ua, ub)?;
+                let neg = self.rr(IOp::Xor, sa, sb);
+                let top = sign(self, p.1);
+                // p == 2⁶³：高半是 0x80000000、低半是 0
+                let k = self.li(i32::MIN);
+                let d = self.rr(IOp::Xor, p.1, k);
+                let d = self.rr(IOp::Or, d, p.0);
+                let exact = self.ri(IOp::Sltiu, d, 1);
+                let allowed = self.rr(IOp::And, exact, neg);
+                let allowed = self.ri(IOp::Andi, allowed, 1);
+                let lost = self.rr(IOp::Sub, top, allowed);
+                let lost = self.rr(IOp::Sltu, R::ZERO, lost);
+                (r, self.rr(IOp::Or, wide, lost))
+            }
+        };
+        Ok(vec![r.0, r.1, ovf])
+    }
+
+    /// 无符号 64 × 64 的积放不进 64 位 ⇒ 1：两个高半都非零，或交叉项的高半非零，或高半累加进位。
+    fn umul64_overflow(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> R {
+        let (na, nb) = (self.rr(IOp::Sltu, R::ZERO, ah), self.rr(IOp::Sltu, R::ZERO, bh));
+        let both = self.rr(IOp::And, na, nb);
+        let h1 = self.rr(Zmmul::Mulhu, ah, bl);
+        let h2 = self.rr(Zmmul::Mulhu, al, bh);
+        let h = self.rr(IOp::Or, h1, h2);
+        let cross = self.rr(IOp::Sltu, R::ZERO, h);
+        // 交叉项的低半与 mulhu(al, bl) 相加：高半进位
+        let (m1, m2) = (self.rr(Zmmul::Mul, ah, bl), self.rr(Zmmul::Mul, al, bh));
+        let t = self.rr(IOp::Add, m1, m2);
+        let c1 = self.rr(IOp::Sltu, t, m1);
+        let h0 = self.rr(Zmmul::Mulhu, al, bl);
+        let hi = self.rr(IOp::Add, h0, t);
+        let c2 = self.rr(IOp::Sltu, hi, t);
+        let c = self.rr(IOp::Or, c1, c2);
+        let o = self.rr(IOp::Or, both, cross);
+        self.rr(IOp::Or, o, c)
     }
 
     /// 32 位的溢出位（`(x ^ y) & (x ^ z)` 的符号位）⇒ 0 / 1。
@@ -238,10 +317,13 @@ impl Isel<'_> {
             }
             Intr::SAddOv | Intr::SSubOv | Intr::UAddOv | Intr::USubOv | Intr::SMulOv | Intr::UMulOv => {
                 let signed = matches!(i, Intr::SAddOv | Intr::SSubOv | Intr::SMulOv);
-                let (a, b, w) = self.two(args, signed)?;
-                if w > 32 {
-                    return Self::bad(format!("{i:?}.i{w} 还没做"));
+                match self.bits_of(args[0]) {
+                    64 if matches!(i, Intr::SMulOv | Intr::UMulOv) && !Zmmul::Mul.enabled() => return Self::bad(format!("{i:?}.i64 没有 Zmmul 还没做")),
+                    64 => return self.overflow64(i, args),
+                    w if w > 32 => return Self::bad(format!("{i:?}.i{w} 还没做")),
+                    _ => {}
                 }
+                let (a, b, w) = self.two(args, signed)?;
                 let (r, ovf) = match i {
                     Intr::UAddOv => {
                         let s = self.rr(IOp::Add, a, b);
@@ -478,7 +560,22 @@ impl Isel<'_> {
                 let ret = rt.map(|t| self.parts(t)).transpose()?.unwrap_or_default();
                 self.libcall(name, &ps, &ret)?
             }
-            Intr::Bitreverse => return Self::bad("bitreverse 还没做"),
+            Intr::Bitreverse => match self.bits_of(args[0]) {
+                64 => {
+                    let (lo, hi) = self.pair(args[0])?;
+                    vec![self.rev32(hi), self.rev32(lo)]
+                }
+                w @ (8 | 16 | 32) => {
+                    let x = self.get1(args[0])?;
+                    let r = self.rev32(x);
+                    vec![if w == 32 { r } else { self.ri(IOp::Srli, r, 32 - w.cast_signed()) }]
+                }
+                w => return Self::bad(format!("bitreverse.i{w}")),
+            },
+            Intr::PtrMask => {
+                let (p, m) = (self.get1(args[0])?, self.get1(args[1])?);
+                vec![self.rr(IOp::And, p, m)]
+            }
         })
     }
 

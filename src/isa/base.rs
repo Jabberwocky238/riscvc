@@ -257,6 +257,22 @@ pub enum Rv32i {
 }
 
 /// RV32I 的打印别名（LLVM `InstAlias` 里 EmitPriority ≠ 0 的那些）。
+impl Rv32i {
+    /// 条件分支的反条件（`beq` ⇔ `bne` …）；不是条件分支 ⇒ `None`。
+    #[must_use]
+    pub const fn inverted(self) -> Option<Self> {
+        Some(match self {
+            Self::Beq => Self::Bne,
+            Self::Bne => Self::Beq,
+            Self::Blt => Self::Bge,
+            Self::Bge => Self::Blt,
+            Self::Bltu => Self::Bgeu,
+            Self::Bgeu => Self::Bltu,
+            _ => return None,
+        })
+    }
+}
+
 fn alias(i: &Inst<Rv32i>, pc: u64, s: Style) -> Option<(String, String)> {
     let x = |r| s.x(r);
     let (rd, rs1, rs2, imm) = (i.rd, i.rs1, i.rs2, i.imm);

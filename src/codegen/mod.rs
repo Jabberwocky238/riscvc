@@ -2,15 +2,17 @@
 //!
 //! ```text
 //! isel     指令选择 ⇒ 机器 IR（虚拟寄存器）
+//! opt      机器 IR 上的 pass（SSA）：化简、公共子表达式、死代码
 //! regalloc regalloc2（Ion）
-//! emit     栈帧布局、序言 / 尾声、分配结果 ⇒ 汇编
+//! post     分配之后：物理寄存器的机器函数（栈帧、序言 / 尾声、分支折叠、分支松弛）⇒ 汇编
 //! data     全局变量、别名
 //! ```
 mod abi;
 mod data;
-mod emit;
 mod isel;
 mod mir;
+mod opt;
+mod post;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -31,14 +33,15 @@ impl Module {
             if f.blocks.is_empty() {
                 continue;
             }
-            let sel = isel::Isel::select(self, f)?;
+            let mut sel = isel::Isel::select(self, f)?;
+            sel.optimize();
             let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs);
             if !mf.well_formed() {
                 return Err(Error::Select(format!("{}：机器块没有以终结指令收尾", f.name)));
             }
             let opts = regalloc2::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
             let out = regalloc2::run(&mf, &abi::Abi::machine_env(), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
-            let body = emit::Emitter::new(&sel, &mf, &out, id).body();
+            let body = post::PFunc::new(&sel, &mf, &out, id).to_string();
             let section = f.section.as_deref().map_or_else(|| String::from("\t.text"), |s| format!("\t.section\t{s},\"ax\",@progbits"));
             let _ = writeln!(text, "{section}");
             Self::binding(&mut text, &f.name, f.linkage, f.hidden);

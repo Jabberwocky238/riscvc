@@ -17,6 +17,9 @@ pub struct Llc {
     /// 列出注册的方言与 pass。
     #[arg(long)]
     list_plugins: bool,
+    /// `-mattr=-relax`：出目标文件时 ⛔ 出 `R_RISCV_RELAX` / `R_RISCV_ALIGN`（缺省同 llc 开着松弛）。
+    #[arg(long)]
+    no_relax: bool,
 }
 
 impl Llc {
@@ -40,14 +43,14 @@ impl Llc {
         reg.run(&mut module, &pipeline).map_err(|e| format!("{}：{e}", input.display()))?;
         let asm = module.compile().map_err(|e| format!("{}：{e}", input.display()))?;
         if output.extension().is_some_and(|e| e == "o") {
-            super::write(output, &Self::object(&asm).map_err(|e| format!("{}（汇编生成的代码）：{e}", input.display()))?)
+            super::write(output, &self.object(&asm).map_err(|e| format!("{}（汇编生成的代码）：{e}", input.display()))?)
         } else {
             super::write(output, asm.as_bytes())
         }
     }
 
     /// 生成的汇编 ⇒ 目标文件。
-    fn object(asm: &str) -> Result<Vec<u8>, String> {
-        crate::asm::Assembler::new(crate::asm::Options { attributes: None, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
+    fn object(&self, asm: &str) -> Result<Vec<u8>, String> {
+        crate::asm::Assembler::new(crate::asm::Options { attributes: None, relax: !self.no_relax, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
     }
 }

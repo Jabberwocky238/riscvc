@@ -1,10 +1,9 @@
 //! 整数：≤ 32 位一个寄存器（窄的恒零扩展），33..=64 位拆成低 / 高两半。
 use super::{Error, Isel, Part, R};
-use crate::codegen::mir::MOp;
+use crate::codegen::mir::{MInst, MOp, Rule};
 use crate::ir::{BinOp, CastOp, Const, IPred, Kind, Ty, ValId};
 use crate::feature::{Zmmul, M, Float};
 use crate::isa::{Base, Rv32i as IOp, Table};
-use regalloc2::RegClass;
 
 impl Isel<'_> {
     /// 低 `w` 位以外清零（零扩展的不变式）。
@@ -102,14 +101,24 @@ impl Isel<'_> {
                 let r = self.with_imm(IOp::Sra, IOp::Srai, s, b)?;
                 self.mask(r, w)
             }
-            BinOp::UDiv | BinOp::URem => {
-                let y = self.get1(b)?;
-                self.rr(if op == BinOp::UDiv { M::Divu } else { M::Remu }, x, y)
-            }
+            BinOp::UDiv | BinOp::URem => match self.const_i32(b).and_then(|c| self.div_by_const(op, x, c, w)) {
+                Some(r) => r,
+                None => {
+                    let y = self.get1(b)?;
+                    self.rr(if op == BinOp::UDiv { M::Divu } else { M::Remu }, x, y)
+                }
+            },
             BinOp::SDiv | BinOp::SRem => {
-                let y = self.get1(b)?;
-                let (sx, sy) = (self.sext(x, w), self.sext(y, w));
-                let r = self.rr(if op == BinOp::SDiv { M::Div } else { M::Rem }, sx, sy);
+                let sx = self.sext(x, w);
+                let sc = self.const_i32(b).map(|c| if w < 32 { (c << (32 - w)) >> (32 - w) } else { c });
+                let r = match sc.and_then(|c| self.div_by_const(op, sx, c, w)) {
+                    Some(r) => r,
+                    None => {
+                        let y = self.get1(b)?;
+                        let sy = self.sext(y, w);
+                        self.rr(if op == BinOp::SDiv { M::Div } else { M::Rem }, sx, sy)
+                    }
+                };
                 self.mask(r, w)
             }
             _ => return Self::bad(format!("整数不支持 {op:?}")),
@@ -134,33 +143,16 @@ impl Isel<'_> {
                 (self.rr(iop, al, bl), self.rr(iop, ah, bh))
             }
             BinOp::Add => {
-                let (bl, bh) = self.pair(b)?;
-                let lo = self.rr(IOp::Add, al, bl);
-                let carry = self.rr(IOp::Sltu, lo, al);
-                let h = self.rr(IOp::Add, ah, bh);
-                (lo, self.rr(IOp::Add, h, carry))
+                let b = self.pair(b)?;
+                self.add64((al, ah), b)
             }
             BinOp::Sub => {
-                let (bl, bh) = self.pair(b)?;
-                let lo = self.rr(IOp::Sub, al, bl);
-                let borrow = self.rr(IOp::Sltu, al, bl);
-                let h = self.rr(IOp::Sub, ah, bh);
-                (lo, self.rr(IOp::Sub, h, borrow))
-            }
-            // 没有 Zmmul：整个调 __muldi3（同 llc；拆开算的 mulhu 自己就要调它）
-            BinOp::Mul if !Zmmul::Mul.enabled() => {
-                let (bl, bh) = self.pair(b)?;
-                let r = self.libcall("__muldi3", &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
-                (r[0], r[1])
+                let b = self.pair(b)?;
+                self.sub64((al, ah), b)
             }
             BinOp::Mul => {
-                let (bl, bh) = self.pair(b)?;
-                let lo = self.rr(Zmmul::Mul, al, bl);
-                let h0 = self.rr(Zmmul::Mulhu, al, bl);
-                let h1 = self.rr(Zmmul::Mul, al, bh);
-                let h2 = self.rr(Zmmul::Mul, ah, bl);
-                let h = self.rr(IOp::Add, h0, h1);
-                (lo, self.rr(IOp::Add, h, h2))
+                let b = self.pair(b)?;
+                self.mul64((al, ah), b)?
             }
             BinOp::Shl | BinOp::LShr | BinOp::AShr => match self.const_i32(b) {
                 Some(c) => self.shift64_const(op, al, ah, c & 63),
@@ -184,6 +176,46 @@ impl Isel<'_> {
         };
         let hi = if w < 64 && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl) { self.mask(hi, w - 32) } else { hi };
         Ok(vec![lo, hi])
+    }
+
+    // ---- 64 位的部件运算（两半：lo, hi）：binary64 与溢出检测共用 ------------------------------
+
+    pub(super) fn add64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> (R, R) {
+        let lo = self.rr(IOp::Add, al, bl);
+        let carry = self.rr(IOp::Sltu, lo, al);
+        let h = self.rr(IOp::Add, ah, bh);
+        (lo, self.rr(IOp::Add, h, carry))
+    }
+
+    pub(super) fn sub64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> (R, R) {
+        let lo = self.rr(IOp::Sub, al, bl);
+        let borrow = self.rr(IOp::Sltu, al, bl);
+        let h = self.rr(IOp::Sub, ah, bh);
+        (lo, self.rr(IOp::Sub, h, borrow))
+    }
+
+    /// 低 64 位的积。没有 Zmmul：整个调 `__muldi3`（同 llc；拆开算的 mulhu 自己就要调它）。
+    pub(super) fn mul64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> Result<(R, R), Error> {
+        if !Zmmul::Mul.enabled() {
+            let r = self.libcall("__muldi3", &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
+            return Ok((r[0], r[1]));
+        }
+        let lo = self.rr(Zmmul::Mul, al, bl);
+        let h0 = self.rr(Zmmul::Mulhu, al, bl);
+        let h1 = self.rr(Zmmul::Mul, al, bh);
+        let h2 = self.rr(Zmmul::Mul, ah, bl);
+        let h = self.rr(IOp::Add, h0, h1);
+        Ok((lo, self.rr(IOp::Add, h, h2)))
+    }
+
+    /// `a <u b`（64 位）⇒ 0 / 1。
+    pub(super) fn ltu64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> R {
+        let hi_lt = self.rr(IOp::Sltu, ah, bh);
+        let d = self.rr(IOp::Xor, ah, bh);
+        let hi_eq = self.ri(IOp::Sltiu, d, 1);
+        let lo_lt = self.rr(IOp::Sltu, al, bl);
+        let t = self.rr(IOp::And, hi_eq, lo_lt);
+        self.rr(IOp::Or, hi_lt, t)
     }
 
     /// 64 位值的两半。
@@ -422,32 +454,29 @@ impl Isel<'_> {
     }
 
     /// `select c, a, b`：整数部件 `b ^ ((a ^ b) & -c)`，浮点部件搬到整数寄存器做同样的事。
+    /// `select c, a, b`：一条 [`MOp::Select`]（条件是同一块里的整数比较 ⇒ 直接并进分支，同 `br`）。
     pub(super) fn select_value(&mut self, c: ValId, a: ValId, b: ValId) -> Result<Vec<R>, Error> {
-        let c = self.get1(c)?;
-        let m = self.rr(IOp::Sub, R::ZERO, c);
-        let (xa, xb) = (self.get(a)?, self.get(b)?);
+        let (op, x, y) = match self.fused.get(&c).copied() {
+            Some((p, l, r)) => self.compare_branch(p, l, r)?,
+            None => (IOp::Bne, self.get1(c)?, R::ZERO),
+        };
+        let (ta, fb) = (self.get(a)?, self.get(b)?);
+        Ok(self.select_parts(op, x, y, &ta, &fb))
+    }
+
+    /// `op x, y` 成立取 `a` 的各部件，否则取 `b` 的：一条 [`MOp::Select`]（目的寄存器逐个绑在真值上）。
+    pub(super) fn select_parts(&mut self, op: IOp, x: R, y: R, a: &[R], b: &[R]) -> Vec<R> {
+        let mut inst = MInst::new(MOp::Select(op), Vec::new(), vec![x, y]);
         let mut out = Vec::new();
-        for (pa, pb) in xa.into_iter().zip(xb) {
-            let float = matches!(pa, R::V(v) if v.class() == RegClass::Float);
-            let (ia, ib) = if float {
-                let (x, y) = (self.xr(), self.xr());
-                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![x], vec![pa]);
-                self.emit(MOp::Reg(Float::FmvXW.into(), 7), vec![y], vec![pb]);
-                (x, y)
-            } else {
-                (pa, pb)
-            };
-            let d = self.rr(IOp::Xor, ia, ib);
-            let d = self.rr(IOp::And, d, m);
-            let r = self.rr(IOp::Xor, d, ib);
-            out.push(if float {
-                let f = self.fr();
-                self.emit(MOp::Reg(Float::FmvWX.into(), 7), vec![f], vec![r]);
-                f
-            } else {
-                r
-            });
+        for (k, &t) in a.iter().enumerate() {
+            let t = self.virt(t);
+            let d = R::V(self.vreg(t.class()));
+            inst.use_on(R::V(t), Rule::Any);
+            inst.def_on(d, Rule::Reuse(2 + k));
+            out.push(d);
         }
-        Ok(out)
+        b.iter().for_each(|&f| inst.use_on(f, Rule::Any));
+        self.push(inst);
+        out
     }
 }

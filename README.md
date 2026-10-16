@@ -240,6 +240,7 @@ riscvc llc [OPTIONS] [INPUT]
 | `-o <OUTPUT>` | output; a `.o` extension produces an object file, anything else produces assembly |
 | `--pass <NAME>` | run a pass on the internal IR before code generation (repeatable, runs in order) |
 | `--list-plugins` | list registered dialects and passes |
+| `--no-relax` | object output without `R_RISCV_RELAX` / `R_RISCV_ALIGN` (like `llc -mattr=-relax`; default on, like llc) |
 
 Built-in plugins: dialect `llvm`; pass `dce` (removes side-effect-free instructions whose results are unused).
 
@@ -422,12 +423,16 @@ As of 2026-10-15:
 | Linker | 167 compiler-rt objects × 2 linker scripts: identical to ld.lld (loadable sections incl. empty ones, program headers incl. `PT_GNU_RELRO` / `PT_RISCV_ATTRIBUTES`, entry, globals); llvm-mc `+relax` objects (535 `R_RISCV_RELAX`, 8 `R_RISCV_ALIGN`, merge string sections) identical to ld.lld both with and without `--no-relax` |
 | MLIR parsing | 334 generic-form `.mlir` files parse and convert to the internal IR |
 | Code generation | all 334 compile; O0 and O2: 97 scalar-signature functions each, 4,656 calls each, results identical to llc (undefined behaviour in the C sources excluded) |
-| End-to-end ELF | 163 builtins unit tests: all match LLVM at O0 and O2, except 2 fp128 tests (out of scope, skipped) |
+| End-to-end ELF | 163 builtins unit tests: all match LLVM at O0 and O2, except 2 fp128 tests (out of scope, skipped); 16 hand-written C programs (`tests/programs`: sorting, hashing, strings, struct passing, switch, function pointers, 64-bit, bit tricks, float / double, varargs, recursion, lists, bignum, global tables): `main`'s checksum identical to LLVM at O0 and O2 |
+| Division by constants | shifts / magic-number multiply (same as LLVM's BuildUDIV / BuildSDIV): 496 functions (udiv / urem / sdiv / srem × i32 / i16 / i8 × 40-odd divisors), 209,806 calls checked against exact arithmetic |
+| Code size (`.text`, both `-mattr=-relax`, `tools/size_vs_llc.py`) | compiler-rt O2 1.18× llc, O0 0.98×; `tests/programs` O2 1.09×, O0 0.95× |
 | MC fixtures | 276 of 279 identical to llvm-mc (with and without relaxation); remaining: long-branch relaxation of conditional branches pushed out by `.fill`, alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
 
 Not done yet: `sret` lowering (return values that do not fit in registers), test coverage of stack-passed
-arguments, `cmpxchg`, `i128` / `fp128`, vector operations; code quality (peepholes, jump tables, constant
-reuse) has not been compared with llc.
+arguments, `cmpxchg`, `i128` / `fp128`, vector operations. Code size: the machine-IR passes (constant folding,
+dominator-scoped CSE, branch-condition folding, tail calls) and post-allocation branch folding / relaxation are in;
+still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping, jump tables and
+copy coalescing (regalloc2 has no move hints), plus llc's lowering of `cttz` (de Bruijn table).
 
 ## Building and testing
 
@@ -444,7 +449,7 @@ To run the full comparison you need an LLVM 22.1.8 build with the RISC-V target 
 
 ```bash
 tools/corpus.sh          # compiler-rt builtins -> target/corpus/{s,ll,mlir}
-tools/programs.sh        # regenerate tests/fixtures/{unit,builtins,support.o} (checked in)
+tools/programs.sh        # regenerate tests/fixtures/{unit,builtins,programs,support} (checked in; ONLY=programs: just programs/)
 tools/fixtures.py        # regenerate tests/fixtures/mc (checked in)
 cargo test --release
 ```

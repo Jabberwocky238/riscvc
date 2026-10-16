@@ -7,19 +7,21 @@
 //! ```text
 //! mod.rs   骨架：值表、块、跳转（关键边切开、块参数）、入口取参
 //! int.rs   整数运算与比较（≤ 32 位直接做，i64 拆两半，除法走 __divdi3 一类）
+//! divc.rs  除以常数：移位 / 乘魔数（不出除法指令）
 //! float.rs float 用 F 扩展；double 全走 compiler-rt 软浮点（__adddf3 …）
 //! mem.rs   load / store / alloca / getelementptr、聚合值
 //! call.rs  调用、返回、库函数调用
 //! intr.rs  llvm.intr.*
 //! ```
 mod call;
+mod divc;
 mod float;
 mod int;
 mod intr;
 mod mem;
 
 use super::abi::{Assign, Loc, Part};
-use super::mir::{Base, MBlock, MInst, MOp, R};
+use super::mir::{Base, MBlock, MInst, MOp, R, Rule};
 use super::Error;
 use crate::ir::{Block as IBlock, Const, Function, IPred, Inst, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::feature::{Float, M, Zmmul};
@@ -75,7 +77,7 @@ pub struct Isel<'m> {
     preds: Vec<u32>,
     /// 各 IR 值被用了几次。
     uses: Vec<u32>,
-    /// 只给本块条件跳转用的整数比较：留到跳转时直接出 `bxx`。
+    /// 本块条件跳转 / select 的条件里的整数比较：用处直接出 `bxx`（另有用处的照样算出来）。
     fused: HashMap<ValId, (IPred, ValId, ValId)>,
     out_args: i32,
     calls: bool,
@@ -171,17 +173,19 @@ impl<'m> Isel<'m> {
                 inst.op.operands().into_iter().for_each(|v| self.uses[v.0 as usize] += 1);
             }
         }
+        // 条件跳转、select 的条件是同一块里的 ≤ 32 位比较 ⇒ 分支直接拿比较的操作数（同 LLVM：比较另有用处也照样算出来）
         for blk in &self.f.blocks {
-            let Some(Inst { op: Op::CondBr(c, ..), .. }) = blk.insts.last() else { continue };
-            if self.uses[c.0 as usize] != 1 {
-                continue;
-            }
-            for inst in &blk.insts {
-                if inst.result == Some(*c)
-                    && let Op::ICmp(p, a, b) = inst.op
-                    && self.types().bits(self.ty(a)).is_none_or(|w| w <= 32)
-                {
-                    self.fused.insert(*c, (p, a, b));
+            for c in blk.insts.iter().filter_map(|i| match i.op {
+                Op::CondBr(c, ..) | Op::Select(c, ..) => Some(c),
+                _ => None,
+            }) {
+                for inst in &blk.insts {
+                    if inst.result == Some(c)
+                        && let Op::ICmp(p, a, b) = inst.op
+                        && self.types().bits(self.ty(a)).is_none_or(|w| w <= 32)
+                    {
+                        self.fused.insert(c, (p, a, b));
+                    }
                 }
             }
         }
@@ -435,7 +439,8 @@ impl<'m> Isel<'m> {
                 self.set(r, parts);
             }
             Op::ICmp(p, a, b) => {
-                if r.is_some_and(|r| self.fused.contains_key(&r)) {
+                // 只给分支用 ⇒ 不用算出来
+                if r.is_some_and(|r| self.fused.contains_key(&r) && self.uses[r.0 as usize] == 1) {
                     return Ok(());
                 }
                 let x = self.icmp(*p, *a, *b)?;
@@ -599,43 +604,38 @@ impl<'m> Isel<'m> {
             let d = self.xr();
             let [loc] = assign.parts(&[Part::X], false)[..] else { unreachable!() };
             if let Loc::Reg(p) = loc {
-                args.defs.push(d);
-                args.fixed_defs.push(Some(p));
+                args.def_on(d, Rule::Fixed(p));
             }
             self.sret = Some(d);
         }
-        for (i, &p) in blk.params.iter().enumerate() {
-            let t = self.ty(p);
-            let parts = self.parts(t)?;
+        // ⚠ 先推 `Args`（定义寄存器上的参数）、再读栈上的、再做零扩展：⛔ 先用后定义
+        let mut params = Vec::new();
+        for &p in &blk.params {
+            let parts = self.parts(self.ty(p))?;
             let locs = assign.parts(&parts, false);
             let mut regs = Vec::new();
             for (part, loc) in parts.iter().zip(locs) {
                 let d = R::V(self.vreg(part.class()));
                 match loc {
-                    Loc::Reg(preg) => {
-                        args.defs.push(d);
-                        args.fixed_defs.push(Some(preg));
-                    }
+                    Loc::Reg(preg) => args.def_on(d, Rule::Fixed(preg)),
                     Loc::Stack(off) => loads.push((d, *part, off)),
                 }
                 regs.push(d);
             }
-            // 窄整数：调用方按 signext / zeroext 扩展过，这里统一成零扩展
-            let regs = match self.types().bits(t) {
-                Some(w) if w < 32 && self.f.params.get(i).is_some_and(|p| p.attrs.signext) => {
-                    let m = self.mask(regs[0], w);
-                    vec![m]
-                }
-                _ => regs,
-            };
-            self.vals[p.0 as usize] = Some(regs);
+            params.push(regs);
         }
-        let n = args.defs.len();
-        args.fixed_defs.truncate(n);
         self.push(args);
         for (d, part, off) in loads {
             let op = if part == Part::F { Opcode::from(Float::Flw) } else { Opcode::from(IOp::Lw) };
             self.emit(MOp::Load(op, Base::Incoming, off), vec![d], Vec::new());
+        }
+        for (i, (&p, regs)) in blk.params.iter().zip(params).enumerate() {
+            // 窄整数：调用方按 signext / zeroext 扩展过，这里统一成零扩展
+            let regs = match self.types().bits(self.ty(p)) {
+                Some(w) if w < 32 && self.f.params.get(i).is_some_and(|p| p.attrs.signext) => vec![self.mask(regs[0], w)],
+                _ => regs,
+            };
+            self.vals[p.0 as usize] = Some(regs);
         }
         if self.f.varargs {
             self.varargs = Some(assign.next_x());

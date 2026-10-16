@@ -2,7 +2,7 @@
 //! 栈上的先存进出参区；返回值是固定 def；调用方保存的寄存器记成 clobber。库函数调用走同一条路。
 use super::{Error, FrameObj, Isel, R};
 use crate::codegen::abi::{Abi, Assign, Loc, Part};
-use crate::codegen::mir::{Base, MInst, MOp};
+use crate::codegen::mir::{Base, MInst, MOp, Rule};
 use crate::ir::{ArgAttrs, Callee, Kind, RmwOp, Ty, ValId};
 use crate::feature::{Float};
 use crate::isa::{Opcode, Rv32i as IOp};
@@ -32,8 +32,7 @@ impl Isel<'_> {
                 match loc {
                     Loc::Reg(p) => {
                         let v = self.virt(r);
-                        inst.uses.push(R::V(v));
-                        inst.fixed_uses.push(Some(p));
+                        inst.use_on(R::V(v), Rule::Fixed(p));
                     }
                     Loc::Stack(off) => {
                         let op = if part == Part::F { Opcode::from(Float::Fsw) } else { Opcode::from(IOp::Sw) };
@@ -44,15 +43,13 @@ impl Isel<'_> {
         }
         self.out_args = self.out_args.max(assign.stack);
         if let Some(t) = indirect {
-            inst.uses.push(t);
-            inst.fixed_uses.push(None);
+            inst.use_on(t, Rule::Any);
         }
         let mut clobbers = Abi::caller_saved();
         let mut out = Vec::new();
         for (part, p) in ret.iter().zip(&ret_regs) {
             let d = R::V(self.vreg(part.class()));
-            inst.defs.push(d);
-            inst.fixed_defs.push(Some(*p));
+            inst.def_on(d, Rule::Fixed(*p));
             clobbers.remove(*p);
             out.push(d);
         }
@@ -140,8 +137,7 @@ impl Isel<'_> {
                 Some(pregs) => {
                     for (r, p) in regs.into_iter().zip(pregs) {
                         let v = self.virt(r);
-                        inst.uses.push(R::V(v));
-                        inst.fixed_uses.push(Some(p));
+                        inst.use_on(R::V(v), Rule::Fixed(p));
                     }
                 }
                 None => return Self::bad("返回值放不进寄存器（sret 降级）还没做"),

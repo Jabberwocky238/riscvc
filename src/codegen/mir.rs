@@ -4,7 +4,7 @@ use crate::isa::{Opcode, Rv32i as IOp};
 use regalloc2::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
 
 /// 一个寄存器引用：虚拟寄存器（交给 regalloc2），或不参与分配的物理寄存器（`zero` / `sp`）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum R {
     V(VReg),
     /// 物理整数寄存器号。
@@ -16,7 +16,7 @@ impl R {
 }
 
 /// 地址：基址寄存器 + 偏移，或栈帧对象 + 偏移（帧布局定了才知道相对 `sp` 的偏移）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Base {
     Reg(R),
     /// 栈帧对象（alloca、按值传参的拷贝）。
@@ -28,12 +28,15 @@ pub enum Base {
 }
 
 /// 一条机器指令。寄存器操作数的次序见各变体（`defs` 在前，`uses` 在后）。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MOp {
     /// `op rd, rs1, rs2`（R 型、浮点 R / R4 型、比较、转换：按 isa 的格式取寄存器个数）。舍入模式在 `rm`。
     Reg(Opcode, u8),
     /// `op rd, rs1, imm`
     Imm(IOp, i32),
+    /// `select`（同 LLVM 的 Select_GPR 伪指令）：uses = `[a, b, 真值…, 假值…]`，defs 逐个绑定真值
+    /// （[`Rule::Reuse`]）；`op a, b` 不成立时把假值搬进去。分配之后展开成「`b<op>` 跳过 + `mv`」。
+    Select(IOp),
     /// `li rd, imm`（32 位常数，展开同汇编器）
     Li(i32),
     /// `lla rd, 符号 + 偏移`
@@ -50,6 +53,8 @@ pub enum MOp {
     Call(Option<String>),
     /// 返回（uses 是固定在返回寄存器上的值）。
     Ret,
+    /// 尾调用：拆掉本函数的帧后跳去（uses 同 [`MOp::Call`] 的实参；见 `opt::tail`）。
+    Tail(String),
     /// 无条件跳转（块参数经 regalloc2 的 branch args 传）。
     Jump(Block),
     /// 条件跳转：`op rs1, rs2` 成立去 `t`，否则去 `f`。
@@ -67,15 +72,25 @@ pub enum MOp {
     SpRestore,
 }
 
+/// 一个寄存器操作数的分配约束。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rule {
+    Any,
+    /// 固定在这个物理寄存器上（调用约定）。
+    Fixed(PReg),
+    /// 定义与第几个使用分到同一个寄存器（`select` 的目的寄存器绑定真值）。只用在定义上。
+    Reuse(usize),
+}
+
 /// 一条机器指令与它的寄存器。
 #[derive(Clone, Debug)]
 pub struct MInst {
     pub op: MOp,
     pub defs: Vec<R>,
     pub uses: Vec<R>,
-    /// 固定寄存器约束（与 `defs` / `uses` 一一对应，`None` = 任意）。
-    pub fixed_defs: Vec<Option<PReg>>,
-    pub fixed_uses: Vec<Option<PReg>>,
+    /// 分配约束，与 `defs` / `uses` 一一对应（经 [`MInst::def_on`] / [`MInst::use_on`] 成对加）。
+    pub def_rules: Vec<Rule>,
+    pub use_rules: Vec<Rule>,
     /// 调用的破坏集。
     pub clobbers: PRegSet,
     /// regalloc2 看到的操作数（`finish` 时由上面几项算出）。
@@ -86,27 +101,73 @@ impl MInst {
     #[must_use]
     pub fn new(op: MOp, defs: Vec<R>, uses: Vec<R>) -> Self {
         let (nd, nu) = (defs.len(), uses.len());
-        Self { op, defs, uses, fixed_defs: vec![None; nd], fixed_uses: vec![None; nu], clobbers: PRegSet::empty(), operands: Vec::new() }
+        Self { op, defs, uses, def_rules: vec![Rule::Any; nd], use_rules: vec![Rule::Any; nu], clobbers: PRegSet::empty(), operands: Vec::new() }
+    }
+
+    /// 加一个定义。
+    pub fn def_on(&mut self, r: R, rule: Rule) {
+        self.defs.push(r);
+        self.def_rules.push(rule);
+    }
+
+    /// 加一个使用。
+    pub fn use_on(&mut self, r: R, rule: Rule) {
+        self.uses.push(r);
+        self.use_rules.push(rule);
+    }
+
+    /// 第 `j` 个使用必须留在虚拟寄存器上（有固定约束，或被某个定义绑定）：⛔ 换成 `zero` 之类的物理寄存器。
+    #[must_use]
+    pub fn pinned(&self, j: usize) -> bool {
+        self.use_rules[j] != Rule::Any || self.def_rules.contains(&Rule::Reuse(j))
+    }
+
+    /// 第 `j` 个使用在 regalloc2 操作数表里的下标（虚拟的定义在前、虚拟的使用在后）。
+    fn operand_of_use(&self, j: usize) -> usize {
+        let virt = |r: &&R| matches!(r, R::V(_));
+        self.defs.iter().filter(virt).count() + self.uses[..j].iter().filter(virt).count()
     }
 
     /// 算 regalloc2 的操作数：只收虚拟寄存器（物理的 `zero` / `sp` 不参与分配）。
     fn finish(&mut self) {
         let mut ops = Vec::new();
-        for (r, f) in self.defs.iter().zip(&self.fixed_defs) {
-            if let R::V(v) = r {
-                ops.push(f.map_or_else(|| Operand::reg_def(*v), |p| Operand::reg_fixed_def(*v, p)));
+        for (r, rule) in self.defs.iter().zip(&self.def_rules) {
+            if let R::V(v) = *r {
+                ops.push(match *rule {
+                    Rule::Any => Operand::reg_def(v),
+                    Rule::Fixed(p) => Operand::reg_fixed_def(v, p),
+                    Rule::Reuse(j) => Operand::reg_reuse_def(v, self.operand_of_use(j)),
+                });
             }
         }
-        for (r, f) in self.uses.iter().zip(&self.fixed_uses) {
-            if let R::V(v) = r {
-                ops.push(f.map_or_else(|| Operand::reg_use(*v), |p| Operand::reg_fixed_use(*v, p)));
+        for (r, rule) in self.uses.iter().zip(&self.use_rules) {
+            if let R::V(v) = *r {
+                ops.push(match *rule {
+                    Rule::Fixed(p) => Operand::reg_fixed_use(v, p),
+                    _ => Operand::reg_use(v),
+                });
             }
         }
         self.operands = ops;
     }
 
+    /// 纯的：只算出 `defs`，没有别的作用（定义没人用就能删）。
+    #[must_use]
+    pub fn pure(&self) -> bool {
+        matches!(self.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..) | MOp::Select(_))
+    }
+
+    /// 定义的唯一一个虚拟寄存器（没有固定约束）：pass 能改名、能顶替的那种。
+    #[must_use]
+    pub fn def(&self) -> Option<VReg> {
+        match (self.defs.as_slice(), self.def_rules.as_slice()) {
+            ([R::V(v)], [Rule::Any]) => Some(*v),
+            _ => None,
+        }
+    }
+
     fn is_term(&self) -> bool {
-        matches!(self.op, MOp::Ret | MOp::Jump(_) | MOp::Branch(..) | MOp::Unreachable)
+        matches!(self.op, MOp::Ret | MOp::Tail(_) | MOp::Jump(_) | MOp::Branch(..) | MOp::Unreachable)
     }
 }
 
@@ -131,44 +192,9 @@ pub struct MFunc {
 }
 
 impl MFunc {
-    /// 删死代码：没有副作用、定义的虚拟寄存器没人用的指令（反复做到不再变）。
-    fn dce(blocks: &mut [MBlock], vregs: usize) {
-        loop {
-            let mut used = vec![false; vregs];
-            for b in blocks.iter() {
-                for i in &b.insts {
-                    for r in &i.uses {
-                        if let R::V(v) = r {
-                            used[v.vreg()] = true;
-                        }
-                    }
-                }
-                for v in b.args.iter().flatten() {
-                    used[v.vreg()] = true;
-                }
-            }
-            let mut changed = false;
-            for b in blocks.iter_mut() {
-                let before = b.insts.len();
-                b.insts.retain(|i| {
-                    let pure = matches!(i.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..));
-                    !pure || i.defs.iter().any(|r| match r {
-                        R::V(v) => used[v.vreg()],
-                        R::P(_) => true,
-                    })
-                });
-                changed |= b.insts.len() != before;
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// 从各块组装：删死代码、补前驱、平铺指令、算操作数。
+    /// 从各块组装（pass 已跑完，见 [`super::opt`]）：补前驱、平铺指令、算操作数。
     #[must_use]
     pub fn new(mut blocks: Vec<MBlock>, vregs: usize) -> Self {
-        Self::dce(&mut blocks, vregs);
         for b in &mut blocks {
             b.preds.clear();
         }
@@ -221,7 +247,7 @@ impl Function for MFunc {
     }
 
     fn is_ret(&self, insn: RInst) -> bool {
-        matches!(self.insts[insn.index()].op, MOp::Ret | MOp::Unreachable)
+        matches!(self.insts[insn.index()].op, MOp::Ret | MOp::Tail(_) | MOp::Unreachable)
     }
 
     fn is_branch(&self, insn: RInst) -> bool {

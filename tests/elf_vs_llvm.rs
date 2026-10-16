@@ -1,5 +1,6 @@
 //! 端到端 ELF 对拍：`tests/fixtures/unit`（入库，`tools/programs.sh` 生成）是 compiler-rt 的 builtins 单元测试
-//! （有 main、自检，过了返回 0）。同一份 C 源出的 `.ll`：llc + ld.lld 链一个 ELF；由它转来的 `.mlir`：
+//! （有 main、自检，过了返回 0）；`tests/fixtures/programs` 是 `tests/programs/*.c` 手写的小程序（排序、哈希、字符串、
+//! 结构体传值、switch、函数指针、64 位、位操作、单 / 双精度、可变参数、递归、链表、大数、全局表；main 回校验和，⛔ 自检）。同一份 C 源出的 `.ll`：llc + ld.lld 链一个 ELF；由它转来的 `.mlir`：
 //! riscvc llc + riscvc ld 链一个 ELF。被测的 builtins（`tests/fixtures/builtins`）同理两边各编各的，
 //! 桩（`tests/fixtures/support/<abi>/`）两边共用一份。
 //! 目标跟着 feature 走：llc 的 `-mattr` / `-target-abi` 取 [`Ext::mattr`] / [`Ext::abi`]，`.ll` 里每个函数写死的
@@ -83,7 +84,7 @@ fn llc_obj(llvm: &llvm::Llvm, ll: &Path, out: &Path) -> Vec<u8> {
 fn level(name: &str) {
     let Some(llvm) = llvm::Llvm::locate() else { return };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let (progs, builtins) = (std::fs::read_dir(root.join("unit")).unwrap(), std::fs::read_dir(root.join("builtins")).unwrap());
+    let builtins = std::fs::read_dir(root.join("builtins")).unwrap();
     let tmp = std::env::temp_dir().join(format!("riscvc-elf-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // 桩：按调用约定选
@@ -117,16 +118,21 @@ fn level(name: &str) {
         let inputs: Vec<(&str, &[u8])> = objs.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
         riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(SCRIPT)), allow_undefined: true, ..Default::default() }, &inputs).unwrap()
     };
-    let mut progs: Vec<_> = progs.map(|e| e.unwrap().path()).filter(|p| p.to_str().unwrap().ends_with(&format!(".{name}.mlir"))).collect();
-    progs.sort();
+    // （目录, 自检：过了返回 0）
+    let mut progs: Vec<(&str, bool, std::path::PathBuf)> = Vec::new();
+    for (dir, selfcheck) in [("unit", true), ("programs", false)] {
+        let mut ps: Vec<_> = std::fs::read_dir(root.join(dir)).unwrap().map(|e| e.unwrap().path()).filter(|p| p.to_str().unwrap().ends_with(&format!(".{name}.mlir"))).collect();
+        ps.sort();
+        progs.extend(ps.into_iter().map(|p| (dir, selfcheck, p)));
+    }
     let (mut bad, mut broken, mut n) = (Vec::new(), Vec::new(), 0);
-    for m in &progs {
+    for (dir, selfcheck, m) in &progs {
         let stem = m.file_stem().unwrap().to_str().unwrap();
         if SCOPE.iter().any(|p| stem.starts_with(&format!("{p}."))) {
             eprintln!("SKIP（范围外：fp128）：{stem}");
             continue;
         }
-        let theirs_obj = (String::from("test.o"), llc_obj(&llvm, &root.join(format!("unit/{stem}.ll")), &tmp.join("t.o")));
+        let theirs_obj = (String::from("test.o"), llc_obj(&llvm, &root.join(format!("{dir}/{stem}.ll")), &tmp.join("t.o")));
         // 没有 main（源里被 `#if` 掉了）的跳过
         if !object::File::parse(theirs_obj.1.as_slice()).unwrap().symbols().any(|s| s.name() == Ok("main") && s.is_definition()) {
             continue;
@@ -138,7 +144,7 @@ fn level(name: &str) {
                 let all = ours.objs.iter().chain(&theirs.objs).map(|(_, b)| b.as_slice());
                 let stub = missing(all.chain([obj.as_slice(), theirs_obj.1.as_slice()]));
                 let expect = theirs.run(&[theirs_obj.clone(), stub.clone()], lld).expect("有 main");
-                if expect != (Stop::Returned, String::from("0x0")) {
+                if *selfcheck && expect != (Stop::Returned, String::from("0x0")) {
                     broken.push(format!("{stem} {expect:?}"));
                 }
                 (ours.run(&[(String::from("test.o"), obj), stub], ld).expect("llvm 那边有 main"), expect)
