@@ -13,6 +13,7 @@ mod elf;
 mod expr;
 mod fixup;
 mod inst;
+mod layout;
 mod lex;
 mod reloc;
 mod source;
@@ -78,6 +79,10 @@ pub struct Section {
     pub relax_items: Vec<(u64, u64)>,
     /// 带标号的 `.uleb128`（起, 止）。
     pub leb_items: Vec<(u64, u64)>,
+    /// 长度到布局时才定的控制流指令（[`layout`]）。
+    grows: Vec<layout::Grow>,
+    /// 布局变了要重补的对齐。
+    pads: Vec<layout::Pad>,
 }
 
 impl Section {
@@ -124,6 +129,19 @@ pub struct Symbol {
     pub declared: bool,
 }
 
+/// `.option` 管的开关。
+#[derive(Clone, Copy, Debug)]
+struct Mode {
+    /// `exact`：条件分支不扩成长跳转（连带 norelax）。
+    exact: bool,
+    /// `pic`：`la` 走 GOT。
+    pic: bool,
+    /// `relax` / `norelax`：此刻出的指令可不可松弛（缺省跟 `Options::relax`）。
+    relax: bool,
+    /// `rvc` / `norvc`：能压的压成 16 位（缺省跟 `c` feature）。
+    rvc: bool,
+}
+
 /// 汇编器状态。
 pub struct Assembler<'e> {
     opts: Options,
@@ -147,14 +165,12 @@ pub struct Assembler<'e> {
     attributes: Vec<(u64, Result<u64, String>)>,
     /// 当前行（报错用）。
     line: usize,
-    /// `.option exact`：条件分支不扩成长跳转。
-    exact: bool,
-    /// `.option pic`：`la` 走 GOT。
-    pic: bool,
-    /// `.option relax` / `norelax`：此刻出的指令可不可松弛（缺省跟 `Options::relax`）。
-    relax_on: bool,
-    /// `.option push` 存的（exact, pic, relax）。
-    options: Vec<(bool, bool, bool)>,
+    /// `.option` 的开关（`push` / `pop` 整个存取）。
+    mode: Mode,
+    /// 标号的定义序号（布局补对齐时分清同一位置上的标号在对齐前还是后）。
+    label_seq: HashMap<String, u64>,
+    /// `.option push` 存的。
+    options: Vec<Mode>,
     /// `.reloc 位置, 类型, 目标`（行号报错用）。
     directs: Vec<(Expr, u32, Expr, usize)>,
 }
@@ -203,9 +219,8 @@ impl<'e> Assembler<'e> {
             labels: HashSet::new(),
             attributes: Vec::new(),
             line: 0,
-            exact: false,
-            relax_on: relax,
-            pic: false,
+            mode: Mode { exact: false, pic: false, relax, rvc: crate::feature::Compressed::ENABLED },
+            label_seq: HashMap::new(),
             options: Vec::new(),
             directs: Vec::new(),
         };
@@ -338,6 +353,8 @@ impl<'e> Assembler<'e> {
     fn define(&mut self, name: &str) {
         let at = Def::Label(self.cur, self.sections[self.cur].size());
         self.symbol(name).def = at;
+        let seq = self.label_seq.len() as u64;
+        self.label_seq.insert(String::from(name), seq);
     }
 
     /// 切到名为 `name` 的节（没有就建）。类型、标志按名字推（同 llvm-mc 的缺省），给了就用给的。
@@ -368,7 +385,7 @@ impl<'e> Assembler<'e> {
         let ty = ty.unwrap_or(dty);
         let entsize = entsize.unwrap_or(0);
         let _ = (SHF_MERGE, SHF_STRINGS);
-        self.sections.push(Section { name: String::from(name), ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new() });
+        self.sections.push(Section { name: String::from(name), ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
         self.cur = self.sections.len() - 1;
     }
 
@@ -395,7 +412,46 @@ impl<'e> Assembler<'e> {
         if !crate::isa::Table::enabled(&i.op) {
             return Err(Error::Syntax(format!("`{}` 要 {} 扩展（feature 没开）", i.op, crate::isa::Table::ext(&i.op))));
         }
+        self.instruction_word(u32::from(i))
+    }
+
+    /// 编一条指令，⛔ 压缩（同 LLVM：PseudoCALL / PseudoTAIL 在编码器里才展开，不经 compressInst；
+    /// 立即数不是字面常数的也不压，见 [`Expr::literal`]）。
+    fn emit_wide(&mut self, i: riscv::Inst) -> Result<(), Error> {
+        if !crate::isa::Table::enabled(&i.op) {
+            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（feature 没开）", i.op, crate::isa::Table::ext(&i.op))));
+        }
         self.bytes(&u32::from(i).to_le_bytes())
+    }
+
+    /// 立即数来自 `e`：字面常数才可能压缩。
+    /// ⚠ 单独一个 `.equ` 符号（裸符号）也压：LLVM 的 simm6 一类谓词收裸符号，值到布局再填（rvc_imm）。
+    fn emit_imm(&mut self, i: riscv::Inst, e: &Expr) -> Result<(), Error> {
+        let bare = matches!(e, Expr::Sym(n) if matches!(self.symbols.get(n).map(|s| &s.def), Some(Def::Equ(_))));
+        if bare || self.literal(e, 0) { self.emit(i) } else { self.emit_wide(i) }
+    }
+
+    /// 字面常数：只有数、运算与值是字面常数的 `.equ` 符号（同 llvm-mc 解析时就当常数的那些）；⛔ 修饰符（`%lo(常数)`）、
+    /// 标号（往往是前向引用，解析时还没有值）。
+    fn literal(&self, e: &Expr, depth: usize) -> bool {
+        match e {
+            Expr::Num(_) => true,
+            Expr::Mod(..) => false,
+            Expr::Sym(n) => depth < 100 && matches!(self.symbols.get(n).map(|s| &s.def), Some(Def::Equ(inner)) if self.literal(inner, depth + 1)),
+            Expr::Neg(a) | Expr::Not(a) | Expr::LNot(a) => self.literal(a, depth),
+            Expr::Bin(_, a, b) => self.literal(a, depth) && self.literal(b, depth),
+        }
+    }
+
+    /// 出一条标准指令的 32 位字：开着 rvc、身上没有修补点、压得下 ⇒ 出 16 位（同 llvm-mc 的 compressInst）。
+    pub(super) fn instruction_word(&mut self, w: u32) -> Result<(), Error> {
+        let here = self.here();
+        let fixed = self.sections[self.cur].fixups.last().is_some_and(|f| f.offset == here);
+        // `.option exact`：⛔ 压（同 llvm-mc）
+        match crate::feature::Compressed::compress(w).filter(|_| self.mode.rvc && !self.mode.exact && !fixed) {
+            Some(h) => self.bytes(&h.to_le_bytes()),
+            None => self.bytes(&w.to_le_bytes()),
+        }
     }
 
     /// 原样出一个 32 位字（`.insn`）。
@@ -437,19 +493,23 @@ impl<'e> Assembler<'e> {
         let e = self.pin(&e);
         let line = self.line;
         let symbolic = || self.eval(&e, 0).map_or(true, |v| v.constant().is_none());
-        let relaxable = self.relax_on
+        let relaxable = self.mode.relax
             && match kind {
                 Fix::Call | Fix::Hi20 | Fix::Lo12I | Fix::Lo12S | Fix::PcrelHi20 | Fix::PcrelLo12I | Fix::PcrelLo12S => true,
                 Fix::Reloc(t) | Fix::PcHi(t) => { use object::elf as e; matches!(t, e::R_RISCV_TPREL_HI20 | e::R_RISCV_TPREL_LO12_I | e::R_RISCV_TPREL_LO12_S | e::R_RISCV_TPREL_ADD | e::R_RISCV_GOT_HI20 | e::R_RISCV_TLSDESC_HI20) },
-                // 条件分支只是候选（可能扩成 b<cc> + jal）：算可松弛点，但不带 R_RISCV_RELAX
-                Fix::Jal | Fix::Branch => symbolic(),
+                // 条件分支只是候选（可能扩成 b<cc> + jal）：算可松弛点，但不带 R_RISCV_RELAX；压缩的跳转同
+                Fix::Jal | Fix::Branch | Fix::RvcBranch | Fix::RvcJump => symbolic(),
                 _ => false,
             };
         if relaxable {
-            let len = if kind == Fix::Call { 8 } else { 4 };
+            let len = match kind {
+                Fix::Call => 8,
+                Fix::RvcBranch | Fix::RvcJump => 2,
+                _ => 4,
+            };
             self.sections[self.cur].relax_items.push((offset, offset + len));
         }
-        let relax = relaxable && kind != Fix::Branch;
+        let relax = relaxable && !matches!(kind, Fix::Branch | Fix::RvcBranch | Fix::RvcJump);
         self.sections[self.cur].fixups.push(fixup::Fixup { offset, kind, expr: e, line, relax });
     }
 

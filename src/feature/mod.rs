@@ -8,6 +8,8 @@
 //! | `f/` | `f`（蕴含 `zicsr`） | 单精度浮点、`fcsr` 一类伪指令 |
 //! | `zicsr/` | `zicsr` | `csrr*`、`csrr` / `csrw` / `rdcycle` 一类伪指令 |
 //! | `xthead/<名>/` | `xthead<名>`（`xthead` = 全部） | 玄铁厂商扩展，默认不开 |
+//! | `c.rs` | `c` | 16 位压缩指令（一张「压缩 ⇔ 32 位」对照表，⛔ 不走 `#[derive(Isa)]`），默认不开 |
+mod c;
 mod f;
 mod m;
 pub mod xthead;
@@ -17,6 +19,7 @@ mod zmmul;
 use crate::ext::{Exec, Extension, Std};
 use crate::isa::Table;
 use crate::sim::Stop;
+pub use c::Compressed;
 pub use f::Float;
 pub use m::M;
 pub use zicsr::Zicsr;
@@ -31,19 +34,56 @@ macro_rules! tables {
 
         impl Target {
             /// `-march` 串（同 clang 的规范写法，只列开了的）：`rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`。
+            /// C 隐含 Zca（有 F 再隐含 Zcf），同 LLVM。
             #[must_use]
             pub fn march() -> String {
-                let mut s = String::from("rv32i2p1");
+                let mut exts: Vec<(&str, &str)> = Vec::new();
                 $(if $t::ENABLED {
-                    s.push_str(&format!("_{}{}", $t::ALL[0].ext(), $ver));
+                    exts.push(($t::ALL[0].ext(), $ver));
                 })*
-                s
+                if Compressed::ENABLED {
+                    exts.push(("c", "2p0"));
+                    exts.push(("zca", "1p0"));
+                    if Float::ENABLED {
+                        exts.push(("zcf", "1p0"));
+                    }
+                }
+                exts.sort_by_key(|(e, _)| Self::rank(e));
+                exts.iter().fold(String::from("rv32i2p1"), |s, (e, v)| format!("{s}_{e}{v}"))
+            }
+
+            /// 扩展名在 `-march` 里的次序（同 LLVM 的 RISCVISAInfo）：单字母按 `imafdqlcbkjtpvnh`；
+            /// z 扩展在后，按第二个字母所属的单字母类别、再按名字；x 扩展最后。
+            fn rank(e: &str) -> (u8, usize, String) {
+                const ORDER: &str = "imafdqlcbkjtpvnh";
+                let class = |c: char| ORDER.find(c).unwrap_or(ORDER.len());
+                let mut chars = e.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => (0, class(c), String::new()),
+                    (Some('z'), Some(c)) => (1, class(c), String::from(e)),
+                    _ => (2, 0, String::from(e)),
+                }
+            }
+
+            /// 架构串（`rv32i2p1_m2p0_c2p0_zca1p0`，也认不规范的 `rv32imfc`）里有没有扩展 `ext`。
+            #[must_use]
+            pub fn lists(arch: &str, ext: &str) -> bool {
+                let rest = arch.trim().to_ascii_lowercase();
+                let rest = rest.strip_prefix("rv32").or_else(|| rest.strip_prefix("rv64")).unwrap_or(&rest).to_owned();
+                let mut parts = rest.split('_');
+                // 第一段是一串单字母（夹着版本号）
+                let first = parts.next().unwrap_or_default();
+                if ext.len() == 1 && first.chars().filter(char::is_ascii_alphabetic).filter(|&c| c != 'p').any(|c| ext.starts_with(c)) {
+                    return true;
+                }
+                parts.any(|p| p.trim_end_matches(|c: char| c.is_ascii_digit() || c == 'p') == ext)
             }
 
             /// llc / llvm-mc 的 `-mattr`（对照用）：开了的 `+x`，关了的 `-x`。
             #[must_use]
             pub fn mattr() -> String {
-                [$(format!("{}{}", if $t::ENABLED { '+' } else { '-' }, $t::ALL[0].ext())),*].join(",")
+                let c = if Compressed::ENABLED { "+c" } else { "-c" };
+                [$(format!("{}{}", if $t::ENABLED { '+' } else { '-' }, $t::ALL[0].ext())),*, String::from(c)].join(",")
             }
 
             /// 浮点调用约定：开了 F 用 ilp32f，否则 ilp32（软浮点）。
@@ -61,6 +101,9 @@ macro_rules! tables {
                 const E: Std<$t> = Std::new();
                 out.push(&E);
             })*
+            if Compressed::ENABLED {
+                out.push(&Compressed);
+            }
             out
         }
 
@@ -80,6 +123,9 @@ macro_rules! tables {
             $(if $t::ENABLED && let Some(n) = Std::<$t>::new().decode(window) {
                 return Some(n);
             })*
+            if Compressed::ENABLED {
+                return Compressed.decode(window);
+            }
             None
         }
 
@@ -90,6 +136,9 @@ macro_rules! tables {
             $(if $t::ENABLED && Std::<$t>::new().decode(&window).is_some() {
                 return Std::<$t>::new().execute(cx, bytes);
             })*
+            if Compressed::ENABLED && Compressed.decode(&window).is_some() {
+                return Compressed.execute(cx, bytes);
+            }
             Err(Stop::Trap(u32::from_le_bytes([window[0], window[1], window[2], window[3]])))
         }
     };

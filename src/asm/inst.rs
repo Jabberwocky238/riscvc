@@ -36,6 +36,19 @@ impl Assembler<'_> {
                 _ => self.operand(t),
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // 显式的压缩跳转跳到符号：长度留到布局（⛔ 交给 C 扩展只能编常数偏移）
+        if let ("c.j" | "c.jal", [Opnd::E(t)]) | ("c.beqz" | "c.bnez", [Opnd::X(_), Opnd::E(t)]) = (mnem, ops.as_slice())
+            && self.folded(t).is_none()
+        {
+            use super::layout::Flow;
+            let flow = match (mnem, ops.as_slice()) {
+                ("c.j", _) => Flow::Jump(0),
+                ("c.jal", _) => Flow::Jump(X::RA.0),
+                (_, [Opnd::X(rs), _]) => Flow::Branch(if mnem == "c.beqz" { Op::Beq } else { Op::Bne }, rs.0, 0),
+                _ => unreachable!(),
+            };
+            return self.compressed_flow(flow, &t.clone());
+        }
         if self.extended(mnem, rest, &ops)? {
             return Ok(());
         }
@@ -66,6 +79,8 @@ impl Assembler<'_> {
         let exts = self.exts.clone();
         let Some((name, out)) = exts.iter().find_map(|e| e.assemble(mnem, &args).map(|r| (e.name(), r))) else { return Ok(false) };
         match out.map_err(|msg| Error::Syntax(format!("{name}：{msg}")))? {
+            // 内置扩展的 4 字节标准指令（flw / fsw …）也压
+            Emit::Bytes(b) if b.len() == 4 => self.instruction_word(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))?,
             Emit::Bytes(b) => self.bytes(&b)?,
             Emit::Fixed(b, fixups) => {
                 let start = self.here();
@@ -88,7 +103,7 @@ impl Assembler<'_> {
 
     /// 汇编时就能定的常数；开着松弛时常数上的 `%hi` / `%lo` 不算（要出 0 号符号 + 常数的重定位，同 llvm-mc）。
     fn folded(&self, e: &Expr) -> Option<i64> {
-        if self.relax_on && matches!(e.modifier(), Some((Modifier::Lo | Modifier::Hi, _))) {
+        if self.mode.relax && matches!(e.modifier(), Some((Modifier::Lo | Modifier::Hi, _))) {
             return None;
         }
         self.eval(e, 0).ok()?.constant()
@@ -177,7 +192,7 @@ impl Assembler<'_> {
             ("la" | "lla", [Opnd::X(rd), E(e)]) if self.eval(e, 0).is_ok_and(|v| v.constant().is_some()) => self.li(*rd, e)?,
             ("lla", [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcrelHi20, Op::Addi, rd.0, rd.0, e, true)?,
             // `.option pic` 下 `la` 走 GOT（同 llvm-mc）
-            ("la", [Opnd::X(rd), E(e)]) if !self.pic => self.pcrel(Fix::PcrelHi20, Op::Addi, rd.0, rd.0, e, true)?,
+            ("la", [Opnd::X(rd), E(e)]) if !self.mode.pic => self.pcrel(Fix::PcrelHi20, Op::Addi, rd.0, rd.0, e, true)?,
             ("la" | "lga", [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcHi(elf::R_RISCV_GOT_HI20), Op::Lw, rd.0, rd.0, e, true)?,
             ("la.tls.gd", [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcHi(elf::R_RISCV_TLS_GD_HI20), Op::Addi, rd.0, rd.0, e, true)?,
             ("la.tls.ie", [Opnd::X(rd), E(e)]) => self.pcrel(Fix::PcHi(elf::R_RISCV_TLS_GOT_HI20), Op::Lw, rd.0, rd.0, e, true)?,
@@ -208,8 +223,8 @@ impl Assembler<'_> {
                 };
                 self.branch(op, b.0, a.0, t)?;
             }
-            ("j", [E(t)]) => self.emit_fix(i(Op::Jal), Fix::Jal, t.clone())?,
-            ("jal", [E(t)]) => self.emit_fix(i(Op::Jal).x(X::RA.0, 0, 0), Fix::Jal, t.clone())?,
+            ("j", [E(t)]) => self.jump(0, t)?,
+            ("jal", [E(t)]) => self.jump(X::RA.0, t)?,
             ("jr", [Opnd::X(rs)]) => self.emit(i(Op::Jalr).x(zero, rs.0, 0))?,
             ("jr", [M(e, rs)] | [Opnd::X(rs), E(e)]) => self.imm(i(Op::Jalr).x(zero, rs.0, 0), e, Fix::Imm12)?,
             ("jalr", [Opnd::X(rs)]) => self.emit(i(Op::Jalr).x(X::RA.0, rs.0, 0))?,
@@ -229,7 +244,7 @@ impl Assembler<'_> {
             ("sbreak", []) => self.emit(i(Op::Ebreak))?,
             ("scall", []) => self.emit(i(Op::Ecall))?,
             // `csrrw zero, cycle, zero`：不管开没开 Zicsr 都认（同 llvm-mc）
-            ("unimp", []) => self.word(0xc000_1073)?,
+            ("unimp", []) => self.instruction_word(0xc000_1073)?,
             ("fence", []) => self.emit(i(Op::Fence).with_imm(0xff))?,
             _ => return Ok(false),
         }
@@ -260,7 +275,7 @@ impl Assembler<'_> {
                 let Some((_, inner)) = e.modifier() else { return Err(bad()) };
                 self.emit_fix(i, fix, inner.clone())?;
             }
-            (Base::J, [Opnd::X(rd), E(t)]) => self.emit_fix(i.x(rd.0, 0, 0), Fix::Jal, t.clone())?,
+            (Base::J, [Opnd::X(rd), E(t)]) => self.jump(rd.0, t)?,
             (Base::Jalr, [Opnd::X(rd), M(e, rs)]) => self.imm(i.x(rd.0, rs.0, 0), e, Fix::Imm12)?,
             (Base::Jalr, [Opnd::X(rd), M(e, rs), E(m)]) if let Some((Modifier::TlsdescCall, label)) = m.modifier() => {
                 self.note(Fix::Reloc(elf::R_RISCV_TLSDESC_CALL), label.clone());
@@ -307,6 +322,9 @@ impl Assembler<'_> {
     /// `.insn`：原始字（`.insn 值` / `.insn 长度, 值`）或按格式拼（`.insn r|r4|i|s|b|sb|u|j|uj opcode, …`）。
     pub(super) fn insn(&mut self, rest: &str) -> Result<(), Error> {
         let (kind, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        if matches!(kind, "cr" | "ci" | "ciw" | "css" | "cl" | "cs" | "ca" | "cb" | "cj") {
+            return self.insn_c(kind, args);
+        }
         if !matches!(kind, "r" | "r4" | "i" | "s" | "b" | "sb" | "u" | "j" | "uj") {
             let a = Toks::try_from(rest)?.split_commas();
             let (len, value) = match a.as_slice() {
@@ -426,6 +444,75 @@ impl Assembler<'_> {
         }
     }
 
+    /// `.insn` 的压缩格式（同 LLVM 的 DirectiveInsnC*）：`cr opcode, funct4, rd, rs2` · `ci opcode, funct3, rd, simm6` ·
+    /// `ciw opcode, funct3, rd', uimm8` · `css opcode, funct3, rs2, uimm6` · `cl opcode, funct3, rd', uimm5(rs1')` ·
+    /// `cs opcode, funct3, rs2', uimm5(rs1')` · `ca opcode, funct6, funct2, rd', rs2'` · `cb opcode, funct3, rs1', 目标` ·
+    /// `cj opcode, funct3, 目标`。立即数按原样放进各自的位段（cb / cj 的是偏移，散布同 c.beqz / c.j）；`'` = x8..x15 / f8..f15。
+    fn insn_c(&mut self, kind: &str, args: &str) -> Result<(), Error> {
+        let ops = Toks::try_from(args)?.split_commas();
+        let (op, rest) = ops.split_first().ok_or_else(|| Error::Syntax(format!(".insn {kind} 的操作数不够")))?;
+        let opcode = match op.tokens() {
+            [Tok::Ident(n)] if let Some(k) = ["C0", "C1", "C2"].iter().position(|c| c == n) => k as u16,
+            _ => u16::try_from(self.constant_arg(Some(op), "opcode")? & 3).unwrap_or_default(),
+        };
+        let ops = rest.iter().map(|t| self.operand(t.clone())).collect::<Result<Vec<_>, _>>()?;
+        let bad = || Error::Syntax(format!(".insn {kind} 的操作数：{ops:?}"));
+        let k = |me: &Self, o: &Opnd| -> Result<u16, Error> {
+            match o {
+                Opnd::E(e) => Ok(me.eval(e, 0)?.constant().map_or(0, |v| v as u16)),
+                _ => Err(bad()),
+            }
+        };
+        let reg = |o: &Opnd| match o {
+            Opnd::X(r) => Ok(u16::from(r.0)),
+            Opnd::F(r) => Ok(u16::from(r.0)),
+            _ => Err(bad()),
+        };
+        let creg = |o: &Opnd| reg(o).and_then(|r| if (8..16).contains(&r) { Ok(r - 8) } else { Err(Error::Syntax(format!(".insn {kind} 的寄存器要是 x8..x15 / f8..f15"))) });
+        let mem = |me: &Self, o: &Opnd| match o {
+            Opnd::M(e, b) => Ok((me.eval(e, 0)?.constant().map_or(0, |v| v as u16), u16::from(b.0))),
+            _ => Err(bad()),
+        };
+        let h = match (kind, ops.as_slice()) {
+            ("cr", [f4, rd, rs2]) => (k(self, f4)? & 0xf) << 12 | reg(rd)? << 7 | reg(rs2)? << 2,
+            ("ci", [f3, rd, i]) => {
+                let v = k(self, i)?;
+                (k(self, f3)? & 7) << 13 | (v >> 5 & 1) << 12 | reg(rd)? << 7 | (v & 0x1f) << 2
+            }
+            ("ciw", [f3, rd, i]) => (k(self, f3)? & 7) << 13 | (k(self, i)? & 0xff) << 5 | creg(rd)? << 2,
+            ("css", [f3, rs2, i]) => (k(self, f3)? & 7) << 13 | (k(self, i)? & 0x3f) << 7 | reg(rs2)? << 2,
+            ("cl" | "cs", [f3, r, m]) => {
+                let (v, b) = mem(self, m)?;
+                let b = if (8..16).contains(&b) { b - 8 } else { return Err(bad()) };
+                (k(self, f3)? & 7) << 13 | (v >> 2 & 7) << 10 | b << 7 | (v & 3) << 5 | creg(r)? << 2
+            }
+            ("ca", [f6, f2, rd, rs2]) => (k(self, f6)? & 0x3f) << 10 | creg(rd)? << 7 | (k(self, f2)? & 3) << 5 | creg(rs2)? << 2,
+            ("cb" | "cj", [f3, rest @ ..]) => {
+                let (rs1, t) = match (kind, rest) {
+                    ("cb", [r, Opnd::E(t)]) => (creg(r)? << 7, t),
+                    ("cj", [Opnd::E(t)]) => (0, t),
+                    _ => return Err(bad()),
+                };
+                let w = (k(self, f3)? & 7) << 13 | rs1 | opcode;
+                let fix = if kind == "cb" { Fix::RvcBranch } else { Fix::RvcJump };
+                // 常数目标 = 偏移（按 32 位补码）；符号 ⇒ 修补点
+                return match self.folded(t) {
+                    Some(d) => {
+                        let d = Self::rv32(Base::Branch, d);
+                        let bits = if kind == "cb" { crate::feature::Compressed::branch_bits(d) } else { crate::feature::Compressed::jump_bits(d) };
+                        self.bytes(&(w | bits.ok_or_else(|| Error::Syntax(format!(".insn {kind} 的偏移 {d} 放不下")))?).to_le_bytes())
+                    }
+                    None => {
+                        self.note(fix, t.clone());
+                        self.bytes(&w.to_le_bytes())
+                    }
+                };
+            }
+            _ => return Err(bad()),
+        };
+        self.bytes(&(h | opcode).to_le_bytes())
+    }
+
     /// `.insn` 的 opcode 名（同 llvm-mc 的 InsnDirectiveOpcode）。
     fn opcode(name: &str) -> Option<u32> {
         Some(match name {
@@ -467,7 +554,7 @@ impl Assembler<'_> {
             None => None,
             // 常数上的 %lo / %hi 现在就折（`li a0, %lo(0x123456)`）
             // 开着松弛时常数上的也出重定位（0 号符号 + 常数，同 llvm-mc）
-            Some((Modifier::Lo | Modifier::Hi, inner)) if !self.relax_on && self.eval(inner, 0)?.constant().is_some() => None,
+            Some((Modifier::Lo | Modifier::Hi, inner)) if !self.mode.relax && self.eval(inner, 0)?.constant().is_some() => None,
             Some((Modifier::Lo, _)) => Some(if store { Fix::Lo12S } else { Fix::Lo12I }),
             Some((Modifier::PcrelLo, _)) => Some(if store { Fix::PcrelLo12S } else { Fix::PcrelLo12I }),
             Some((Modifier::TprelLo, _)) => Some(Fix::Reloc(if store { elf::R_RISCV_TPREL_LO12_S } else { elf::R_RISCV_TPREL_LO12_I })),
@@ -485,7 +572,7 @@ impl Assembler<'_> {
             _ => Base::Imm,
         };
         match self.eval(e, 0)?.constant().map(|k| Self::rv32(form, k)) {
-            Some(k) if form.fits(k) => self.emit(i.with_imm(i32::try_from(k).unwrap_or_default())),
+            Some(k) if form.fits(k) => self.emit_imm(i.with_imm(i32::try_from(k).unwrap_or_default()), e),
             Some(k) => Err(Error::Syntax(format!("立即数 {k} 超出范围"))),
             None => self.emit_fix(i, plain, e.clone()),
         }
@@ -500,21 +587,75 @@ impl Assembler<'_> {
         }
     }
 
-    /// 条件分支：目标在本文件、本节里能就地解析（或 `.option exact`）⇒ 一条；否则同 LLVM 扩成「反向分支跳过 + `j` 目标」。
+    /// 条件分支：常数目标 ⇒ 就是偏移，现在就编（能压就压）；`.option exact` ⇒ 原样一条；目标本文件解析得了 ⇒ 长度留到布局（[`super::layout`]）；
+    /// 解析不了 ⇒ 现在就出长形式「反向分支跳过 + jal」（同 llvm-mc 把解析不了的放宽；反向的那条能压就压）。
     fn branch(&mut self, op: Op, a: u8, b: u8, t: &Expr) -> Result<(), Error> {
-        if self.exact || self.resolvable(t) {
+        use super::layout::Flow;
+        if let Some(k) = self.folded(t) {
+            return self.constant_target(Inst::new(op).x(0, a, b), Base::Branch, k);
+        }
+        if self.mode.exact {
             return self.emit_fix(Inst::new(op).x(0, a, b), Fix::Branch, t.clone());
         }
-        let inverse = match op {
-            Op::Beq => Op::Bne,
-            Op::Bne => Op::Beq,
-            Op::Blt => Op::Bge,
-            Op::Bge => Op::Blt,
-            Op::Bltu => Op::Bgeu,
-            _ => Op::Bltu,
-        };
-        self.emit(Inst::new(inverse).x(0, a, b).with_imm(8))?;
+        if self.resolvable(t) {
+            // 目标是裸符号才从 16 位起（同 LLVM 的 isBareSymbolRef：`.L+16` 一类不压）
+            return self.flow(Flow::Branch(op, a, b), t, matches!(t, Expr::Sym(_)));
+        }
+        self.long_branch(op, a, b, t)
+    }
+
+    /// 跳转的常数目标 = 偏移（同 llvm-mc：`jal 2046`、`beq a0, a1, 102`；按 RV32 的补码读）：不是修补点、⛔ 放宽，
+    /// 放不下就报错；能压就压。
+    fn constant_target(&mut self, i: Inst, form: Base, k: i64) -> Result<(), Error> {
+        let k = Self::rv32(form, k);
+        if !form.fits(k) {
+            return Err(Error::Syntax(format!("跳转距离 {k} 超出 {form:?} 的范围")));
+        }
+        self.emit(i.with_imm(i32::try_from(k).unwrap_or_default()))
+    }
+
+    /// 长形式「反向分支跳过 + jal」（反向的能压成 16 位 ⇒ 跳过 6 字节，否则 8）。
+    fn long_branch(&mut self, op: Op, a: u8, b: u8, t: &Expr) -> Result<(), Error> {
+        let inverse = op.inverted().expect("条件分支");
+        let short = crate::feature::Compressed::compress(u32::from(Inst::new(inverse).x(0, a, b).with_imm(6))).filter(|_| self.mode.rvc);
+        match short {
+            Some(h) => self.bytes(&h.to_le_bytes())?,
+            None => self.emit_wide(Inst::new(inverse).x(0, a, b).with_imm(8))?,
+        }
         self.emit_fix(Inst::new(Op::Jal), Fix::Jal, t.clone())
+    }
+
+    /// `jal rd, 目标`：rd 是 x0 / ra、目标本文件解析得了、开着 rvc ⇒ 长度留到布局（可能是 c.j / c.jal）。
+    fn jump(&mut self, rd: u8, t: &Expr) -> Result<(), Error> {
+        if let Some(k) = self.folded(t) {
+            return self.constant_target(Inst::new(Op::Jal).x(rd, 0, 0), Base::J, k);
+        }
+        if self.mode.rvc && !self.mode.exact && matches!(rd, 0 | 1) && matches!(t, Expr::Sym(_)) && self.resolvable(t) {
+            return self.flow(super::layout::Flow::Jump(rd), t, true);
+        }
+        self.emit_fix(Inst::new(Op::Jal).x(rd, 0, 0), Fix::Jal, t.clone())
+    }
+
+    /// 显式的 `c.j` / `c.jal` / `c.beqz` / `c.bnez` 跳到符号：exact ⇒ 原样 16 位；本文件解析得了 ⇒ 布局（从 16 位起）；
+    /// 解析不了 ⇒ 同 llvm-mc 放宽（`c.j` ⇒ jal，`c.beqz` ⇒ 长形式）。
+    fn compressed_flow(&mut self, flow: super::layout::Flow, t: &Expr) -> Result<(), Error> {
+        use super::layout::Flow;
+        if self.mode.exact {
+            let (w, fix) = match flow {
+                Flow::Branch(op, a, b) => (u32::from(Inst::new(op).x(0, a, b)), Fix::RvcBranch),
+                Flow::Jump(rd) => (u32::from(Inst::new(Op::Jal).x(rd, 0, 0)), Fix::RvcJump),
+            };
+            let h = crate::feature::Compressed::compress(w).ok_or_else(|| Error::Syntax(String::from("寄存器放不进压缩格式")))?;
+            self.note(fix, t.clone());
+            return self.bytes(&h.to_le_bytes());
+        }
+        if self.resolvable(t) {
+            return self.flow(flow, t, true);
+        }
+        match flow {
+            Flow::Branch(op, a, b) => self.long_branch(op, a, b, t),
+            Flow::Jump(rd) => self.emit_fix(Inst::new(Op::Jal).x(rd, 0, 0), Fix::Jal, t.clone()),
+        }
     }
 
     /// 分支目标能不能在汇编时解析：本文件定义的、不会被替换的标号（定义过的还得在本节）。
@@ -539,7 +680,7 @@ impl Assembler<'_> {
     fn li(&mut self, rd: X, e: &Expr) -> Result<(), Error> {
         // `li rd, %lo(sym)` / `%pcrel_lo(标号)` ⇒ `addi rd, zero, …`
         match e.modifier() {
-            Some((Modifier::Lo, inner)) if self.relax_on || self.eval(inner, 0)?.constant().is_none() => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::Lo12I, inner.clone()),
+            Some((Modifier::Lo, inner)) if self.mode.relax || self.eval(inner, 0)?.constant().is_none() => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::Lo12I, inner.clone()),
             Some((Modifier::PcrelLo, inner)) => return self.emit_fix(Inst::new(Op::Addi).x(rd.0, 0, 0), Fix::PcrelLo12I, inner.clone()),
             _ => {}
         }
@@ -551,20 +692,20 @@ impl Assembler<'_> {
         let lo = (v << 20) >> 20;
         let hi = v.wrapping_sub(lo) >> 12 & 0xf_ffff;
         if hi == 0 {
-            return self.emit(Inst::new(Op::Addi).x(rd.0, 0, 0).with_imm(lo));
+            return self.emit_imm(Inst::new(Op::Addi).x(rd.0, 0, 0).with_imm(lo), e);
         }
         // 同 RISCVMatInt：本要 lui + addi、又是偶数、去掉尾零后放得进 6 位 ⇒ `li` 小数 + `slli`（更好压缩）
         if lo != 0 && v & 1 == 0 {
             let tz = v.trailing_zeros();
             let shifted = v >> tz;
             if (-32..32).contains(&shifted) {
-                self.emit(Inst::new(Op::Addi).x(rd.0, 0, 0).with_imm(shifted))?;
-                return self.emit(Inst::new(Op::Slli).x(rd.0, rd.0, 0).with_imm(i32::try_from(tz).unwrap_or_default()));
+                self.emit_imm(Inst::new(Op::Addi).x(rd.0, 0, 0).with_imm(shifted), e)?;
+                return self.emit_imm(Inst::new(Op::Slli).x(rd.0, rd.0, 0).with_imm(i32::try_from(tz).unwrap_or_default()), e);
             }
         }
-        self.emit(Inst::new(Op::Lui).x(rd.0, 0, 0).with_imm(hi))?;
+        self.emit_imm(Inst::new(Op::Lui).x(rd.0, 0, 0).with_imm(hi), e)?;
         if lo != 0 {
-            self.emit(Inst::new(Op::Addi).x(rd.0, rd.0, 0).with_imm(lo))?;
+            self.emit_imm(Inst::new(Op::Addi).x(rd.0, rd.0, 0).with_imm(lo), e)?;
         }
         Ok(())
     }
@@ -579,8 +720,9 @@ impl Assembler<'_> {
 
     /// `call` / `tail` / `jump`：`auipc base` + `jalr link, 0(base)`，一个 `CALL_PLT` 管两条。
     fn call(&mut self, link: u8, base: u8, t: &Expr) -> Result<(), Error> {
-        self.emit_fix(Inst::new(Op::Auipc).x(base, 0, 0), Fix::Call, t.clone())?;
-        self.emit(Inst::new(Op::Jalr).x(link, base, 0))
+        self.note(Fix::Call, t.clone());
+        self.emit_wide(Inst::new(Op::Auipc).x(base, 0, 0))?;
+        self.emit_wide(Inst::new(Op::Jalr).x(link, base, 0))
     }
 
     /// `fence` 的 `iorw` 集合。

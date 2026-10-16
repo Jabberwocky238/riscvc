@@ -18,6 +18,8 @@ default = ["toolchain", "m", "f"]
 # ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
 # ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
 toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:regalloc2", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
+# C：16 位压缩指令（汇编器、反汇编、解释器认 `c.*` 与 16 位编码；`-march` 带 c2p0_zca1p0[_zcf1p0]），默认不开
+c = []
 # M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
 m = ["zmmul"]
 # Zmmul：只有乘法；没开 ⇒ 乘法调 __mulsi3

@@ -117,6 +117,16 @@ pub struct Exec<'c, 'd> {
     pub next: Option<u32>,
 }
 
+impl Exec<'_, '_> {
+    /// ⭐ 执行一条 32 位指令（RV32I 或内置扩展的），长度按 `len` 字节算（压缩指令还原出来的是 2）：
+    /// 下一条的 pc 写进 [`Self::next`]。
+    pub fn word(&mut self, w: u32, len: u32) -> Result<(), Stop> {
+        let next = self.cpu.exec(self.devs, w, len)?;
+        self.next = Some(next);
+        Ok(())
+    }
+}
+
 /// 规范 NaN（同硬件）。
 const NAN: u32 = 0x7fc0_0000;
 
@@ -368,6 +378,8 @@ impl<'b> Iterator for Disasm<'b, '_> {
         let window = Self::window(self.data, self.at);
         let (n, text) = match Self::claim(&self.exts, &window) {
             Some((e, n)) if self.at + n <= self.data.len() => (n, e.print(&self.data[self.at..self.at + n], pc, self.style)),
+            // 开了 C：低两位不是 11 的是 16 位（认不出也只占 2 字节，同 llvm-objdump）
+            _ if crate::feature::Compressed::ENABLED && window[0] & 3 != 3 => (2, String::from("<unknown>")),
             _ => {
                 let w = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
                 (4, Inst::<crate::isa::Rv32i>::try_from(w).map_or_else(|()| String::from("<unknown>"), |i| i.print(pc, self.style)))

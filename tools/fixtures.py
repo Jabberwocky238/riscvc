@@ -13,9 +13,12 @@ B = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('RISCVC_LLVM_BIN', os.p
 LLVM = os.path.join(ROOT, '../llvm-project')
 OUT = os.path.join(ROOT, 'tests/fixtures/mc')
 OUT_XTHEAD = os.path.join(ROOT, 'tests/fixtures/mc-xthead')
+# C：全部 fixture 另开 +c 过一遍（llvm-mc 开了 C 就把能压的都压掉）⇒ tests/fixtures/mc-c（cargo test --features c）
+OUT_C = os.path.join(ROOT, 'tests/fixtures/mc-c')
 STD = '+m,+f,+zicsr,-relax'
 # 玄铁：文件名带 thead 的那批，另开全部 XThead 扩展过一遍 ⇒ tests/fixtures/mc-xthead（cargo test --features xthead）
 XTHEAD = STD + ',' + ','.join('+xthead' + x for x in ['ba', 'bb', 'bs', 'cmo', 'condmov', 'fmemidx', 'mac', 'memidx', 'mempair', 'sync'])
+C = STD + ',+c'
 
 
 def mc(mattr):
@@ -24,11 +27,13 @@ ERR = re.compile(r'^<stdin>:(\d+):\d+: error:', re.M)
 # 范围外：压缩指令 / 别的扩展（.option rvc / arch）、linker relaxation（.option relax）、
 # CFI（不出 .eh_frame）、.attribute arch 的规范化（要 LLVM 的整张扩展表）、H 扩展（llvm-mc 不查扩展也收的 hfence）、厂商的 `.insn qc.*`
 SCOPE = re.compile(r'^\s*(\.insn\s+qc\.|hfence\.|hinval\.|\.option\s+(rvc|arch|relax|noexact)\b|\.cfi_|\.attribute\s+(arch|5|Tag_RISCV_arch)\b)')
+# C 那批：`.option rvc / norvc` 在范围内
+SCOPE_C = re.compile(r'^\s*(\.insn\s+qc\.|hfence\.|hinval\.|\.option\s+(arch|relax|noexact)\b|\.cfi_|\.attribute\s+(arch|5|Tag_RISCV_arch)\b)')
 
 
-def clean(text, mattr=STD):
+def clean(text, mattr=STD, scope=SCOPE):
     """llvm-mc 报错的行注释掉，直到不报错；回 None 表示放弃。"""
-    lines = ['# riscvc-scope: ' + l if SCOPE.match(l) else l for l in text.split('\n')]
+    lines = ['# riscvc-scope: ' + l if scope.match(l) else l for l in text.split('\n')]
     for _ in range(10):
         r = subprocess.run(mc(mattr), input='\n'.join(lines), capture_output=True, text=True)
         bad = {int(n) - 1 for n in ERR.findall(r.stderr)}
@@ -65,10 +70,18 @@ def keep(out):
     return out is not None and any(l.strip() and not l.lstrip().startswith(('#', '//', ';')) for l in out.split('\n'))
 
 
-for d in (OUT, OUT_XTHEAD):
+for d in (OUT, OUT_XTHEAD, OUT_C):
     os.makedirs(d, exist_ok=True)
-kept = dropped = xt = 0
+kept = dropped = xt = nc = 0
+# ONLY=c：只重新生成 mc-c
+only_c = os.environ.get('ONLY') == 'c'
 for stem, text in sources():
+    out = clean(text, C, SCOPE_C)
+    if keep(out):
+        open(os.path.join(OUT_C, stem + '.s'), 'w').write(out)
+        nc += 1
+    if only_c:
+        continue
     out = clean(text)
     if keep(out):
         open(os.path.join(OUT, stem + '.s'), 'w').write(out)
@@ -80,4 +93,4 @@ for stem, text in sources():
         if keep(out):
             open(os.path.join(OUT_XTHEAD, stem + '.s'), 'w').write(out)
             xt += 1
-print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}；玄铁 {xt} 份 ⇒ {OUT_XTHEAD}')
+print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}；玄铁 {xt} 份 ⇒ {OUT_XTHEAD}；C {nc} 份 ⇒ {OUT_C}')

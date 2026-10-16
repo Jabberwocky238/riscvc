@@ -16,6 +16,10 @@ pub enum Fix {
     U20,
     Branch,
     Jal,
+    /// `c.beqz` / `c.bnez`（16 位，±256 B）。
+    RvcBranch,
+    /// `c.j` / `c.jal`（16 位，±2 KiB）。
+    RvcJump,
     Hi20,
     Lo12I,
     Lo12S,
@@ -175,10 +179,13 @@ impl Assembler<'_> {
         }
     }
 
-    /// PC 相对的目标在本节、能就地解析、且和修补点之间没有可松弛点 ⇒ 目标偏移。
+    /// PC 相对的目标在本节、能就地解析、且**符号本身**和修补点之间没有可松弛点 ⇒ 目标偏移（同 MC：看的是
+    /// 「符号 − 修补点」能不能折，加数不算：`.+32` 的符号就在这条上，跨不过什么；`.L+32` 要看 `.L` 到这条之间）。
     fn local_pcrel(&self, section: usize, v: &Value, pc: u64) -> Option<u64> {
         let target = self.local_target(section, v)?;
-        (!self.crosses(section, pc.min(target), pc.max(target))).then_some(target)
+        let (name, _) = v.single()?;
+        let (_, at) = self.label(name)?;
+        (!self.crosses(section, pc.min(at), pc.max(at))).then_some(target)
     }
 
     /// 表达式里的标号与系数（不折同节的差；`.set` 展开）：判断「A − B」是否跨过可松弛点用。加减以外的 ⇒ 认不出（空名）。
@@ -318,6 +325,21 @@ impl Assembler<'_> {
                 )?),
             },
             Fix::Reloc(t) | Fix::PcHi(t) => relocs.push(reloc(t, &v)?),
+            // 压缩的跳转：常数目标 = 偏移；本节解析得了 ⇒ 就地填，否则出 RVC_BRANCH / RVC_JUMP
+            Fix::RvcBranch | Fix::RvcJump => {
+                let bits = |d: i64| if f.kind == Fix::RvcBranch { crate::feature::Compressed::branch_bits(d) } else { crate::feature::Compressed::jump_bits(d) };
+                let d = match v.constant() {
+                    Some(d) => Some(d),
+                    None => self.local_pcrel(section, &v, pc).filter(|_| !f.relax).map(|t| t.cast_signed() - pc.cast_signed()),
+                };
+                match d {
+                    Some(d) => {
+                        let b = bits(d).ok_or_else(|| Error::Syntax(format!("跳转距离 {d} 超出压缩跳转的范围")))?;
+                        self.patch16(section, pc, b);
+                    }
+                    None => relocs.push(reloc(if f.kind == Fix::RvcBranch { elf::R_RISCV_RVC_BRANCH } else { elf::R_RISCV_RVC_JUMP }, &v)?),
+                }
+            }
             // 常数目标 = 偏移（同 llvm-mc：`jal 2046`、`beq a0, a1, 102`）
             Fix::Branch | Fix::Jal if let Some(d) = v.constant() => {
                 let form = if f.kind == Fix::Branch { Base::Branch } else { Base::J };
@@ -425,6 +447,14 @@ impl Assembler<'_> {
             Fix::Lo12I => Base::Imm.scatter((v << 20) >> 20),
             _ => Base::Store.scatter((v << 20) >> 20),
         }
+    }
+
+    /// 把位或进节里 `at` 处的 16 位（压缩指令）。
+    fn patch16(&mut self, section: usize, at: u64, bits: u16) {
+        let at = usize::try_from(at).unwrap_or_default();
+        let data = &mut self.sections[section].data;
+        let h = u16::from_le_bytes([data[at], data[at + 1]]) | bits;
+        data[at..at + 2].copy_from_slice(&h.to_le_bytes());
     }
 
     /// 把位或进节里 `at` 处的 32 位字。

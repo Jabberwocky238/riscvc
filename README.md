@@ -76,7 +76,7 @@ tracked. The comparison corpus is the compiler-rt builtins and the MC / lld RISC
 
 | | Supported | Not supported |
 | --- | --- | --- |
-| ISA | RV32I base; M, Zmmul, F, Zicsr; ten T-Head (XuanTie) `XThead*` scalar extensions — each one a Cargo feature | C (compressed), D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot |
+| ISA | RV32I base; M, Zmmul, F, Zicsr; C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a Cargo feature | D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot, Zcb / Zcmp |
 | ABI | `ilp32f` (with `f`), `ilp32` + soft-float (without `f`) | `ilp32d`, `lp64*` |
 | Default target | `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`, ABI `ilp32f` | |
 | Compiler input | MLIR `llvm` dialect in **generic form** (`mlir-opt --mlir-print-op-generic`) | C / C++ (this is not a front end) |
@@ -382,6 +382,7 @@ depending on `thiserror` only.
 | `zmmul` | multiply only | same, for `mul` / `mulh*`; codegen calls `__mulsi3` / `__muldi3` |
 | `f` *(default)* | F extension + `ilp32f` ABI (implies `zicsr`) | no float instructions, `e_flags` without single-float ABI; codegen uses `ilp32` + soft-float (`__addsf3` & co.) |
 | `zicsr` | CSR instructions | `csr*` and `frcsr`-style pseudo-instructions rejected |
+| `c` | C: 16-bit compressed instructions (`-march` gains `c2p0_zca1p0[_zcf1p0]`, objects get `EF_RISCV_RVC`); off by default | assembler / disassembler / simulator reject 16-bit encodings, nothing is compressed |
 | `xthead` | all ten T-Head extensions below | — |
 | `xtheadba`, `xtheadbb`, `xtheadbs`, `xtheadcmo`, `xtheadcondmov`, `xtheadfmemidx` (implies `f`), `xtheadmac`, `xtheadmemidx`, `xtheadmempair`, `xtheadsync` | T-Head vendor extensions (the RV32 scalar parts LLVM supports); off by default | assembler / disassembler do not know them; codegen never uses them |
 
@@ -418,7 +419,8 @@ As of 2026-10-15:
 
 | Area | Result |
 | --- | --- |
-| Decode / print | 200,000 random words × 3 print styles: identical to llvm-objdump |
+| Decode / print | 200,000 random words × 3 print styles: identical to llvm-objdump; with `c`, all 49,152 16-bit halfwords × 3 styles identical too |
+| Compressed (`--features c`) | assembler compresses like llvm-mc (`compressInst` order, literal immediates and bare symbols only, `.option rvc` / `norvc` / `exact`, `.attribute arch`), relaxes `c.j` / `c.beqz` → `jal` / `b<cc>` → long form at layout time, `.insn c*` formats: 285 of 287 MC fixtures (`tests/fixtures/mc-c`) and 334 compiler-rt files identical to llvm-mc `+c`; linker applies `RVC_BRANCH` / `RVC_JUMP` and relaxes calls to `c.j` / `c.jal`: identical to ld.lld; all end-to-end programs built with `+c` match LLVM in the simulator |
 | Assembler | 334 compiler-rt files (O0 / O2), both `-mno-relax` and `+relax` (`R_RISCV_RELAX` / `R_RISCV_ALIGN`, `.option relax` / `norelax`): section bytes, relocations, global symbols identical to llvm-mc |
 | Linker | 167 compiler-rt objects × 2 linker scripts: identical to ld.lld (loadable sections incl. empty ones, program headers incl. `PT_GNU_RELRO` / `PT_RISCV_ATTRIBUTES`, entry, globals); llvm-mc `+relax` objects (535 `R_RISCV_RELAX`, 8 `R_RISCV_ALIGN`, merge string sections) identical to ld.lld both with and without `--no-relax` |
 | MLIR parsing | 334 generic-form `.mlir` files parse and convert to the internal IR |
@@ -426,7 +428,7 @@ As of 2026-10-15:
 | End-to-end ELF | 163 builtins unit tests: all match LLVM at O0 and O2, except 2 fp128 tests (out of scope, skipped); 16 hand-written C programs (`tests/programs`: sorting, hashing, strings, struct passing, switch, function pointers, 64-bit, bit tricks, float / double, varargs, recursion, lists, bignum, global tables): `main`'s checksum identical to LLVM at O0 and O2 |
 | Division by constants | shifts / magic-number multiply (same as LLVM's BuildUDIV / BuildSDIV): 496 functions (udiv / urem / sdiv / srem × i32 / i16 / i8 × 40-odd divisors), 209,806 calls checked against exact arithmetic |
 | Code size (`.text`, both `-mattr=-relax`, `tools/size_vs_llc.py`) | compiler-rt O2 1.18× llc, O0 0.98×; `tests/programs` O2 1.09×, O0 0.95× |
-| MC fixtures | 276 of 279 identical to llvm-mc (with and without relaxation); remaining: long-branch relaxation of conditional branches pushed out by `.fill`, alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
+| MC fixtures | 277 of 279 identical to llvm-mc (with and without relaxation; branch lengths are settled at layout time, like MC relaxation); remaining: alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
 
 Not done yet: `sret` lowering (return values that do not fit in registers), test coverage of stack-passed
 arguments, `cmpxchg`, `i128` / `fp128`, vector operations. Code size: the machine-IR passes (constant folding,
@@ -457,7 +459,7 @@ cargo test --release
 ## Limitations and non-goals
 
 - Not a C / C++ front end; bring MLIR (or LLVM IR via `mlir-translate --import-llvm`).
-- No compressed instructions, no double-precision hardware, no vector extension.
+- No double-precision hardware, no vector extension; compressed instructions only behind the `c` feature (no Zcb / Zcmp).
 - Static executables only; no shared libraries, PLT/GOT generation or dynamic relocations.
 - The `.S` preprocessor handles only `#if`, `#ifdef` and `#define`.
 - No optimisation pipeline of its own beyond what your MLIR passes and the `dce` pass do; code quality is

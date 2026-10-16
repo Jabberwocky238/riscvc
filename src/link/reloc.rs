@@ -23,7 +23,7 @@ impl Linker {
                     let s = target.unwrap_or(0);
                     let v = s.wrapping_add_signed(r.addend);
                     // 未定义符号的跳转 / 调用同 lld：跳到自己（死循环，⛔ 不溢出）
-                    let jump = matches!(r.r_type, elf::R_RISCV_BRANCH | elf::R_RISCV_JAL | elf::R_RISCV_CALL | elf::R_RISCV_CALL_PLT | elf::R_RISCV_PLT32);
+                    let jump = matches!(r.r_type, elf::R_RISCV_BRANCH | elf::R_RISCV_JAL | elf::R_RISCV_RVC_BRANCH | elf::R_RISCV_RVC_JUMP | elf::R_RISCV_CALL | elf::R_RISCV_CALL_PLT | elf::R_RISCV_PLT32);
                     let pc = if target.is_none() && jump { r.addend } else { v.wrapping_sub(p).cast_signed() };
                     let data = &mut self.outs[out].data;
                     let range = |bits: u32, x: i64| -> Result<(), Error> {
@@ -73,6 +73,15 @@ impl Linker {
                         elf::R_RISCV_JAL => {
                             range(21, pc)?;
                             Self::field(data, at, Base::J, pc as i32);
+                        }
+                        // 压缩的跳转：16 位里清掉偏移的位再填（同 lld）
+                        elf::R_RISCV_RVC_BRANCH | elf::R_RISCV_RVC_JUMP => {
+                            let branch = r.r_type == elf::R_RISCV_RVC_BRANCH;
+                            range(if branch { 9 } else { 12 }, pc)?;
+                            let bits = if branch { crate::feature::Compressed::branch_bits(pc) } else { crate::feature::Compressed::jump_bits(pc) };
+                            let bits = bits.ok_or_else(|| Error::Link(format!("{}：{} 处的压缩跳转距离 {pc} 不是偶数", self.objs[o].name, sec.name)))?;
+                            let h = u16::try_from(Self::get(data, at, 2)).unwrap_or_default() & if branch { 0xe383 } else { 0xe003 };
+                            Self::put(data, at, 2, u64::from(h | bits));
                         }
                         elf::R_RISCV_CALL | elf::R_RISCV_CALL_PLT => {
                             range(32, pc)?;

@@ -158,3 +158,17 @@ fn llvm_fixtures_relax() {
 fn xthead_fixtures() {
     corpus("tests/fixtures/mc-xthead", "tools/fixtures.py", false);
 }
+
+/// C：`tests/fixtures/mc-c`（全部 LLVM fixture 开 +c 再过 llvm-mc；`cargo test --features c`）。⚠ 开了 C，
+/// llvm-mc 把能压的都压掉 ⇒ 这里比的主要是汇编器的自动压缩与松弛。
+#[cfg(feature = "c")]
+#[test]
+fn c_fixtures() {
+    corpus("tests/fixtures/mc-c", "tools/fixtures.py", false);
+}
+
+#[cfg(feature = "c")]
+#[test]
+fn c_fixtures_relax() {
+    corpus("tests/fixtures/mc-c", "tools/fixtures.py", true);
+}

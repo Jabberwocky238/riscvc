@@ -222,21 +222,29 @@ impl Assembler<'_> {
                     Some(s) => Err(String::from(s)),
                     None => Ok(u64::try_from(Self::const_text(value)?).unwrap_or_default()),
                 };
+                // 架构串改写当前的扩展集（同 RISCVAsmParser）：这里只有 C 影响汇编 ⇒ 串里有 c / zca 才压缩
+                if tag == 5
+                    && let Err(arch) = &value
+                {
+                    self.mode.rvc = crate::feature::Compressed::ENABLED && (crate::feature::Target::lists(arch, "c") || crate::feature::Target::lists(arch, "zca"));
+                }
                 self.attributes.retain(|(t, _)| *t != tag);
                 self.attributes.push((tag, value));
             }
             ".option" => match rest.split(',').next().map(str::trim) {
-                Some("push") => self.options.push((self.exact, self.pic, self.relax_on)),
-                Some("pop") => (self.exact, self.pic, self.relax_on) = self.options.pop().ok_or_else(|| Error::Syntax(String::from(".option pop 没有配对的 push")))?,
-                Some("relax") => self.relax_on = true,
-                Some("norelax") => self.relax_on = false,
+                Some("push") => self.options.push(self.mode),
+                Some("pop") => self.mode = self.options.pop().ok_or_else(|| Error::Syntax(String::from(".option pop 没有配对的 push")))?,
+                Some("relax") => self.mode.relax = true,
+                Some("norelax") => self.mode.relax = false,
                 // exact 连带 norelax（同 RISCVAsmParser）
-                Some("exact") => (self.exact, self.relax_on) = (true, false),
-                Some("noexact") => (self.exact, self.relax_on) = (false, true),
-                Some("pic") => self.pic = true,
-                Some("nopic") => self.pic = false,
-                Some("rvc") => return Err(Error::Syntax(String::from("不做压缩指令（.option rvc）"))),
-                // relax / norelax / norvc / arch 与认不出的：llvm-mc 也只是告警
+                Some("exact") => (self.mode.exact, self.mode.relax) = (true, false),
+                Some("noexact") => (self.mode.exact, self.mode.relax) = (false, true),
+                Some("pic") => self.mode.pic = true,
+                Some("nopic") => self.mode.pic = false,
+                Some("rvc") if crate::feature::Compressed::ENABLED => self.mode.rvc = true,
+                Some("rvc") => return Err(Error::Syntax(String::from("压缩指令要 c feature（.option rvc）"))),
+                Some("norvc") => self.mode.rvc = false,
+                // arch 与认不出的：llvm-mc 也只是告警
                 _ => {}
             },
             // 只影响调试信息 / 展开表 / 链接器提示的：认了就跳过
@@ -334,22 +342,13 @@ impl Assembler<'_> {
             }
             return self.bytes(&bytes);
         }
-        let mut bytes = Vec::new();
-        if s.code() && fill.is_none() {
-            // 同 llvm-mc：奇数先补一个 0，再差 2 字节补 `c.nop`（不开 C 也补），其余一条条 nop
-            if pad % 2 == 1 {
-                bytes.push(0);
-            }
-            if pad % 4 >= 2 {
-                bytes.extend_from_slice(&[0x01, 0x00]);
-            }
-            for _ in 0..pad / 4 {
-                bytes.extend_from_slice(&0x13u32.to_le_bytes());
-            }
-        } else {
-            bytes.resize(usize::try_from(pad).unwrap_or_default(), u8::try_from(fill.unwrap_or(0) & 0xff).unwrap_or_default());
-        }
-        self.bytes(&bytes)
+        // 同 llvm-mc：代码节奇数先补一个 0，再差 2 字节补 `c.nop`（不开 C 也补），其余一条条 nop；别的按填充字节。
+        // 记下来：前面的指令布局时放宽了要重补（[`super::layout`]）
+        let fill = (!s.code() || fill.is_some()).then(|| u8::try_from(fill.unwrap_or(0) & 0xff).unwrap_or_default());
+        let seq = self.label_seq.len() as u64;
+        let max = max.and_then(|m| u64::try_from(m).ok());
+        self.sections[self.cur].pads.push(super::layout::Pad { offset: here, align, size: pad, fill, max, seq });
+        self.bytes(&Self::padding(pad, fill))
     }
 
     /// 常数参数（现在就要能算出来）。

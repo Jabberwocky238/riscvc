@@ -141,10 +141,26 @@ impl Cpu {
             return Ok(());
         }
         let w = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
+        self.pc = self.exec(devs, w, 4)?;
+        self.steps += 1;
+        Ok(())
+    }
+
+    /// ⭐ 执行一条 RV32I 的 32 位指令，指令长 `len` 字节（压缩指令还原出来的是 2：`jal` 的返回地址、顺序的下一条都按它算）。
+    /// 回下一条的 pc。⚠ 不动 `pc` 与步数（调用方定）。
+    pub(crate) fn exec(&mut self, devs: &mut [&mut dyn Device], w: u32, len: u32) -> Result<u32, Stop> {
+        // 内置扩展（M、F、Zicsr …）的 32 位指令
+        let window = { let mut b = [0u8; 8]; b[..4].copy_from_slice(&w.to_le_bytes()); b };
+        if crate::feature::decode(&window) == Some(4) {
+            let mut cx = Exec::new(self, devs);
+            crate::feature::execute(&mut cx, &window[..4])?;
+            let next = cx.next;
+            return Ok(next.unwrap_or_else(|| self.pc.wrapping_add(len)));
+        }
         let i = Inst::<Op>::try_from(w).map_err(|()| Stop::Trap(w))?;
         let (rs1, rs2) = (self.x[i.rs1 as usize], self.x[i.rs2 as usize]);
         let imm = i.imm.cast_unsigned();
-        let mut next = self.pc.wrapping_add(4);
+        let mut next = self.pc.wrapping_add(len);
         match i.op {
             Op::Lui => self.set(i.rd, imm << 12),
             Op::Auipc => self.set(i.rd, self.pc.wrapping_add(imm << 12)),
@@ -208,9 +224,7 @@ impl Cpu {
             Op::Fence | Op::FenceTso | Op::FenceI | Op::Wfi | Op::SfenceVma => {}
             Op::Ecall | Op::Ebreak | Op::Mret | Op::Sret | Op::Dret => return Err(Stop::Trap(w)),
         }
-        self.pc = next;
-        self.steps += 1;
-        Ok(())
+        Ok(next)
     }
 
     /// 从 `entry` 跑到返回地址 `ret`（`ra` 设成它）或停下，最多 `limit` 步（只挂内置扩展）。

@@ -3,7 +3,7 @@
 //! ```text
 //! 每一轮（地址都按上一轮排好）：可执行输出节里的每个输入节，按重定位次序算各条要删的字节数（累计 = deltas），
 //!   R_RISCV_ALIGN                  删掉超出对齐所需的 nop（--no-relax 也做）
-//!   CALL / CALL_PLT + RELAX        auipc + jalr ⇒ jal（±1 MiB 内；第 4 轮起只许删得更少，防振荡）
+//!   CALL / CALL_PLT + RELAX        auipc + jalr ⇒ c.j / c.jal（输入开了 C、±2 KiB 内）或 jal（±1 MiB 内）；第 4 轮起只许删得更少，防振荡
 //!   HI20 / LO12_I / LO12_S + RELAX 值放得进 12 位 ⇒ 删 lui、lo12 改用 x0
 //! 同时按「锚」（符号的起点与终点）更新本节符号的值与大小。有变化就重排地址、再来一轮（最多 30 轮）。
 //! 定下来以后改写节内容（删字节、写 jal / nop）、重定位的位置与类型、符号的值与大小。
@@ -19,6 +19,8 @@ pub(super) enum Rewrite {
     None,
     /// `auipc + jalr` ⇒ 这个 `jal` 字。
     Jal(u32),
+    /// `auipc + jalr` ⇒ 这个 `c.j` / `c.jal`（开了 C、±2 KiB 内）。
+    Rvc(u16),
     /// 这条（`lui`）删掉。
     Drop,
     /// lo12 改用 x0（I / S 型）。
@@ -145,7 +147,15 @@ impl Linker {
                         let at = usize::try_from(r.offset).unwrap_or_default();
                         let jalr = data.get(at + 4..at + 8).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
                         let rd = (jalr >> 7) & 31;
-                        if remove >= 4 && (-(1 << 20)..1 << 20).contains(&displace) {
+                        // 同 lld 的 relaxCall：这个输入开了 C（EF_RISCV_RVC）、±2 KiB 内 ⇒ c.j（rd = x0）/ c.jal（rd = ra，只有 RV32）
+                        let rvc = self.objs[o].e_flags & elf::EF_RISCV_RVC != 0 && (-2048..2048).contains(&displace);
+                        if remove >= 6 && rvc && rd == 0 {
+                            aux.kinds[k] = Rewrite::Rvc(0xa001);
+                            remove = 6;
+                        } else if remove >= 6 && rvc && rd == 1 {
+                            aux.kinds[k] = Rewrite::Rvc(0x2001);
+                            remove = 6;
+                        } else if remove >= 4 && (-(1 << 20)..1 << 20).contains(&displace) {
                             aux.kinds[k] = Rewrite::Jal(0x6f | rd << 7);
                             remove = 4;
                         } else {
@@ -242,6 +252,9 @@ impl Linker {
                 } else if let Rewrite::Jal(w) = aux.kinds[k] {
                     skip = 4;
                     new.extend_from_slice(&w.to_le_bytes());
+                } else if let Rewrite::Rvc(h) = aux.kinds[k] {
+                    skip = 2;
+                    new.extend_from_slice(&h.to_le_bytes());
                 }
                 // 删的是这条处的前 `remove` 个字节（ALIGN 的 4 的倍数：留下的 nop 由下一段照抄）
                 offset = at + skip + remove as usize;
@@ -261,6 +274,7 @@ impl Linker {
                 r.r_type = match aux.kinds[k] {
                     Rewrite::None => r.r_type,
                     Rewrite::Jal(_) => elf::R_RISCV_JAL,
+                    Rewrite::Rvc(_) => elf::R_RISCV_RVC_JUMP,
                     Rewrite::Drop => elf::R_RISCV_RELAX,
                     Rewrite::X0I => X0REL_I,
                     Rewrite::X0S => X0REL_S,
