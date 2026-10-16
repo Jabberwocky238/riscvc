@@ -9,12 +9,23 @@ target triple = "riscv32-unknown-unknown-elf"
 ; Function Attrs: nounwind
 define dso_local range(i32 0, 2) i32 @test__truncdfhf2(double noundef %a, i16 noundef zeroext %expected) local_unnamed_addr #0 {
 entry:
-  %call = tail call zeroext i16 @__truncdfhf2(double noundef %a) #3
-  %cmp.i = icmp eq i16 %call, %expected
+  %x.addr.i = alloca half, align 2
+  %ret.i = alloca i16, align 2
+  %x.addr.i.i = alloca half, align 2
+  %ret.i.i = alloca i16, align 2
+  %call = tail call half @__truncdfhf2(double noundef %a) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i)
+  store half %call, ptr %x.addr.i.i, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i) #4
+  %call.i.i = call ptr @memcpy(ptr noundef nonnull %ret.i.i, ptr noundef nonnull %x.addr.i.i, i32 noundef 2) #3
+  %0 = load i16, ptr %ret.i.i, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i)
+  %cmp.i = icmp eq i16 %0, %expected
   br i1 %cmp.i, label %if.end, label %compareResultH.exit
 
 compareResultH.exit:                              ; preds = %entry
-  %conv.i = zext i16 %call to i32
+  %conv.i = zext i16 %0 to i32
   %cmp4.i = icmp eq i16 %expected, 32256
   %and.i = and i32 %conv.i, 31744
   %cmp8.i = icmp eq i32 %and.i, 31744
@@ -25,8 +36,16 @@ compareResultH.exit:                              ; preds = %entry
   br i1 %or.cond20.i.not, label %if.end, label %if.then
 
 if.then:                                          ; preds = %compareResultH.exit
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i)
+  store half %call, ptr %x.addr.i, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i) #4
+  %call.i = call ptr @memcpy(ptr noundef nonnull %ret.i, ptr noundef nonnull %x.addr.i, i32 noundef 2) #3
+  %1 = load i16, ptr %ret.i, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i)
+  %conv = zext i16 %1 to i32
   %conv3 = zext i16 %expected to i32
-  %call4 = tail call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %a, i32 noundef %conv.i, i32 noundef %conv3) #3
+  %call4 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %a, i32 noundef %conv, i32 noundef %conv3) #3
   br label %if.end
 
 if.end:                                           ; preds = %entry, %if.then, %compareResultH.exit
@@ -37,7 +56,7 @@ if.end:                                           ; preds = %entry, %if.then, %c
 ; Function Attrs: mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
 declare void @llvm.lifetime.start.p0(ptr captures(none)) #1
 
-declare dso_local zeroext i16 @__truncdfhf2(double noundef) local_unnamed_addr #2
+declare dso_local half @__truncdfhf2(double noundef) local_unnamed_addr #2
 
 declare dso_local i32 @printf(ptr noundef, ...) local_unnamed_addr #2
 
@@ -47,27 +66,50 @@ declare void @llvm.lifetime.end.p0(ptr captures(none)) #1
 ; Function Attrs: nounwind
 define dso_local range(i32 0, 2) i32 @main() local_unnamed_addr #0 {
 entry:
-  %x.addr.i.i125 = alloca i64, align 8
-  %ret.i.i126 = alloca double, align 8
-  %x.addr.i.i109 = alloca i64, align 8
-  %ret.i.i110 = alloca double, align 8
-  %x.addr.i.i93 = alloca i64, align 8
-  %ret.i.i94 = alloca double, align 8
+  %x.addr.i.i145 = alloca half, align 2
+  %ret.i.i146 = alloca i16, align 2
+  %x.addr.i.i.i147 = alloca half, align 2
+  %ret.i.i.i148 = alloca i16, align 2
+  %x.addr.i.i142 = alloca i64, align 8
+  %ret.i.i143 = alloca double, align 8
+  %x.addr.i.i122 = alloca half, align 2
+  %ret.i.i123 = alloca i16, align 2
+  %x.addr.i.i.i124 = alloca half, align 2
+  %ret.i.i.i125 = alloca i16, align 2
+  %x.addr.i.i119 = alloca i64, align 8
+  %ret.i.i120 = alloca double, align 8
+  %x.addr.i.i99 = alloca half, align 2
+  %ret.i.i100 = alloca i16, align 2
+  %x.addr.i.i.i101 = alloca half, align 2
+  %ret.i.i.i102 = alloca i16, align 2
+  %x.addr.i.i96 = alloca i64, align 8
+  %ret.i.i97 = alloca double, align 8
+  %x.addr.i.i93 = alloca half, align 2
+  %ret.i.i94 = alloca i16, align 2
+  %x.addr.i.i.i = alloca half, align 2
+  %ret.i.i.i = alloca i16, align 2
   %x.addr.i.i = alloca i64, align 8
   %ret.i.i = alloca double, align 8
   call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i)
-  store i64 9221120237041090560, ptr %x.addr.i.i, align 8, !tbaa !10
+  store i64 9221120237041090560, ptr %x.addr.i.i, align 8, !tbaa !14
   call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i) #4
   %call.i.i = call ptr @memcpy(ptr noundef nonnull %ret.i.i, ptr noundef nonnull %x.addr.i.i, i32 noundef 8) #3
-  %0 = load double, ptr %ret.i.i, align 8, !tbaa !12
+  %0 = load double, ptr %ret.i.i, align 8, !tbaa !16
   call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i) #4
   call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i)
-  %call.i = call zeroext i16 @__truncdfhf2(double noundef %0) #3
-  %cmp.i.i = icmp eq i16 %call.i, 32256
+  %call.i = call half @__truncdfhf2(double noundef %0) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i.i)
+  store half %call.i, ptr %x.addr.i.i.i, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i.i) #4
+  %call.i.i.i = call ptr @memcpy(ptr noundef nonnull %ret.i.i.i, ptr noundef nonnull %x.addr.i.i.i, i32 noundef 2) #3
+  %1 = load i16, ptr %ret.i.i.i, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i.i) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i.i)
+  %cmp.i.i = icmp eq i16 %1, 32256
   br i1 %cmp.i.i, label %if.end, label %compareResultH.exit.i
 
 compareResultH.exit.i:                            ; preds = %entry
-  %conv.i.i = zext i16 %call.i to i32
+  %conv.i.i = zext i16 %1 to i32
   %and.i.i = and i32 %conv.i.i, 31744
   %cmp8.i.i = icmp eq i32 %and.i.i, 31744
   %and11.i.i = and i32 %conv.i.i, 1023
@@ -76,67 +118,118 @@ compareResultH.exit.i:                            ; preds = %entry
   br i1 %or.cond20.i.not.i, label %if.end, label %test__truncdfhf2.exit
 
 test__truncdfhf2.exit:                            ; preds = %compareResultH.exit.i
-  %call4.i = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %0, i32 noundef %conv.i.i, i32 noundef 32256) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i93)
+  store half %call.i, ptr %x.addr.i.i93, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i94) #4
+  %call.i.i95 = call ptr @memcpy(ptr noundef nonnull %ret.i.i94, ptr noundef nonnull %x.addr.i.i93, i32 noundef 2) #3
+  %2 = load i16, ptr %ret.i.i94, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i94) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i93)
+  %conv.i = zext i16 %2 to i32
+  %call4.i = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %0, i32 noundef %conv.i, i32 noundef 32256) #3
   br label %return
 
 if.end:                                           ; preds = %compareResultH.exit.i, %entry
-  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i93)
-  store i64 9218868437227438080, ptr %x.addr.i.i93, align 8, !tbaa !10
-  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i94) #4
-  %call.i.i95 = call ptr @memcpy(ptr noundef nonnull %ret.i.i94, ptr noundef nonnull %x.addr.i.i93, i32 noundef 8) #3
-  %1 = load double, ptr %ret.i.i94, align 8, !tbaa !12
-  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i94) #4
-  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i93)
-  %call.i96 = call zeroext i16 @__truncdfhf2(double noundef %1) #3
-  %cmp.i.i97 = icmp eq i16 %call.i96, 32256
-  br i1 %cmp.i.i97, label %if.end6, label %compareResultH.exit.i98
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i96)
+  store i64 9218868437227438080, ptr %x.addr.i.i96, align 8, !tbaa !14
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i97) #4
+  %call.i.i98 = call ptr @memcpy(ptr noundef nonnull %ret.i.i97, ptr noundef nonnull %x.addr.i.i96, i32 noundef 8) #3
+  %3 = load double, ptr %ret.i.i97, align 8, !tbaa !16
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i97) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i96)
+  %call.i103 = call half @__truncdfhf2(double noundef %3) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i.i101)
+  store half %call.i103, ptr %x.addr.i.i.i101, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i.i102) #4
+  %call.i.i.i104 = call ptr @memcpy(ptr noundef nonnull %ret.i.i.i102, ptr noundef nonnull %x.addr.i.i.i101, i32 noundef 2) #3
+  %4 = load i16, ptr %ret.i.i.i102, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i.i102) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i.i101)
+  %cmp.i.i105 = icmp eq i16 %4, 32256
+  br i1 %cmp.i.i105, label %if.end6, label %compareResultH.exit.i106
 
-compareResultH.exit.i98:                          ; preds = %if.end
-  %conv.i.i99 = zext i16 %call.i96 to i32
-  %and.i.i100 = and i32 %conv.i.i99, 31744
-  %cmp8.i.i101 = icmp eq i32 %and.i.i100, 31744
-  %and11.i.i102 = and i32 %conv.i.i99, 1023
-  %cmp12.not.i.i103 = icmp ne i32 %and11.i.i102, 0
-  %or.cond20.i.not.i104 = and i1 %cmp12.not.i.i103, %cmp8.i.i101
-  br i1 %or.cond20.i.not.i104, label %if.end6, label %test__truncdfhf2.exit108
+compareResultH.exit.i106:                         ; preds = %if.end
+  %conv.i.i107 = zext i16 %4 to i32
+  %and.i.i108 = and i32 %conv.i.i107, 31744
+  %cmp8.i.i109 = icmp eq i32 %and.i.i108, 31744
+  %and11.i.i110 = and i32 %conv.i.i107, 1023
+  %cmp12.not.i.i111 = icmp ne i32 %and11.i.i110, 0
+  %or.cond20.i.not.i112 = and i1 %cmp12.not.i.i111, %cmp8.i.i109
+  br i1 %or.cond20.i.not.i112, label %if.end6, label %test__truncdfhf2.exit118
 
-test__truncdfhf2.exit108:                         ; preds = %compareResultH.exit.i98
-  %call4.i106 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %1, i32 noundef %conv.i.i99, i32 noundef 32256) #3
+test__truncdfhf2.exit118:                         ; preds = %compareResultH.exit.i106
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i99)
+  store half %call.i103, ptr %x.addr.i.i99, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i100) #4
+  %call.i.i114 = call ptr @memcpy(ptr noundef nonnull %ret.i.i100, ptr noundef nonnull %x.addr.i.i99, i32 noundef 2) #3
+  %5 = load i16, ptr %ret.i.i100, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i100) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i99)
+  %conv.i115 = zext i16 %5 to i32
+  %call4.i116 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %3, i32 noundef %conv.i115, i32 noundef 32256) #3
   br label %return
 
-if.end6:                                          ; preds = %compareResultH.exit.i98, %if.end
-  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i109)
-  store i64 9218868437227405312, ptr %x.addr.i.i109, align 8, !tbaa !10
-  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i110) #4
-  %call.i.i111 = call ptr @memcpy(ptr noundef nonnull %ret.i.i110, ptr noundef nonnull %x.addr.i.i109, i32 noundef 8) #3
-  %2 = load double, ptr %ret.i.i110, align 8, !tbaa !12
-  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i110) #4
-  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i109)
-  %call.i112 = call zeroext i16 @__truncdfhf2(double noundef %2) #3
-  %cmp.i.i113 = icmp eq i16 %call.i112, 31744
-  br i1 %cmp.i.i113, label %if.end11, label %test__truncdfhf2.exit124
+if.end6:                                          ; preds = %compareResultH.exit.i106, %if.end
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i119)
+  store i64 9218868437227405312, ptr %x.addr.i.i119, align 8, !tbaa !14
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i120) #4
+  %call.i.i121 = call ptr @memcpy(ptr noundef nonnull %ret.i.i120, ptr noundef nonnull %x.addr.i.i119, i32 noundef 8) #3
+  %6 = load double, ptr %ret.i.i120, align 8, !tbaa !16
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i120) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i119)
+  %call.i126 = call half @__truncdfhf2(double noundef %6) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i.i124)
+  store half %call.i126, ptr %x.addr.i.i.i124, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i.i125) #4
+  %call.i.i.i127 = call ptr @memcpy(ptr noundef nonnull %ret.i.i.i125, ptr noundef nonnull %x.addr.i.i.i124, i32 noundef 2) #3
+  %7 = load i16, ptr %ret.i.i.i125, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i.i125) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i.i124)
+  %cmp.i.i128 = icmp eq i16 %7, 31744
+  br i1 %cmp.i.i128, label %if.end11, label %test__truncdfhf2.exit141
 
-test__truncdfhf2.exit124:                         ; preds = %if.end6
-  %conv.i.i115 = zext i16 %call.i112 to i32
-  %call4.i122 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %2, i32 noundef %conv.i.i115, i32 noundef 31744) #3
+test__truncdfhf2.exit141:                         ; preds = %if.end6
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i122)
+  store half %call.i126, ptr %x.addr.i.i122, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i123) #4
+  %call.i.i137 = call ptr @memcpy(ptr noundef nonnull %ret.i.i123, ptr noundef nonnull %x.addr.i.i122, i32 noundef 2) #3
+  %8 = load i16, ptr %ret.i.i123, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i123) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i122)
+  %conv.i138 = zext i16 %8 to i32
+  %call4.i139 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %6, i32 noundef %conv.i138, i32 noundef 31744) #3
   br label %return
 
 if.end11:                                         ; preds = %if.end6
-  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i125)
-  store i64 9218868437227405312, ptr %x.addr.i.i125, align 8, !tbaa !10
-  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i126) #4
-  %call.i.i127 = call ptr @memcpy(ptr noundef nonnull %ret.i.i126, ptr noundef nonnull %x.addr.i.i125, i32 noundef 8) #3
-  %3 = load double, ptr %ret.i.i126, align 8, !tbaa !12
-  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i126) #4
-  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i125)
-  %fneg = fneg double %3
-  %call.i128 = call zeroext i16 @__truncdfhf2(double noundef %fneg) #3
-  %cmp.i.i129 = icmp eq i16 %call.i128, -1024
-  br i1 %cmp.i.i129, label %if.end16, label %test__truncdfhf2.exit140
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i142)
+  store i64 9218868437227405312, ptr %x.addr.i.i142, align 8, !tbaa !14
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i143) #4
+  %call.i.i144 = call ptr @memcpy(ptr noundef nonnull %ret.i.i143, ptr noundef nonnull %x.addr.i.i142, i32 noundef 8) #3
+  %9 = load double, ptr %ret.i.i143, align 8, !tbaa !16
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i143) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i142)
+  %fneg = fneg double %9
+  %call.i149 = call half @__truncdfhf2(double noundef %fneg) #3
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i.i147)
+  store half %call.i149, ptr %x.addr.i.i.i147, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i.i148) #4
+  %call.i.i.i150 = call ptr @memcpy(ptr noundef nonnull %ret.i.i.i148, ptr noundef nonnull %x.addr.i.i.i147, i32 noundef 2) #3
+  %10 = load i16, ptr %ret.i.i.i148, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i.i148) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i.i147)
+  %cmp.i.i151 = icmp eq i16 %10, -1024
+  br i1 %cmp.i.i151, label %if.end16, label %test__truncdfhf2.exit164
 
-test__truncdfhf2.exit140:                         ; preds = %if.end11
-  %conv.i.i131 = zext i16 %call.i128 to i32
-  %call4.i138 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %fneg, i32 noundef %conv.i.i131, i32 noundef 64512) #3
+test__truncdfhf2.exit164:                         ; preds = %if.end11
+  call void @llvm.lifetime.start.p0(ptr nonnull %x.addr.i.i145)
+  store half %call.i149, ptr %x.addr.i.i145, align 2, !tbaa !10
+  call void @llvm.lifetime.start.p0(ptr nonnull %ret.i.i146) #4
+  %call.i.i160 = call ptr @memcpy(ptr noundef nonnull %ret.i.i146, ptr noundef nonnull %x.addr.i.i145, i32 noundef 2) #3
+  %11 = load i16, ptr %ret.i.i146, align 2, !tbaa !12
+  call void @llvm.lifetime.end.p0(ptr nonnull %ret.i.i146) #4
+  call void @llvm.lifetime.end.p0(ptr nonnull %x.addr.i.i145)
+  %conv.i161 = zext i16 %11 to i32
+  %call4.i162 = call i32 (ptr, ...) @printf(ptr noundef nonnull @.str, double noundef %fneg, i32 noundef %conv.i161, i32 noundef 64512) #3
   br label %return
 
 if.end16:                                         ; preds = %if.end11
@@ -233,8 +326,8 @@ if.end88:                                         ; preds = %if.end84
   %call89 = call i32 @test__truncdfhf2(double noundef 6.553600e+04, i16 noundef zeroext 31744) #5
   br label %return
 
-return:                                           ; preds = %test__truncdfhf2.exit140, %test__truncdfhf2.exit124, %test__truncdfhf2.exit108, %test__truncdfhf2.exit, %if.end88, %if.end84, %if.end80, %if.end76, %if.end72, %if.end68, %if.end64, %if.end60, %if.end56, %if.end52, %if.end48, %if.end44, %if.end40, %if.end36, %if.end32, %if.end28, %if.end24, %if.end20, %if.end16
-  %retval.0 = phi i32 [ 1, %if.end84 ], [ 1, %test__truncdfhf2.exit ], [ 1, %test__truncdfhf2.exit108 ], [ 1, %test__truncdfhf2.exit124 ], [ 1, %test__truncdfhf2.exit140 ], [ 1, %if.end16 ], [ 1, %if.end20 ], [ 1, %if.end24 ], [ 1, %if.end28 ], [ 1, %if.end32 ], [ 1, %if.end36 ], [ 1, %if.end40 ], [ 1, %if.end44 ], [ 1, %if.end48 ], [ 1, %if.end52 ], [ 1, %if.end56 ], [ 1, %if.end60 ], [ 1, %if.end64 ], [ 1, %if.end68 ], [ 1, %if.end72 ], [ 1, %if.end76 ], [ 1, %if.end80 ], [ %call89, %if.end88 ]
+return:                                           ; preds = %test__truncdfhf2.exit164, %test__truncdfhf2.exit141, %test__truncdfhf2.exit118, %test__truncdfhf2.exit, %if.end88, %if.end84, %if.end80, %if.end76, %if.end72, %if.end68, %if.end64, %if.end60, %if.end56, %if.end52, %if.end48, %if.end44, %if.end40, %if.end36, %if.end32, %if.end28, %if.end24, %if.end20, %if.end16
+  %retval.0 = phi i32 [ 1, %if.end84 ], [ 1, %test__truncdfhf2.exit ], [ 1, %test__truncdfhf2.exit118 ], [ 1, %test__truncdfhf2.exit141 ], [ 1, %test__truncdfhf2.exit164 ], [ 1, %if.end16 ], [ 1, %if.end20 ], [ 1, %if.end24 ], [ 1, %if.end28 ], [ 1, %if.end32 ], [ 1, %if.end36 ], [ 1, %if.end40 ], [ 1, %if.end44 ], [ 1, %if.end48 ], [ 1, %if.end52 ], [ 1, %if.end56 ], [ 1, %if.end60 ], [ 1, %if.end64 ], [ 1, %if.end68 ], [ 1, %if.end72 ], [ 1, %if.end76 ], [ 1, %if.end80 ], [ %call89, %if.end88 ]
   ret i32 %retval.0
 }
 
@@ -262,6 +355,10 @@ attributes #5 = { nobuiltin "no-builtins" }
 !8 = !{!"omnipotent char", !9, i64 0}
 !9 = !{!"Simple C/C++ TBAA"}
 !10 = !{!11, !11, i64 0}
-!11 = !{!"long long", !8, i64 0}
+!11 = !{!"_Float16", !8, i64 0}
 !12 = !{!13, !13, i64 0}
-!13 = !{!"double", !8, i64 0}
+!13 = !{!"short", !8, i64 0}
+!14 = !{!15, !15, i64 0}
+!15 = !{!"long long", !8, i64 0}
+!16 = !{!17, !17, i64 0}
+!17 = !{!"double", !8, i64 0}

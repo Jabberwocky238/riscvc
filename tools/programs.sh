@@ -13,7 +13,9 @@ cd "$(dirname "$0")/.."
 BIN=${1:-../llvm-project/build/bin}
 CRT=../llvm-project/compiler-rt
 OUT=tests/fixtures
-BASE="--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -I $CRT/lib/builtins"
+# -DCOMPILER_RT_HAS_FLOAT16：同 compiler-rt 的 CMake（编译器支持 _Float16 就定义）⇒ half 的 builtins 收 / 回 _Float16，
+# 与 LLVM 的 libcall 约定一致（ilp32f 下在 fa0）；⛔ 不定义会编成 uint16_t（在 a0），llc 调它就读错寄存器
+BASE="--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -I $CRT/lib/builtins -DCOMPILER_RT_HAS_FLOAT16"
 mlir() { "$BIN/mlir-translate" --import-llvm "$1" 2>/dev/null | "$BIN/mlir-opt" --mlir-print-op-generic -o "$2"; }
 unit() {
   f=$1; b=$(basename "$f" .c)

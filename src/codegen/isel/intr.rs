@@ -1,7 +1,7 @@
 //! `llvm.intr.*`。没有 Zbb：数位用无分支的 SWAR（乘法在 M 扩展里）。
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
-use crate::ir::{IPred, Intr, Kind, Ty, ValId};
+use crate::ir::{IPred, Intr, Kind, Ty, Types, ValId};
 use crate::feature::{Zmmul, Float};
 use crate::isa::{Opcode, Rv32i as IOp, Rm, Table};
 
@@ -67,6 +67,35 @@ impl Isel<'_> {
     /// 按 0 / 1 的 `c` 在两组部件里挑。
     pub(super) fn pick(&mut self, c: R, a: &[R], b: &[R]) -> Vec<R> {
         self.select_parts(IOp::Bne, c, R::ZERO, a, b)
+    }
+
+    /// float 上的数学 intrinsic（部件给定）：开了 F 用硬件指令，否则同软浮点调 libm（fmuladd = 先乘后加，⛔ fma）。
+    fn fmath(&mut self, i: &Intr, xs: Vec<Vec<R>>) -> Result<Vec<R>, Error> {
+        let pf = self.parts(Types::FLOAT)?;
+        let args: Vec<(Vec<R>, Vec<Part>)> = xs.iter().map(|x| (x.clone(), pf.clone())).collect();
+        if Float::ENABLED {
+            let x: Vec<R> = xs.iter().map(|x| x[0]).collect();
+            return Ok(match i {
+                Intr::Fma | Intr::FMulAdd => vec![self.fop(Float::FmaddS, x)],
+                Intr::Sqrt => vec![self.fop(Float::FsqrtS, x)],
+                Intr::MinNum => vec![self.fop(Float::FminS, x)],
+                Intr::MaxNum => vec![self.fop(Float::FmaxS, x)],
+                Intr::Libm(name) => self.libcall(&format!("{name}f"), &args, &pf)?,
+                _ => return Self::bad(format!("float 的 {i:?} 还没做")),
+            });
+        }
+        Ok(match i {
+            Intr::FMulAdd => {
+                let p = self.libcall("__mulsf3", &args[..2], &pf)?;
+                self.libcall("__addsf3", &[(p, pf.clone()), args[2].clone()], &pf)?
+            }
+            Intr::Fma => self.libcall("fmaf", &args, &pf)?,
+            Intr::Sqrt => self.libcall("sqrtf", &args, &pf)?,
+            Intr::MinNum => self.libcall("fminf", &args, &pf)?,
+            Intr::MaxNum => self.libcall("fmaxf", &args, &pf)?,
+            Intr::Libm(name) => self.libcall(&format!("{name}f"), &args, &pf)?,
+            _ => return Self::bad(format!("float 的 {i:?} 还没做")),
+        })
     }
 
     /// 位反转（32 位）：相邻 1 / 2 / 4 位两两交换，再按字节反转（同 LLVM 没有 Zbb 时的展开）。
@@ -209,6 +238,36 @@ impl Isel<'_> {
             && matches!(self.kind(self.ty(*a)), Kind::Vector(..))
         {
             return Self::bad(format!("向量的 {i:?} 还没做"));
+        }
+        // half / bfloat：绝对值、copysign 按位做（同 LLVM 的 SoftPromoteHalf）；别的浮点 intrinsic 还没提升
+        if let Some(a) = args.first()
+            && matches!(self.kind(self.ty(*a)), Kind::Half | Kind::BFloat)
+        {
+            let x = self.get1(*a)?;
+            let low = self.li(0x7fff);
+            return match i {
+                Intr::Fabs => Ok(vec![self.rr(IOp::And, x, low)]),
+                Intr::Copysign => {
+                    let y = self.get1(args[1])?;
+                    let m = self.rr(IOp::And, x, low);
+                    let sign = self.li(0x8000);
+                    let s = self.rr(IOp::And, y, sign);
+                    Ok(vec![self.rr(IOp::Or, m, s)])
+                }
+                Intr::Expect | Intr::Nop => self.get(*a),
+                Intr::Fma | Intr::FMulAdd | Intr::Sqrt | Intr::MinNum | Intr::MaxNum | Intr::Libm(_) => {
+                    // 提升到 float 做、再舍入回来（同 SoftPromoteHalf 的 UnaryOp / BinOp / FMA）
+                    let bf = matches!(self.kind(self.ty(*a)), Kind::BFloat);
+                    let mut xs = Vec::new();
+                    for v in args {
+                        let x = self.get1(*v)?;
+                        xs.push(self.ext16(x, bf)?);
+                    }
+                    let r = self.fmath(i, xs)?;
+                    Ok(vec![self.trunc16(Types::FLOAT, r, bf)?])
+                }
+                _ => Self::bad(format!("half / bfloat 的 {i:?} 还没做")),
+            };
         }
         Ok(match i {
             Intr::Nop | Intr::VaEnd => Vec::new(),

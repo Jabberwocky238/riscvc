@@ -4,37 +4,38 @@ target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
 target triple = "riscv32-unknown-unknown-elf"
 
 ; Function Attrs: mustprogress nofree noinline norecurse nosync nounwind willreturn memory(none)
-define dso_local float @__extendhfsf2(i16 noundef zeroext %a) local_unnamed_addr #0 {
+define dso_local float @__extendhfsf2(half noundef %a) local_unnamed_addr #0 {
 entry:
-  %0 = lshr i16 %a, 10
-  %1 = and i16 %0, 31
-  %2 = and i16 %a, 1023
-  switch i16 %1, label %if.then.i [
+  %0 = bitcast half %a to i16
+  %1 = lshr i16 %0, 10
+  %2 = and i16 %1, 31
+  %3 = and i16 %0, 1023
+  switch i16 %2, label %if.then.i [
     i16 31, label %if.then14.i
     i16 0, label %if.else17.i
   ]
 
 if.then.i:                                        ; preds = %entry
-  %narrow.i = add nuw nsw i16 %1, 112
+  %narrow.i = add nuw nsw i16 %2, 112
   %add.i = zext nneg i16 %narrow.i to i32
-  %conv10.i = zext nneg i16 %2 to i32
+  %conv10.i = zext nneg i16 %3 to i32
   %shl.i = shl nuw nsw i32 %conv10.i, 13
   br label %__extendXfYf2__.exit
 
 if.then14.i:                                      ; preds = %entry
-  %conv15.i = zext nneg i16 %2 to i32
+  %conv15.i = zext nneg i16 %3 to i32
   %shl16.i = shl nuw nsw i32 %conv15.i, 13
   br label %__extendXfYf2__.exit
 
 if.else17.i:                                      ; preds = %entry
-  %tobool.not.i = icmp eq i16 %2, 0
+  %tobool.not.i = icmp eq i16 %3, 0
   br i1 %tobool.not.i, label %__extendXfYf2__.exit, label %if.then18.i
 
 if.then18.i:                                      ; preds = %if.else17.i
-  %conv.i.i.i = zext nneg i16 %2 to i32
-  %3 = tail call range(i32 22, 33) i32 @llvm.ctlz.i32(i32 %conv.i.i.i, i1 true)
-  %add21.i = sub nuw nsw i32 134, %3
-  %add23.i = add nsw i32 %3, -8
+  %conv.i.i.i = zext nneg i16 %3 to i32
+  %4 = tail call range(i32 22, 33) i32 @llvm.ctlz.i32(i32 %conv.i.i.i, i1 true)
+  %add21.i = sub nuw nsw i32 134, %4
+  %add23.i = add nsw i32 %4, -8
   %shl24.i = shl i32 %conv.i.i.i, %add23.i
   %xor.i = xor i32 %shl24.i, 8388608
   br label %__extendXfYf2__.exit
@@ -42,20 +43,20 @@ if.then18.i:                                      ; preds = %if.else17.i
 __extendXfYf2__.exit:                             ; preds = %if.then.i, %if.then14.i, %if.else17.i, %if.then18.i
   %dstSigFrac.0.i = phi i32 [ %shl.i, %if.then.i ], [ %shl16.i, %if.then14.i ], [ %xor.i, %if.then18.i ], [ 0, %if.else17.i ]
   %dstExp.0.i = phi i32 [ %add.i, %if.then.i ], [ 255, %if.then14.i ], [ %add21.i, %if.then18.i ], [ 0, %if.else17.i ]
-  %4 = lshr i16 %a, 15
-  %conv.i = zext nneg i16 %4 to i32
+  %5 = lshr i16 %0, 15
+  %conv.i = zext nneg i16 %5 to i32
   %shl.i.i = shl nuw i32 %conv.i, 31
   %shl1.i.i = shl nuw nsw i32 %dstExp.0.i, 23
   %or.i.i = or disjoint i32 %shl1.i.i, %shl.i.i
   %or2.i.i = or i32 %or.i.i, %dstSigFrac.0.i
-  %5 = bitcast i32 %or2.i.i to float
-  ret float %5
+  %6 = bitcast i32 %or2.i.i to float
+  ret float %6
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(none)
-define dso_local float @__gnu_h2f_ieee(i16 noundef zeroext %a) local_unnamed_addr #1 {
+define dso_local float @__gnu_h2f_ieee(half noundef %a) local_unnamed_addr #1 {
 entry:
-  %call = tail call float @__extendhfsf2(i16 noundef zeroext %a) #3
+  %call = tail call float @__extendhfsf2(half noundef %a) #3
   ret float %call
 }
 

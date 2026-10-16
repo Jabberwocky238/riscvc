@@ -7,16 +7,16 @@ target triple = "riscv32-unknown-unknown-elf"
 @assumption_1 = dso_local global [1 x i8] zeroinitializer, align 1
 
 ; Function Attrs: noinline nounwind optnone
-define dso_local i32 @test__extendhfsf2(i16 noundef zeroext %a, i32 noundef %expected) #0 {
+define dso_local i32 @test__extendhfsf2(half noundef %a, i32 noundef %expected) #0 {
 entry:
-  %a.addr = alloca i16, align 2
+  %a.addr = alloca half, align 2
   %expected.addr = alloca i32, align 4
   %x = alloca float, align 4
   %ret = alloca i32, align 4
-  store i16 %a, ptr %a.addr, align 2
+  store half %a, ptr %a.addr, align 2
   store i32 %expected, ptr %expected.addr, align 4
-  %0 = load i16, ptr %a.addr, align 2
-  %call = call float @__extendhfsf2(i16 noundef zeroext %0) #2
+  %0 = load half, ptr %a.addr, align 2
+  %call = call float @__extendhfsf2(half noundef %0) #2
   store float %call, ptr %x, align 4
   %1 = load float, ptr %x, align 4
   %2 = load i32, ptr %expected.addr, align 4
@@ -27,8 +27,8 @@ entry:
   br i1 %tobool, label %if.then, label %if.end
 
 if.then:                                          ; preds = %entry
-  %4 = load i16, ptr %a.addr, align 2
-  %call2 = call zeroext i16 @toRep16(i16 noundef zeroext %4) #2
+  %4 = load half, ptr %a.addr, align 2
+  %call2 = call zeroext i16 @toRep16(half noundef %4) #2
   %conv = zext i16 %call2 to i32
   %5 = load float, ptr %x, align 4
   %conv3 = fpext float %5 to double
@@ -43,7 +43,7 @@ if.end:                                           ; preds = %if.then, %entry
   ret i32 %7
 }
 
-declare dso_local float @__extendhfsf2(i16 noundef zeroext) #1
+declare dso_local float @__extendhfsf2(half noundef) #1
 
 ; Function Attrs: noinline nounwind optnone
 define internal i32 @compareResultF(float noundef %result, i32 noundef %expected) #0 {
@@ -105,11 +105,13 @@ return:                                           ; preds = %if.end8, %if.then6,
 declare dso_local i32 @printf(ptr noundef, ...) #1
 
 ; Function Attrs: noinline nounwind optnone
-define internal zeroext i16 @toRep16(i16 noundef zeroext %x) #0 {
+define internal zeroext i16 @toRep16(half noundef %x) #0 {
 entry:
-  %x.addr = alloca i16, align 2
-  store i16 %x, ptr %x.addr, align 2
-  %0 = load i16, ptr %x.addr, align 2
+  %x.addr = alloca half, align 2
+  %ret = alloca i16, align 2
+  store half %x, ptr %x.addr, align 2
+  %call = call ptr @memcpy(ptr noundef %ret, ptr noundef %x.addr, i32 noundef 2) #2
+  %0 = load i16, ptr %ret, align 2
   ret i16 %0
 }
 
@@ -128,8 +130,8 @@ entry:
 define dso_local i32 @main() #0 {
 entry:
   %retval = alloca i32, align 4
-  %call = call zeroext i16 @fromRep16(i16 noundef zeroext 32256) #2
-  %call1 = call i32 @test__extendhfsf2(i16 noundef zeroext %call, i32 noundef 2143289344) #2
+  %call = call half @fromRep16(i16 noundef zeroext 32256) #2
+  %call1 = call i32 @test__extendhfsf2(half noundef %call, i32 noundef 2143289344) #2
   %tobool = icmp ne i32 %call1, 0
   br i1 %tobool, label %if.then, label %if.end
 
@@ -138,8 +140,8 @@ if.then:                                          ; preds = %entry
   br label %return
 
 if.end:                                           ; preds = %entry
-  %call2 = call zeroext i16 @fromRep16(i16 noundef zeroext 32640) #2
-  %call3 = call i32 @test__extendhfsf2(i16 noundef zeroext %call2, i32 noundef 2146435072) #2
+  %call2 = call half @fromRep16(i16 noundef zeroext 32640) #2
+  %call3 = call i32 @test__extendhfsf2(half noundef %call2, i32 noundef 2146435072) #2
   %tobool4 = icmp ne i32 %call3, 0
   br i1 %tobool4, label %if.then5, label %if.end6
 
@@ -148,8 +150,8 @@ if.then5:                                         ; preds = %if.end
   br label %return
 
 if.end6:                                          ; preds = %if.end
-  %call7 = call zeroext i16 @fromRep16(i16 noundef zeroext 31744) #2
-  %call8 = call i32 @test__extendhfsf2(i16 noundef zeroext %call7, i32 noundef 2139095040) #2
+  %call7 = call half @fromRep16(i16 noundef zeroext 31744) #2
+  %call8 = call i32 @test__extendhfsf2(half noundef %call7, i32 noundef 2139095040) #2
   %tobool9 = icmp ne i32 %call8, 0
   br i1 %tobool9, label %if.then10, label %if.end11
 
@@ -158,8 +160,8 @@ if.then10:                                        ; preds = %if.end6
   br label %return
 
 if.end11:                                         ; preds = %if.end6
-  %call12 = call zeroext i16 @fromRep16(i16 noundef zeroext -1024) #2
-  %call13 = call i32 @test__extendhfsf2(i16 noundef zeroext %call12, i32 noundef -8388608) #2
+  %call12 = call half @fromRep16(i16 noundef zeroext -1024) #2
+  %call13 = call i32 @test__extendhfsf2(half noundef %call12, i32 noundef -8388608) #2
   %tobool14 = icmp ne i32 %call13, 0
   br i1 %tobool14, label %if.then15, label %if.end16
 
@@ -168,8 +170,8 @@ if.then15:                                        ; preds = %if.end11
   br label %return
 
 if.end16:                                         ; preds = %if.end11
-  %call17 = call zeroext i16 @fromRep16(i16 noundef zeroext 0) #2
-  %call18 = call i32 @test__extendhfsf2(i16 noundef zeroext %call17, i32 noundef 0) #2
+  %call17 = call half @fromRep16(i16 noundef zeroext 0) #2
+  %call18 = call i32 @test__extendhfsf2(half noundef %call17, i32 noundef 0) #2
   %tobool19 = icmp ne i32 %call18, 0
   br i1 %tobool19, label %if.then20, label %if.end21
 
@@ -178,8 +180,8 @@ if.then20:                                        ; preds = %if.end16
   br label %return
 
 if.end21:                                         ; preds = %if.end16
-  %call22 = call zeroext i16 @fromRep16(i16 noundef zeroext -32768) #2
-  %call23 = call i32 @test__extendhfsf2(i16 noundef zeroext %call22, i32 noundef -2147483648) #2
+  %call22 = call half @fromRep16(i16 noundef zeroext -32768) #2
+  %call23 = call i32 @test__extendhfsf2(half noundef %call22, i32 noundef -2147483648) #2
   %tobool24 = icmp ne i32 %call23, 0
   br i1 %tobool24, label %if.then25, label %if.end26
 
@@ -188,8 +190,8 @@ if.then25:                                        ; preds = %if.end21
   br label %return
 
 if.end26:                                         ; preds = %if.end21
-  %call27 = call zeroext i16 @fromRep16(i16 noundef zeroext 16968) #2
-  %call28 = call i32 @test__extendhfsf2(i16 noundef zeroext %call27, i32 noundef 1078525952) #2
+  %call27 = call half @fromRep16(i16 noundef zeroext 16968) #2
+  %call28 = call i32 @test__extendhfsf2(half noundef %call27, i32 noundef 1078525952) #2
   %tobool29 = icmp ne i32 %call28, 0
   br i1 %tobool29, label %if.then30, label %if.end31
 
@@ -198,8 +200,8 @@ if.then30:                                        ; preds = %if.end26
   br label %return
 
 if.end31:                                         ; preds = %if.end26
-  %call32 = call zeroext i16 @fromRep16(i16 noundef zeroext -15800) #2
-  %call33 = call i32 @test__extendhfsf2(i16 noundef zeroext %call32, i32 noundef -1068957696) #2
+  %call32 = call half @fromRep16(i16 noundef zeroext -15800) #2
+  %call33 = call i32 @test__extendhfsf2(half noundef %call32, i32 noundef -1068957696) #2
   %tobool34 = icmp ne i32 %call33, 0
   br i1 %tobool34, label %if.then35, label %if.end36
 
@@ -208,8 +210,8 @@ if.then35:                                        ; preds = %if.end31
   br label %return
 
 if.end36:                                         ; preds = %if.end31
-  %call37 = call zeroext i16 @fromRep16(i16 noundef zeroext 28258) #2
-  %call38 = call i32 @test__extendhfsf2(i16 noundef zeroext %call37, i32 noundef 1171013632) #2
+  %call37 = call half @fromRep16(i16 noundef zeroext 28258) #2
+  %call38 = call i32 @test__extendhfsf2(half noundef %call37, i32 noundef 1171013632) #2
   %tobool39 = icmp ne i32 %call38, 0
   br i1 %tobool39, label %if.then40, label %if.end41
 
@@ -218,8 +220,8 @@ if.then40:                                        ; preds = %if.end36
   br label %return
 
 if.end41:                                         ; preds = %if.end36
-  %call42 = call zeroext i16 @fromRep16(i16 noundef zeroext 15360) #2
-  %call43 = call i32 @test__extendhfsf2(i16 noundef zeroext %call42, i32 noundef 1065353216) #2
+  %call42 = call half @fromRep16(i16 noundef zeroext 15360) #2
+  %call43 = call i32 @test__extendhfsf2(half noundef %call42, i32 noundef 1065353216) #2
   %tobool44 = icmp ne i32 %call43, 0
   br i1 %tobool44, label %if.then45, label %if.end46
 
@@ -228,8 +230,8 @@ if.then45:                                        ; preds = %if.end41
   br label %return
 
 if.end46:                                         ; preds = %if.end41
-  %call47 = call zeroext i16 @fromRep16(i16 noundef zeroext 1024) #2
-  %call48 = call i32 @test__extendhfsf2(i16 noundef zeroext %call47, i32 noundef 947912704) #2
+  %call47 = call half @fromRep16(i16 noundef zeroext 1024) #2
+  %call48 = call i32 @test__extendhfsf2(half noundef %call47, i32 noundef 947912704) #2
   %tobool49 = icmp ne i32 %call48, 0
   br i1 %tobool49, label %if.then50, label %if.end51
 
@@ -238,8 +240,8 @@ if.then50:                                        ; preds = %if.end46
   br label %return
 
 if.end51:                                         ; preds = %if.end46
-  %call52 = call zeroext i16 @fromRep16(i16 noundef zeroext 16) #2
-  %call53 = call i32 @test__extendhfsf2(i16 noundef zeroext %call52, i32 noundef 897581056) #2
+  %call52 = call half @fromRep16(i16 noundef zeroext 16) #2
+  %call53 = call i32 @test__extendhfsf2(half noundef %call52, i32 noundef 897581056) #2
   %tobool54 = icmp ne i32 %call53, 0
   br i1 %tobool54, label %if.then55, label %if.end56
 
@@ -248,8 +250,8 @@ if.then55:                                        ; preds = %if.end51
   br label %return
 
 if.end56:                                         ; preds = %if.end51
-  %call57 = call zeroext i16 @fromRep16(i16 noundef zeroext 1) #2
-  %call58 = call i32 @test__extendhfsf2(i16 noundef zeroext %call57, i32 noundef 864026624) #2
+  %call57 = call half @fromRep16(i16 noundef zeroext 1) #2
+  %call58 = call i32 @test__extendhfsf2(half noundef %call57, i32 noundef 864026624) #2
   %tobool59 = icmp ne i32 %call58, 0
   br i1 %tobool59, label %if.then60, label %if.end61
 
@@ -258,8 +260,8 @@ if.then60:                                        ; preds = %if.end56
   br label %return
 
 if.end61:                                         ; preds = %if.end56
-  %call62 = call zeroext i16 @fromRep16(i16 noundef zeroext -32767) #2
-  %call63 = call i32 @test__extendhfsf2(i16 noundef zeroext %call62, i32 noundef -1283457024) #2
+  %call62 = call half @fromRep16(i16 noundef zeroext -32767) #2
+  %call63 = call i32 @test__extendhfsf2(half noundef %call62, i32 noundef -1283457024) #2
   %tobool64 = icmp ne i32 %call63, 0
   br i1 %tobool64, label %if.then65, label %if.end66
 
@@ -268,8 +270,8 @@ if.then65:                                        ; preds = %if.end61
   br label %return
 
 if.end66:                                         ; preds = %if.end61
-  %call67 = call zeroext i16 @fromRep16(i16 noundef zeroext 1) #2
-  %call68 = call i32 @test__extendhfsf2(i16 noundef zeroext %call67, i32 noundef 864026624) #2
+  %call67 = call half @fromRep16(i16 noundef zeroext 1) #2
+  %call68 = call i32 @test__extendhfsf2(half noundef %call67, i32 noundef 864026624) #2
   %tobool69 = icmp ne i32 %call68, 0
   br i1 %tobool69, label %if.then70, label %if.end71
 
@@ -278,8 +280,8 @@ if.then70:                                        ; preds = %if.end66
   br label %return
 
 if.end71:                                         ; preds = %if.end66
-  %call72 = call zeroext i16 @fromRep16(i16 noundef zeroext 31743) #2
-  %call73 = call i32 @test__extendhfsf2(i16 noundef zeroext %call72, i32 noundef 1199562752) #2
+  %call72 = call half @fromRep16(i16 noundef zeroext 31743) #2
+  %call73 = call i32 @test__extendhfsf2(half noundef %call72, i32 noundef 1199562752) #2
   %tobool74 = icmp ne i32 %call73, 0
   br i1 %tobool74, label %if.then75, label %if.end76
 
@@ -288,8 +290,8 @@ if.then75:                                        ; preds = %if.end71
   br label %return
 
 if.end76:                                         ; preds = %if.end71
-  %call77 = call zeroext i16 @fromRep16(i16 noundef zeroext 31743) #2
-  %call78 = call i32 @test__extendhfsf2(i16 noundef zeroext %call77, i32 noundef 1199562752) #2
+  %call77 = call half @fromRep16(i16 noundef zeroext 31743) #2
+  %call78 = call i32 @test__extendhfsf2(half noundef %call77, i32 noundef 1199562752) #2
   %tobool79 = icmp ne i32 %call78, 0
   br i1 %tobool79, label %if.then80, label %if.end81
 
@@ -307,12 +309,14 @@ return:                                           ; preds = %if.end81, %if.then8
 }
 
 ; Function Attrs: noinline nounwind optnone
-define internal zeroext i16 @fromRep16(i16 noundef zeroext %x) #0 {
+define internal half @fromRep16(i16 noundef zeroext %x) #0 {
 entry:
   %x.addr = alloca i16, align 2
+  %ret = alloca half, align 2
   store i16 %x, ptr %x.addr, align 2
-  %0 = load i16, ptr %x.addr, align 2
-  ret i16 %0
+  %call = call ptr @memcpy(ptr noundef %ret, ptr noundef %x.addr, i32 noundef 2) #2
+  %0 = load half, ptr %ret, align 2
+  ret half %0
 }
 
 ; Function Attrs: noinline nounwind optnone

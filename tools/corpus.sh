@@ -9,7 +9,9 @@ BIN=${1:-../llvm-project/build/bin}
 SRC=../llvm-project/compiler-rt/lib/builtins
 OUT=target/corpus
 mkdir -p "$OUT/s" "$OUT/ll" "$OUT/mlir"
-FLAGS="--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -I $SRC"
+# -DCOMPILER_RT_HAS_FLOAT16：同 compiler-rt 的 CMake（编译器支持 _Float16 就定义）⇒ half 的 builtins 收 / 回 _Float16，
+# 与 LLVM 的 libcall 约定一致（ilp32f 下在 fa0）；⛔ 不定义会编成 uint16_t（在 a0），llc 调它就读错寄存器
+FLAGS="--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -I $SRC -DCOMPILER_RT_HAS_FLOAT16"
 one() {
   f=$1; b=$(basename "$f" .c)
   for o in O0 O2; do

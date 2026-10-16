@@ -11,16 +11,16 @@ define dso_local i32 @test__truncdfhf2(double noundef %a, i16 noundef zeroext %e
 entry:
   %a.addr = alloca double, align 8
   %expected.addr = alloca i16, align 2
-  %x = alloca i16, align 2
+  %x = alloca half, align 2
   %ret = alloca i32, align 4
   store double %a, ptr %a.addr, align 8
   store i16 %expected, ptr %expected.addr, align 2
   %0 = load double, ptr %a.addr, align 8
-  %call = call zeroext i16 @__truncdfhf2(double noundef %0) #2
-  store i16 %call, ptr %x, align 2
-  %1 = load i16, ptr %x, align 2
+  %call = call half @__truncdfhf2(double noundef %0) #2
+  store half %call, ptr %x, align 2
+  %1 = load half, ptr %x, align 2
   %2 = load i16, ptr %expected.addr, align 2
-  %call1 = call i32 @compareResultH(i16 noundef zeroext %1, i16 noundef zeroext %2) #2
+  %call1 = call i32 @compareResultH(half noundef %1, i16 noundef zeroext %2) #2
   store i32 %call1, ptr %ret, align 4
   %3 = load i32, ptr %ret, align 4
   %tobool = icmp ne i32 %3, 0
@@ -28,8 +28,8 @@ entry:
 
 if.then:                                          ; preds = %entry
   %4 = load double, ptr %a.addr, align 8
-  %5 = load i16, ptr %x, align 2
-  %call2 = call zeroext i16 @toRep16(i16 noundef zeroext %5) #2
+  %5 = load half, ptr %x, align 2
+  %call2 = call zeroext i16 @toRep16(half noundef %5) #2
   %conv = zext i16 %call2 to i32
   %6 = load i16, ptr %expected.addr, align 2
   %conv3 = zext i16 %6 to i32
@@ -41,19 +41,19 @@ if.end:                                           ; preds = %if.then, %entry
   ret i32 %7
 }
 
-declare dso_local zeroext i16 @__truncdfhf2(double noundef) #1
+declare dso_local half @__truncdfhf2(double noundef) #1
 
 ; Function Attrs: noinline nounwind optnone
-define internal i32 @compareResultH(i16 noundef zeroext %result, i16 noundef zeroext %expected) #0 {
+define internal i32 @compareResultH(half noundef %result, i16 noundef zeroext %expected) #0 {
 entry:
   %retval = alloca i32, align 4
-  %result.addr = alloca i16, align 2
+  %result.addr = alloca half, align 2
   %expected.addr = alloca i16, align 2
   %rep = alloca i16, align 2
-  store i16 %result, ptr %result.addr, align 2
+  store half %result, ptr %result.addr, align 2
   store i16 %expected, ptr %expected.addr, align 2
-  %0 = load i16, ptr %result.addr, align 2
-  %call = call zeroext i16 @toRep16(i16 noundef zeroext %0) #2
+  %0 = load half, ptr %result.addr, align 2
+  %call = call zeroext i16 @toRep16(half noundef %0) #2
   store i16 %call, ptr %rep, align 2
   %1 = load i16, ptr %rep, align 2
   %conv = zext i16 %1 to i32
@@ -108,11 +108,13 @@ return:                                           ; preds = %if.end16, %if.then1
 declare dso_local i32 @printf(ptr noundef, ...) #1
 
 ; Function Attrs: noinline nounwind optnone
-define internal zeroext i16 @toRep16(i16 noundef zeroext %x) #0 {
+define internal zeroext i16 @toRep16(half noundef %x) #0 {
 entry:
-  %x.addr = alloca i16, align 2
-  store i16 %x, ptr %x.addr, align 2
-  %0 = load i16, ptr %x.addr, align 2
+  %x.addr = alloca half, align 2
+  %ret = alloca i16, align 2
+  store half %x, ptr %x.addr, align 2
+  %call = call ptr @memcpy(ptr noundef %ret, ptr noundef %x.addr, i32 noundef 2) #2
+  %0 = load i16, ptr %ret, align 2
   ret i16 %0
 }
 
@@ -366,6 +368,8 @@ entry:
   ret double %call
 }
 
+declare dso_local ptr @memcpy(ptr noundef, ptr noundef, i32 noundef) #1
+
 ; Function Attrs: noinline nounwind optnone
 define internal double @fromRep64(i64 noundef %x) #0 {
 entry:
@@ -376,8 +380,6 @@ entry:
   %0 = load double, ptr %ret, align 8
   ret double %0
 }
-
-declare dso_local ptr @memcpy(ptr noundef, ptr noundef, i32 noundef) #1
 
 attributes #0 = { noinline nounwind optnone "frame-pointer"="all" "no-builtins" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="generic-rv32" "target-features"="+32bit,+f,+i,+m,+zicsr,+zmmul,-a,-b,-c,-d,-e,-experimental-p,-experimental-smpmpmt,-experimental-svukte,-experimental-xrivosvisni,-experimental-xrivosvizip,-experimental-xsfmclic,-experimental-xsfsclic,-experimental-zibi,-experimental-zicfilp,-experimental-zicfiss,-experimental-zvbc32e,-experimental-zvfbfa,-experimental-zvfofp8min,-experimental-zvkgs,-experimental-zvqdotq,-h,-q,-relax,-sdext,-sdtrig,-sha,-shcounterenw,-shgatpa,-shlcofideleg,-shtvala,-shvsatpa,-shvstvala,-shvstvecd,-smaia,-smcdeleg,-smcntrpmf,-smcsrind,-smctr,-smdbltrp,-smepmp,-smmpm,-smnpm,-smrnmi,-smstateen,-ssaia,-ssccfg,-ssccptr,-sscofpmf,-sscounterenw,-sscsrind,-ssctr,-ssdbltrp,-ssnpm,-sspm,-ssqosid,-ssstateen,-ssstrict,-sstc,-sstvala,-sstvecd,-ssu64xl,-supm,-svade,-svadu,-svbare,-svinval,-svnapot,-svpbmt,-svvptc,-v,-xandesbfhcvt,-xandesperf,-xandesvbfhcvt,-xandesvdot,-xandesvpackfph,-xandesvsinth,-xandesvsintload,-xcalculet,-xcvalu,-xcvbi,-xcvbitmanip,-xcvelw,-xcvmac,-xcvmem,-xcvsimd,-xmipscbop,-xmipscmov,-xmipsexectl,-xmipslsp,-xqccmp,-xqci,-xqcia,-xqciac,-xqcibi,-xqcibm,-xqcicli,-xqcicm,-xqcics,-xqcicsr,-xqciint,-xqciio,-xqcilb,-xqcili,-xqcilia,-xqcilo,-xqcilsm,-xqcisim,-xqcisls,-xqcisync,-xsfcease,-xsfmm128t,-xsfmm16t,-xsfmm32a16f,-xsfmm32a32f,-xsfmm32a8f,-xsfmm32a8i,-xsfmm32t,-xsfmm64a64f,-xsfmm64t,-xsfmmbase,-xsfvcp,-xsfvfbfexp16e,-xsfvfexp16e,-xsfvfexp32e,-xsfvfexpa,-xsfvfexpa64e,-xsfvfnrclipxfqf,-xsfvfwmaccqqq,-xsfvqmaccdod,-xsfvqmaccqoq,-xsifivecdiscarddlone,-xsifivecflushdlone,-xsmtvdot,-xtheadba,-xtheadbb,-xtheadbs,-xtheadcmo,-xtheadcondmov,-xtheadfmemidx,-xtheadmac,-xtheadmemidx,-xtheadmempair,-xtheadsync,-xtheadvdot,-xventanacondops,-xwchc,-za128rs,-za64rs,-zaamo,-zabha,-zacas,-zalasr,-zalrsc,-zama16b,-zawrs,-zba,-zbb,-zbc,-zbkb,-zbkc,-zbkx,-zbs,-zca,-zcb,-zcd,-zce,-zcf,-zclsd,-zcmop,-zcmp,-zcmt,-zdinx,-zfa,-zfbfmin,-zfh,-zfhmin,-zfinx,-zhinx,-zhinxmin,-zic64b,-zicbom,-zicbop,-zicboz,-ziccamoa,-ziccamoc,-ziccif,-zicclsm,-ziccrse,-zicntr,-zicond,-zifencei,-zihintntl,-zihintpause,-zihpm,-zilsd,-zimop,-zk,-zkn,-zknd,-zkne,-zknh,-zkr,-zks,-zksed,-zksh,-zkt,-ztso,-zvbb,-zvbc,-zve32f,-zve32x,-zve64d,-zve64f,-zve64x,-zvfbfmin,-zvfbfwma,-zvfh,-zvfhmin,-zvkb,-zvkg,-zvkn,-zvknc,-zvkned,-zvkng,-zvknha,-zvknhb,-zvks,-zvksc,-zvksed,-zvksg,-zvksh,-zvkt,-zvl1024b,-zvl128b,-zvl16384b,-zvl2048b,-zvl256b,-zvl32768b,-zvl32b,-zvl4096b,-zvl512b,-zvl64b,-zvl65536b,-zvl8192b" }
 attributes #1 = { "frame-pointer"="all" "no-builtins" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="generic-rv32" "target-features"="+32bit,+f,+i,+m,+zicsr,+zmmul,-a,-b,-c,-d,-e,-experimental-p,-experimental-smpmpmt,-experimental-svukte,-experimental-xrivosvisni,-experimental-xrivosvizip,-experimental-xsfmclic,-experimental-xsfsclic,-experimental-zibi,-experimental-zicfilp,-experimental-zicfiss,-experimental-zvbc32e,-experimental-zvfbfa,-experimental-zvfofp8min,-experimental-zvkgs,-experimental-zvqdotq,-h,-q,-relax,-sdext,-sdtrig,-sha,-shcounterenw,-shgatpa,-shlcofideleg,-shtvala,-shvsatpa,-shvstvala,-shvstvecd,-smaia,-smcdeleg,-smcntrpmf,-smcsrind,-smctr,-smdbltrp,-smepmp,-smmpm,-smnpm,-smrnmi,-smstateen,-ssaia,-ssccfg,-ssccptr,-sscofpmf,-sscounterenw,-sscsrind,-ssctr,-ssdbltrp,-ssnpm,-sspm,-ssqosid,-ssstateen,-ssstrict,-sstc,-sstvala,-sstvecd,-ssu64xl,-supm,-svade,-svadu,-svbare,-svinval,-svnapot,-svpbmt,-svvptc,-v,-xandesbfhcvt,-xandesperf,-xandesvbfhcvt,-xandesvdot,-xandesvpackfph,-xandesvsinth,-xandesvsintload,-xcalculet,-xcvalu,-xcvbi,-xcvbitmanip,-xcvelw,-xcvmac,-xcvmem,-xcvsimd,-xmipscbop,-xmipscmov,-xmipsexectl,-xmipslsp,-xqccmp,-xqci,-xqcia,-xqciac,-xqcibi,-xqcibm,-xqcicli,-xqcicm,-xqcics,-xqcicsr,-xqciint,-xqciio,-xqcilb,-xqcili,-xqcilia,-xqcilo,-xqcilsm,-xqcisim,-xqcisls,-xqcisync,-xsfcease,-xsfmm128t,-xsfmm16t,-xsfmm32a16f,-xsfmm32a32f,-xsfmm32a8f,-xsfmm32a8i,-xsfmm32t,-xsfmm64a64f,-xsfmm64t,-xsfmmbase,-xsfvcp,-xsfvfbfexp16e,-xsfvfexp16e,-xsfvfexp32e,-xsfvfexpa,-xsfvfexpa64e,-xsfvfnrclipxfqf,-xsfvfwmaccqqq,-xsfvqmaccdod,-xsfvqmaccqoq,-xsifivecdiscarddlone,-xsifivecflushdlone,-xsmtvdot,-xtheadba,-xtheadbb,-xtheadbs,-xtheadcmo,-xtheadcondmov,-xtheadfmemidx,-xtheadmac,-xtheadmemidx,-xtheadmempair,-xtheadsync,-xtheadvdot,-xventanacondops,-xwchc,-za128rs,-za64rs,-zaamo,-zabha,-zacas,-zalasr,-zalrsc,-zama16b,-zawrs,-zba,-zbb,-zbc,-zbkb,-zbkc,-zbkx,-zbs,-zca,-zcb,-zcd,-zce,-zcf,-zclsd,-zcmop,-zcmp,-zcmt,-zdinx,-zfa,-zfbfmin,-zfh,-zfhmin,-zfinx,-zhinx,-zhinxmin,-zic64b,-zicbom,-zicbop,-zicboz,-ziccamoa,-ziccamoc,-ziccif,-zicclsm,-ziccrse,-zicntr,-zicond,-zifencei,-zihintntl,-zihintpause,-zihpm,-zilsd,-zimop,-zk,-zkn,-zknd,-zkne,-zknh,-zkr,-zks,-zksed,-zksh,-zkt,-ztso,-zvbb,-zvbc,-zve32f,-zve32x,-zve64d,-zve64f,-zve64x,-zvfbfmin,-zvfbfwma,-zvfh,-zvfhmin,-zvkb,-zvkg,-zvkn,-zvknc,-zvkned,-zvkng,-zvknha,-zvknhb,-zvks,-zvksc,-zvksed,-zvksg,-zvksh,-zvkt,-zvl1024b,-zvl128b,-zvl16384b,-zvl2048b,-zvl256b,-zvl32768b,-zvl32b,-zvl4096b,-zvl512b,-zvl64b,-zvl65536b,-zvl8192b" }
