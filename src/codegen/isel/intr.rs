@@ -2,10 +2,9 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{BinOp, CastOp, IPred, Intr, Kind, Ty, Types, ValId};
-use crate::feature::{Zmmul, Float};
+use crate::feature::{Zmmul, Float, M};
 use crate::isa::{Opcode, Rv32i as IOp, Rm, Table};
 
-const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
 impl Isel<'_> {
     fn bits_of(&self, v: ValId) -> u32 {
@@ -80,7 +79,10 @@ impl Isel<'_> {
                 Intr::Sqrt => vec![self.fop(Float::FsqrtS, x)],
                 Intr::MinNum => vec![self.fop(Float::FminS, x)],
                 Intr::MaxNum => vec![self.fop(Float::FmaxS, x)],
-                Intr::Libm(name) => self.libcall(&format!("{name}f"), &args, &pf)?,
+                Intr::Libm(name) => match Self::round_mode(&format!("{name}f")) {
+                    Some(rm) => vec![self.fround(x[0], rm)],
+                    None => self.libcall(&format!("{name}f"), &args, &pf)?,
+                },
                 _ => return Self::bad(format!("float 的 {i:?} 还没做")),
             });
         }
@@ -95,6 +97,49 @@ impl Isel<'_> {
             Intr::MaxNum => self.libcall("fmaxf", &args, &pf)?,
             Intr::Libm(name) => self.libcall(&format!("{name}f"), &args, &pf)?,
             _ => return Self::bad(format!("float 的 {i:?} 还没做")),
+        })
+    }
+
+    /// 软浮点（值在整数寄存器里：double、fp128、F 没开时的 float）上的数学 intrinsic：fabs / copysign 改顶字的符号位；
+    /// fma / sqrt / minnum / maxnum 调 libm（后缀 `f` / 无 / `l`）；fmuladd = 先乘后加（同 LLVM，⛔ 不是 fma）。
+    fn soft_fmath(&mut self, i: &Intr, args: &[ValId], sfx: &str) -> Result<Vec<R>, Error> {
+        let ps = self.parts(self.ty(args[0]))?;
+        let libm = match sfx {
+            "sf" => "f",
+            "tf" => "l",
+            _ => "",
+        };
+        Ok(match i {
+            Intr::Fabs | Intr::Copysign => {
+                let mut x = self.get(args[0])?;
+                let n = x.len();
+                let t = self.ri(IOp::Slli, x[n - 1], 1);
+                let mag = self.ri(IOp::Srli, t, 1);
+                x[n - 1] = if *i == Intr::Fabs {
+                    mag
+                } else {
+                    let y = self.get(args[1])?;
+                    let s = self.ri(IOp::Srli, y[y.len() - 1], 31);
+                    let s = self.ri(IOp::Slli, s, 31);
+                    self.rr(IOp::Or, mag, s)
+                };
+                x
+            }
+            Intr::FMulAdd => {
+                let (a, b, c) = (self.get(args[0])?, self.get(args[1])?, self.get(args[2])?);
+                let p = self.libcall(&format!("__mul{sfx}3"), &[(a, ps.clone()), (b, ps.clone())], &ps)?;
+                self.libcall(&format!("__add{sfx}3"), &[(p, ps.clone()), (c, ps.clone())], &ps)?
+            }
+            _ => {
+                let base = match i {
+                    Intr::Fma => "fma",
+                    Intr::Sqrt => "sqrt",
+                    Intr::MinNum => "fmin",
+                    _ => "fmax",
+                };
+                let xs = args.iter().map(|a| Ok((self.get(*a)?, ps.clone()))).collect::<Result<Vec<_>, Error>>()?;
+                self.libcall(&format!("{base}{libm}"), &xs, &ps)?
+            }
         })
     }
 
@@ -252,6 +297,33 @@ impl Isel<'_> {
         if pad == 0 { r } else { self.wide_shift_const(BinOp::LShr, &r, pad) }
     }
 
+    /// 窄整数（< 32 位，值零扩展）的漏斗移位：`s' = s mod w`，`fshl = a << s' | b >> (w − s')`、
+    /// `fshr = b >> s' | a << (w − s')`，再截回 w 位（s' = 0 时另一半移出 w 位，截掉就对）。
+    fn narrow_funnel(&mut self, left: bool, args: &[ValId], w: u32) -> Result<Vec<R>, Error> {
+        let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
+        let wi = w.cast_signed();
+        let (x, y) = match self.const_i32(args[2]) {
+            Some(c) => {
+                let c = (c.cast_unsigned() % w).cast_signed();
+                if left { (self.ri(IOp::Slli, a, c), self.ri(IOp::Srli, b, wi - c)) } else { (self.ri(IOp::Srli, b, c), self.ri(IOp::Slli, a, wi - c)) }
+            }
+            None => {
+                let s = self.get1(args[2])?;
+                let s = if w.is_power_of_two() {
+                    self.ri(IOp::Andi, s, wi - 1)
+                } else {
+                    let k = self.li(wi);
+                    self.rr(M::Remu, s, k)
+                };
+                let k = self.li(wi);
+                let inv = self.rr(IOp::Sub, k, s);
+                if left { (self.rr(IOp::Sll, a, s), self.rr(IOp::Srl, b, inv)) } else { (self.rr(IOp::Srl, b, s), self.rr(IOp::Sll, a, inv)) }
+            }
+        };
+        let r = self.rr(IOp::Or, x, y);
+        Ok(vec![self.mask(r, w)])
+    }
+
     /// i64 以上、位宽是 2 的幂的漏斗移位：`[a:b]` 拼成 2n 字，左（右）移 `s mod w`，取高（低）n 字。
     fn wide_funnel(&mut self, left: bool, args: &[ValId], w: u32) -> Result<Vec<R>, Error> {
         if !w.is_power_of_two() || w > 2048 {
@@ -366,9 +438,13 @@ impl Isel<'_> {
 
     #[allow(clippy::too_many_lines, reason = "一个 intrinsic 一支")]
     pub(super) fn intrinsic(&mut self, i: &Intr, args: &[ValId], rt: Option<Ty>) -> Result<Vec<R>, Error> {
-        let first_double = args.first().is_some_and(|a| matches!(self.kind(self.ty(*a)), Kind::Double));
         // F 没开时的 float：一个整数部件，按位做 / 调 libm
-        let soft_float = args.first().is_some_and(|a| self.soft(self.ty(*a)) == Some("sf"));
+        // 软浮点（double、fp128，F 没开时的 float）上的数学 intrinsic
+        if matches!(i, Intr::Fabs | Intr::Copysign | Intr::Fma | Intr::FMulAdd | Intr::Sqrt | Intr::MinNum | Intr::MaxNum)
+            && let Some(sfx) = args.first().and_then(|a| self.soft(self.ty(*a)))
+        {
+            return self.soft_fmath(i, args, sfx);
+        }
         // 向量的位操作还没逐 lane 做：⛔ 只算第一条 lane
         if matches!(i, Intr::Ctlz | Intr::Cttz | Intr::Ctpop | Intr::Bswap | Intr::Bitreverse | Intr::Abs | Intr::Fshl | Intr::Fshr)
             && let Some(a) = args.first()
@@ -392,6 +468,7 @@ impl Isel<'_> {
                     Ok(vec![self.rr(IOp::Or, m, s)])
                 }
                 Intr::Expect | Intr::Nop => self.get(*a),
+                Intr::IsFpClass(mask) => Ok(vec![self.fpclass(*a, *mask)?]),
                 Intr::Fma | Intr::FMulAdd | Intr::Sqrt | Intr::MinNum | Intr::MaxNum | Intr::Libm(_) => {
                     // 提升到 float 做、再舍入回来（同 SoftPromoteHalf 的 UnaryOp / BinOp / FMA）
                     let bf = matches!(self.kind(self.ty(*a)), Kind::BFloat);
@@ -595,8 +672,8 @@ impl Isel<'_> {
                 if w > 64 {
                     return self.wide_funnel(left, args, w);
                 }
-                if w != 32 {
-                    return Self::bad(format!("{i:?}.i{w} 还没做"));
+                if w < 32 {
+                    return self.narrow_funnel(left, args, w);
                 }
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
                 match self.const_i32(args[2]).map(|s| s & 31) {
@@ -621,90 +698,26 @@ impl Isel<'_> {
                     }
                 }
             }
-            Intr::Fabs if soft_float => {
-                let x = self.get1(args[0])?;
-                let t = self.ri(IOp::Slli, x, 1);
-                vec![self.ri(IOp::Srli, t, 1)]
-            }
-            Intr::Copysign if soft_float => {
-                let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
-                let t = self.ri(IOp::Slli, a, 1);
-                let mag = self.ri(IOp::Srli, t, 1);
-                let s = self.ri(IOp::Srli, b, 31);
-                let s = self.ri(IOp::Slli, s, 31);
-                vec![self.rr(IOp::Or, mag, s)]
-            }
-            Intr::Fma | Intr::FMulAdd | Intr::Sqrt | Intr::MinNum | Intr::MaxNum if soft_float => {
-                let ps = args.iter().map(|a| Ok((self.get(*a)?, vec![Part::X]))).collect::<Result<Vec<_>, Error>>()?;
-                match i {
-                    // 软浮点下 fmuladd = 先乘后加（同 LLVM，⛔ 不是 fma）
-                    Intr::FMulAdd => {
-                        let p = self.libcall("__mulsf3", &ps[..2], &[Part::X])?;
-                        self.libcall("__addsf3", &[(p, vec![Part::X]), ps[2].clone()], &[Part::X])?
-                    }
-                    _ => {
-                        let name = match i {
-                            Intr::Fma => "fmaf",
-                            Intr::Sqrt => "sqrtf",
-                            Intr::MinNum => "fminf",
-                            _ => "fmaxf",
-                        };
-                        self.libcall(name, &ps, &[Part::X])?
-                    }
-                }
-            }
-            Intr::Fabs if first_double => {
-                let (lo, hi) = self.pair(args[0])?;
-                let t = self.ri(IOp::Slli, hi, 1);
-                vec![lo, self.ri(IOp::Srli, t, 1)]
-            }
             Intr::Fabs => {
                 let x = self.get1(args[0])?;
                 vec![self.fop(Float::FsgnjxS, vec![x, x])]
-            }
-            Intr::Copysign if first_double => {
-                let (lo, hi) = self.pair(args[0])?;
-                let (_, bh) = self.pair(args[1])?;
-                let t = self.ri(IOp::Slli, hi, 1);
-                let mag = self.ri(IOp::Srli, t, 1);
-                let s = self.ri(IOp::Srli, bh, 31);
-                let s = self.ri(IOp::Slli, s, 31);
-                vec![lo, self.rr(IOp::Or, mag, s)]
             }
             Intr::Copysign => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
                 vec![self.fop(Float::FsgnjS, vec![a, b])]
             }
-            Intr::Fma | Intr::FMulAdd if !first_double => {
+            // 以下是 F 扩展上的 float（软浮点的在 [`Self::soft_fmath`]）
+            Intr::Fma | Intr::FMulAdd => {
                 let (a, b, c) = (self.get1(args[0])?, self.get1(args[1])?, self.get1(args[2])?);
                 vec![self.fop(Float::FmaddS, vec![a, b, c])]
             }
-            Intr::Fma => {
-                let ps = args.iter().map(|a| Ok((self.get(*a)?, PAIR.to_vec()))).collect::<Result<Vec<_>, Error>>()?;
-                self.libcall("fma", &ps, &PAIR)?
-            }
-            Intr::FMulAdd => {
-                // 软浮点下 fmuladd = 先乘后加（同 LLVM，⛔ 不是 fma）
-                let (a, b, c) = (self.get(args[0])?, self.get(args[1])?, self.get(args[2])?);
-                let p = self.libcall("__muldf3", &[(a, PAIR.to_vec()), (b, PAIR.to_vec())], &PAIR)?;
-                self.libcall("__adddf3", &[(p, PAIR.to_vec()), (c, PAIR.to_vec())], &PAIR)?
-            }
-            Intr::Sqrt if !first_double => {
+            Intr::Sqrt => {
                 let x = self.get1(args[0])?;
                 vec![self.fop(Float::FsqrtS, vec![x])]
             }
-            Intr::MinNum | Intr::MaxNum if !first_double => {
+            Intr::MinNum | Intr::MaxNum => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
                 vec![self.fop(if *i == Intr::MinNum { Float::FminS } else { Float::FmaxS }, vec![a, b])]
-            }
-            Intr::Sqrt | Intr::MinNum | Intr::MaxNum => {
-                let name = match i {
-                    Intr::Sqrt => "sqrt",
-                    Intr::MinNum => "fmin",
-                    _ => "fmax",
-                };
-                let ps = args.iter().map(|a| Ok((self.get(*a)?, PAIR.to_vec()))).collect::<Result<Vec<_>, Error>>()?;
-                self.libcall(name, &ps, &PAIR)?
             }
             Intr::IsFpClass(mask) => vec![self.fpclass(args[0], *mask)?],
             Intr::Memcpy | Intr::Memmove | Intr::Memset => {
@@ -715,6 +728,9 @@ impl Isel<'_> {
                 };
                 // `.inline` 的长度是属性（前端补成第三个实参）；缺了报错，⛔ 越界
                 let &[d, v, n, ..] = args else { return Self::bad(format!("{i:?} 要三个实参（目的、源 / 值、长度），只有 {}", args.len())) };
+                if self.mem_inline(*i == Intr::Memset, d, v, n)? {
+                    return Ok(Vec::new());
+                }
                 let (dst, src) = (self.get1(d)?, self.get1(v)?);
                 let args = [d, v, n];
                 // 长度可能是 i64（`llvm.memcpy.p0.p0.i64`）：size_t 32 位，只看低半（同 llc）
@@ -769,6 +785,10 @@ impl Isel<'_> {
                 }
                 self.emit(MOp::Store(IOp::Sw.into(), db, i32::try_from(doff).unwrap_or(0)), &[], &uses);
                 Vec::new()
+            }
+            Intr::Libm(name) if Float::ENABLED && matches!(self.kind(self.ty(args[0])), Kind::Float) && Self::round_mode(name).is_some() => {
+                let x = self.get1(args[0])?;
+                vec![self.fround(x, Self::round_mode(name).unwrap_or(Rm::Dyn))]
             }
             Intr::Libm(name) => {
                 let mut ps = Vec::new();
@@ -855,15 +875,27 @@ impl Isel<'_> {
             let t = self.ri(IOp::Andi, c, m);
             return Ok(self.rr(IOp::Sltu, R::ZERO, t));
         }
-        // 拆位判：double（指数 11 位）；F 没开时的 float（指数 8 位）
-        let single = matches!(self.kind(self.ty(a)), Kind::Float);
-        let (lo, hi) = if single { (R::ZERO, self.get1(a)?) } else { self.pair(a)? };
-        let (ebits, mbits) = if single { (8, 23) } else { (11, 20) };
+        // 拆位判（顶字放符号、指数和尾数的高 mbits 位）：F 没开时的 float 8 位指数、double 11 位、fp128 15 位、half 5 位
+        // half / bfloat（零扩展的 16 位）先挪到顶上
+        let (ebits, mbits) = match self.kind(self.ty(a)) {
+            Kind::Half => (5, 10),
+            Kind::BFloat => (8, 7),
+            Kind::Float => (8, 23),
+            Kind::Fp128 => (15, 16),
+            _ => (11, 20),
+        };
+        let mut x = self.get(a)?;
+        if matches!(self.kind(self.ty(a)), Kind::Half | Kind::BFloat) {
+            x[0] = self.ri(IOp::Slli, x[0], 16);
+        }
+        let (&hi, low) = x.split_last().ok_or_else(|| Error::Select(String::from("is.fpclass 的值没有部件")))?;
         let sign = self.ri(IOp::Srli, hi, 31);
         let e = self.ri(IOp::Slli, hi, 1);
         let exp = self.ri(IOp::Srli, e, 32 - ebits);
-        let mh = self.ri(IOp::Slli, hi, 32 - mbits);
-        let mant = self.rr(IOp::Or, mh, lo);
+        let mut mant = self.ri(IOp::Slli, hi, 32 - mbits);
+        for &w in low {
+            mant = self.rr(IOp::Or, mant, w);
+        }
         let mant_nz = self.rr(IOp::Sltu, R::ZERO, mant);
         let max = self.li((1 << ebits) - 1);
         let dexp = self.rr(IOp::Xor, exp, max);

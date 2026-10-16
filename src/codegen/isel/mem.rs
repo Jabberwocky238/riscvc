@@ -2,7 +2,7 @@
 //! （常数偏移并进地址，⛔ 先算出指针再加）、聚合值的 `extractvalue` / `insertvalue`（只是部件的重排）。
 use super::{Error, Isel, R};
 use crate::codegen::mir::{Base, MOp};
-use crate::ir::{Index, Kind, Ty, ValId};
+use crate::ir::{Const, Index, Kind, Ty, ValId};
 use crate::feature::{Zmmul, Float};
 use crate::isa::{Base as IForm, Opcode, Rv32i as IOp};
 
@@ -34,6 +34,84 @@ impl Isel<'_> {
             return Ok((b, off));
         }
         Ok((Base::Reg(self.get1(ptr)?), 0))
+    }
+
+    /// （基址, 偏移）已知的对齐：帧对象按对象的对齐（帧只保证 16）与偏移；寄存器只知道 1。
+    fn known_align(&self, base: Base, off: i64) -> u64 {
+        let a = match base {
+            Base::Frame(o) => self.frame[o as usize].align.min(16),
+            _ => 1,
+        };
+        if off == 0 { a } else { a.min(1 << off.trailing_zeros()) }
+    }
+
+    /// 常数长度、展开后不超过 8 次存（同 LLVM 的 MaxStoresPerMemcpy / Memmove / Memset）的 memcpy / memmove
+    /// （`set` = memset）就地展开：每次取对齐允许的最宽（4 / 2 / 1 字节，⛔ 非对齐访问），先全读完再写（memmove 也对）。
+    /// ⇒ 展开了没有。⚠ 对齐只按本函数看得到的（帧对象）推，IR 上 `llvm.align` 的实参属性前端还没带过来。
+    pub(super) fn mem_inline(&mut self, set: bool, d: ValId, v: ValId, n: ValId) -> Result<bool, Error> {
+        let Some(len) = (match self.consts.get(&n) {
+            Some(Const::Int(k)) => u64::try_from(*k).ok().filter(|k| *k <= 64),
+            Some(Const::Zero) => Some(0),
+            _ => None,
+        }) else {
+            return Ok(false);
+        };
+        let (db, doff) = self.address(d)?;
+        let (sb, soff) = if set { (Base::Reg(R::ZERO), 0) } else { self.address(v)? };
+        let align = if set { self.known_align(db, doff) } else { self.known_align(db, doff).min(self.known_align(sb, soff)) };
+        let mut chunks = Vec::new();
+        let mut at = 0;
+        while at < len {
+            let k = [4, 2, 1].into_iter().find(|&k| k <= align && k <= len - at).unwrap_or(1);
+            chunks.push((at, k));
+            at += k;
+        }
+        if chunks.len() > 8 {
+            return Ok(false);
+        }
+        let op = |k: u64, load: bool| -> Opcode {
+            match (k, load) {
+                (4, true) => IOp::Lw,
+                (2, true) => IOp::Lhu,
+                (_, true) => IOp::Lbu,
+                (4, false) => IOp::Sw,
+                (2, false) => IOp::Sh,
+                _ => IOp::Sb,
+            }
+            .into()
+        };
+        let vals: Vec<R> = if set {
+            // 字节铺满一个字：常数直接算，变量 x | x << 8、再 | << 16
+            let b = match self.const_i32(v) {
+                Some(c) => self.li((c.cast_unsigned() & 0xff).wrapping_mul(0x0101_0101).cast_signed()),
+                None => {
+                    let x = self.get1(v)?;
+                    let x = self.ri(IOp::Andi, x, 0xff);
+                    let t = self.ri(IOp::Slli, x, 8);
+                    let x = self.rr(IOp::Or, x, t);
+                    let t = self.ri(IOp::Slli, x, 16);
+                    self.rr(IOp::Or, x, t)
+                }
+            };
+            vec![b; chunks.len()]
+        } else {
+            chunks
+                .iter()
+                .map(|&(at, k)| {
+                    let (b, o) = self.fit(sb, soff + at.cast_signed());
+                    let r = self.xr();
+                    self.emit(MOp::Load(op(k, true), b, o), &[r], &Self::uses_of(b));
+                    r
+                })
+                .collect()
+        };
+        for (&(at, k), &r) in chunks.iter().zip(&vals) {
+            let (b, o) = self.fit(db, doff + at.cast_signed());
+            let mut uses = vec![r];
+            uses.extend(Self::uses_of(b));
+            self.emit(MOp::Store(op(k, false), b, o), &[], &uses);
+        }
+        Ok(true)
     }
 
     /// （基址, 偏移）⇒ 偏移放得进 12 位的形式（寄存器基址超了就先加好）。

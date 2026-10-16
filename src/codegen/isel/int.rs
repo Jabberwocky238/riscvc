@@ -137,8 +137,56 @@ impl Isel<'_> {
         Ok(if Self::signed(p) && w < 32 { (self.sext(x, w), self.sext(y, w)) } else { (x, y) })
     }
 
+    /// `ctpop(x) p k` 改写成哪种位运算（同 LLVM 没有 Zbb 时的 SimplifySetCC）：
+    /// `== 0` / `!= 0` ⇒ 看 `x`；`< 2` / `> 1` ⇒ 看 `x & (x − 1)`；`== 1` / `!= 1` ⇒ `(x − 1) <u (x ^ (x − 1))`。
+    pub(super) const fn pop_kind(p: IPred, k: i32) -> Option<(IOp, u8)> {
+        Some(match (p, k) {
+            (IPred::Eq, 0) | (IPred::Ule, 0) | (IPred::Ult, 1) => (IOp::Beq, 0),
+            (IPred::Ne, 0) | (IPred::Ugt, 0) | (IPred::Uge, 1) => (IOp::Bne, 0),
+            (IPred::Ult, 2) | (IPred::Ule, 1) => (IOp::Beq, 1),
+            (IPred::Ugt, 1) | (IPred::Uge, 2) => (IOp::Bne, 1),
+            (IPred::Eq, 1) => (IOp::Bltu, 2),
+            (IPred::Ne, 1) => (IOp::Bgeu, 2),
+            _ => return None,
+        })
+    }
+
+    /// 和常数比的 ctpop（[`Self::pop_kind`]）⇒ 分支形式的（条件, 两个操作数）。
+    fn pop_test(&mut self, p: IPred, a: ValId, b: ValId) -> Result<Option<(IOp, R, R)>, Error> {
+        let (Some(&(x, _)), Some(k)) = (self.pops.get(&a), self.const_i32(b)) else { return Ok(None) };
+        let Some((op, how)) = Self::pop_kind(p, k) else { return Ok(None) };
+        let x = self.get1(x)?;
+        if how == 0 {
+            return Ok(Some((op, x, R::ZERO)));
+        }
+        let m = self.ri(IOp::Addi, x, -1);
+        Ok(Some(if how == 1 {
+            (op, self.rr(IOp::And, x, m), R::ZERO)
+        } else {
+            (op, m, self.rr(IOp::Xor, x, m))
+        }))
+    }
+
+    /// 分支形式的比较 ⇒ 0 / 1。
+    fn test_value(&mut self, op: IOp, x: R, y: R) -> R {
+        match op {
+            IOp::Beq | IOp::Bne => {
+                let t = if y == R::ZERO { x } else { self.rr(IOp::Xor, x, y) };
+                if op == IOp::Beq { self.ri(IOp::Sltiu, t, 1) } else { self.rr(IOp::Sltu, R::ZERO, t) }
+            }
+            IOp::Bltu => self.rr(IOp::Sltu, x, y),
+            _ => {
+                let t = self.rr(IOp::Sltu, x, y);
+                self.ri(IOp::Xori, t, 1)
+            }
+        }
+    }
+
     /// 整数比较 ⇒ 0 / 1。
     pub(super) fn icmp(&mut self, p: IPred, a: ValId, b: ValId) -> Result<R, Error> {
+        if let Some((op, x, y)) = self.pop_test(p, a, b)? {
+            return Ok(self.test_value(op, x, y));
+        }
         let w = self.width(self.ty(a))?;
         if w > 32 {
             return self.wide_icmp(p, a, b, w);
@@ -183,6 +231,9 @@ impl Isel<'_> {
 
     /// 并进跳转的比较 ⇒ `bxx` 与两个操作数。
     pub(super) fn compare_branch(&mut self, p: IPred, a: ValId, b: ValId) -> Result<(IOp, R, R), Error> {
+        if let Some(t) = self.pop_test(p, a, b)? {
+            return Ok(t);
+        }
         let w = self.width(self.ty(a))?;
         let (x, y) = self.cmp_operands(p, a, b, w)?;
         Ok(match p {
@@ -215,61 +266,71 @@ impl Isel<'_> {
         if op == CastOp::ZExt { r } else { self.mask_top(r, wt) }
     }
 
-    /// 类型转换（浮点相关的交给 float.rs）。
+    /// 类型转换（浮点相关的交给 float.rs）。向量逐 lane（每 lane 占 1/n 个部件）；bitcast 整个值一起换。
     pub(super) fn cast(&mut self, op: CastOp, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
         let from = self.ty(a);
-        let bits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
-        // 向量：逐 lane（每 lane 占 1/n 个部件，按元素的位宽）
-        if let (Kind::Vector(n, ef), Kind::Vector(_, et)) = (self.kind(from).clone(), self.kind(to).clone())
-            && matches!(op, CastOp::Trunc | CastOp::ZExt | CastOp::SExt)
-        {
-            let x = self.get(a)?;
-            let (n, wf, wt) = (n as usize, bits(self, ef), bits(self, et));
+        // fptosi / fptoui(floor 一类)：一条带舍入模式的 fcvt（同 LLVM 的 DAG 合并）
+        if let (CastOp::FpToSi | CastOp::FpToUi, Some(&(v, rm, _)), Some(w)) = (op, self.rounds.get(&a), self.types().bits(to).filter(|w| *w <= 32)) {
+            let v = self.get1(v)?;
+            let r = self.fx(if op == CastOp::FpToSi { Float::FcvtWS } else { Float::FcvtWuS }, vec![v], rm);
+            return Ok(vec![self.mask(r, w)]);
+        }
+        let x = self.get(a)?;
+        if op == CastOp::Bitcast {
+            return self.bitcast(from, x, to);
+        }
+        if let (Kind::Vector(n, ef), Kind::Vector(_, et)) = (self.kind(from).clone(), self.kind(to).clone()) {
+            let n = n as usize;
             if n == 0 || x.len() % n != 0 {
                 return Self::bad(format!("{op:?}：{n} 条 lane 对不上 {} 个部件", x.len()));
             }
-            let k = x.len() / n;
-            return Ok(x.chunks(k).flat_map(|lane| self.int_cast(op, lane, wf, wt)).collect());
-        }
-        Ok(match op {
-            CastOp::Trunc | CastOp::ZExt | CastOp::SExt => {
-                let x = self.get(a)?;
-                self.int_cast(op, &x, bits(self, from), bits(self, to))
+            let mut out = Vec::new();
+            for lane in x.chunks(x.len() / n) {
+                out.extend(self.lane_cast(op, ef, lane.to_vec(), et)?);
             }
+            return Ok(out);
+        }
+        self.lane_cast(op, from, x, to)
+    }
+
+    /// 一个标量（一条 lane）的转换：`x` 是 `from` 的部件。
+    fn lane_cast(&mut self, op: CastOp, from: Ty, x: Vec<R>, to: Ty) -> Result<Vec<R>, Error> {
+        let bits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
+        Ok(match op {
+            CastOp::Trunc | CastOp::ZExt | CastOp::SExt => self.int_cast(op, &x, bits(self, from), bits(self, to)),
             CastOp::PtrToInt => {
-                let x = self.get1(a)?;
                 let w = bits(self, to);
                 let op = if w > 32 { CastOp::ZExt } else { CastOp::Trunc };
-                self.int_cast(op, &[x], 32, w)
+                self.int_cast(op, &x[..1], 32, w)
             }
-            CastOp::IntToPtr => vec![self.low(a)?],
-            CastOp::AddrSpaceCast => self.get(a)?,
-            CastOp::Bitcast => {
-                let x = self.get(a)?;
-                match (self.kind(from), self.kind(to)) {
-                    // 软浮点的 float 本来就在整数寄存器里
-                    (Kind::Float, _) | (_, Kind::Float) if !crate::feature::Float::ENABLED => x,
-                    (Kind::Float, Kind::Int(32)) => {
-                        let d = self.xr();
-                        self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[d], &x);
-                        vec![d]
-                    }
-                    (Kind::Int(32), Kind::Float) => {
-                        let d = self.fr();
-                        self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &x);
-                        vec![d]
-                    }
-                    // 部件形状不同（`<16 x i8>` ⇔ i128 一类）：经栈，按一边的类型写、按另一边的读
-                    _ if self.parts(from)?.len() != self.parts(to)?.len() => {
-                        let align = self.types().align(from).max(self.types().align(to));
-                        let obj = self.stack_slot(self.types().size(from).max(self.types().size(to)), align);
-                        self.store_at(from, &x, mir::Base::Frame(obj), 0, align)?;
-                        self.load_at(to, mir::Base::Frame(obj), 0, align)?
-                    }
-                    _ => x,
-                }
+            CastOp::IntToPtr => vec![x[0]],
+            CastOp::AddrSpaceCast => x,
+            _ => self.fcast(op, from, x, to)?,
+        })
+    }
+
+    /// 位型不变的转换。
+    fn bitcast(&mut self, from: Ty, x: Vec<R>, to: Ty) -> Result<Vec<R>, Error> {
+        let class = |s: &Self, t: Ty| s.parts(t).map(|p| p.iter().map(|q| q.class()).collect::<Vec<_>>());
+        Ok(match (self.kind(from), self.kind(to)) {
+            (Kind::Float, Kind::Int(32)) if Float::ENABLED => {
+                let d = self.xr();
+                self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[d], &x);
+                vec![d]
             }
-            _ => self.fcast(op, a, to)?,
+            (Kind::Int(32), Kind::Float) if Float::ENABLED => {
+                let d = self.fr();
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &x);
+                vec![d]
+            }
+            // 部件形状不同（`<16 x i8>` ⇔ i128、`<2 x float>` ⇔ i64 一类）：经栈，按一边的类型写、按另一边的读
+            _ if class(self, from)? != class(self, to)? => {
+                let align = self.types().align(from).max(self.types().align(to));
+                let obj = self.stack_slot(self.types().size(from).max(self.types().size(to)), align);
+                self.store_at(from, &x, mir::Base::Frame(obj), 0, align)?;
+                self.load_at(to, mir::Base::Frame(obj), 0, align)?
+            }
+            _ => x,
         })
     }
 

@@ -25,9 +25,9 @@ mod wide;
 use super::abi::{Assign, Loc, Part};
 use super::mir::{Base, MBlock, MInst, MOp, R, Rule};
 use super::Error;
-use crate::ir::{Block as IBlock, Const, Function, IPred, Inst, Kind, Module, Op, Target, Ty, Types, ValId};
+use crate::ir::{Block as IBlock, CastOp, Const, Function, IPred, Inst, Intr, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::feature::{Float, M, Zmmul};
-use crate::isa::{Opcode, Rv32i as IOp, Table};
+use crate::isa::{Opcode, Rm, Rv32i as IOp, Table};
 use regalloc2::{Block, RegClass, VReg};
 use std::collections::HashMap;
 
@@ -81,6 +81,10 @@ pub struct Isel<'m> {
     uses: Vec<u32>,
     /// 本块条件跳转 / select 的条件里的整数比较：用处直接出 `bxx`（另有用处的照样算出来）。
     fused: HashMap<ValId, (IPred, ValId, ValId)>,
+    /// ≤ 32 位的 ctpop 结果 ⇒（实参, 只拿去和常数比 ⇒ 不用算）：比较改成位运算（[`Self::pop_test`]）。
+    pops: HashMap<ValId, (ValId, bool)>,
+    /// F 扩展上 float 的取整（floor 一类）⇒（实参, 舍入模式, 只拿去转成 ≤ 32 位整数 ⇒ 不用算）：转换并成一条带舍入模式的 fcvt。
+    rounds: HashMap<ValId, (ValId, Rm, bool)>,
     out_args: i32,
     calls: bool,
     varargs: Option<u8>,
@@ -113,6 +117,8 @@ impl<'m> Isel<'m> {
             preds: vec![0; n],
             uses: vec![0; f.vals.len()],
             fused: HashMap::new(),
+            pops: HashMap::new(),
+            rounds: HashMap::new(),
             out_args: 0,
             calls: false,
             varargs: None,
@@ -190,6 +196,42 @@ impl<'m> Isel<'m> {
                     }
                 }
             }
+        }
+        // ctpop 和 0 / 1 / 2 比：改成位运算；float 取整再转成整数：一条 fcvt。所有用处都是这种 ⇒ 被并掉的那个本身不算
+        let ints: HashMap<ValId, i32> = order
+            .iter()
+            .flat_map(|&b| &self.f.blocks[b].insts)
+            .filter_map(|i| match (&i.op, i.result) {
+                (Op::Const(Const::Int(k)), Some(r)) => Some((r, *k as u32 as i32)),
+                (Op::Const(Const::Zero), Some(r)) => Some((r, 0)),
+                _ => None,
+            })
+            .collect();
+        let mut tests: HashMap<ValId, u32> = HashMap::new();
+        for inst in order.iter().flat_map(|&b| &self.f.blocks[b].insts) {
+            match (&inst.op, inst.result) {
+                (Op::Intr(Intr::Ctpop, args), Some(r)) if self.types().bits(self.ty(args[0])).is_some_and(|w| w <= 32) => {
+                    self.pops.insert(r, (args[0], false));
+                }
+                (Op::ICmp(p, a, b), _) if self.pops.contains_key(a) && ints.get(b).is_some_and(|k| Self::pop_kind(*p, *k).is_some()) => {
+                    *tests.entry(*a).or_default() += 1;
+                }
+                (Op::Intr(Intr::Libm(name), args), Some(r)) if Float::ENABLED && matches!(self.kind(self.ty(args[0])), Kind::Float) => {
+                    if let Some(rm) = Self::round_mode(name) {
+                        self.rounds.insert(r, (args[0], rm, false));
+                    }
+                }
+                (Op::Cast(CastOp::FpToSi | CastOp::FpToUi, a), Some(r)) if self.rounds.contains_key(a) && self.types().bits(self.ty(r)).is_some_and(|w| w <= 32) => {
+                    *tests.entry(*a).or_default() += 1;
+                }
+                _ => {}
+            }
+        }
+        for (r, (_, lazy)) in &mut self.pops {
+            *lazy = tests.get(r).copied() == Some(self.uses[r.0 as usize]);
+        }
+        for (r, (_, _, lazy)) in &mut self.rounds {
+            *lazy = tests.get(r).copied() == Some(self.uses[r.0 as usize]);
         }
     }
 
@@ -513,6 +555,8 @@ impl<'m> Isel<'m> {
                 let parts = self.call(*fty, callee, args, ret)?;
                 self.set(r, parts);
             }
+            Op::Intr(Intr::Ctpop, _) if r.is_some_and(|r| self.pops.get(&r).is_some_and(|p| p.1)) => {}
+            Op::Intr(Intr::Libm(_), _) if r.is_some_and(|r| self.rounds.get(&r).is_some_and(|p| p.2)) => {}
             Op::Intr(i, args) => {
                 let t = r.map(|r| self.ty(r));
                 let parts = self.intrinsic(i, args, t)?;

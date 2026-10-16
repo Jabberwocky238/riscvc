@@ -56,6 +56,26 @@ codegen/float-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果�
 codegen/float-convert/fcvt_wu_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i8(257.04236)：riscvc Returned 0x1  ≠  llc Returned 0x101
 codegen/float-intrinsics 解析：`llvm.intr.exp10`：exp10_f32：不支持的 op `llvm.intr.exp10`
 codegen/float-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f32：不支持的 op `llvm.intr.minimum`
+codegen/float-round-conv/test_ceil_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_si16(7207245400000000000)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_ceil_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_si8(861.0217)：riscvc Returned 0x5e  ≠  llc Returned 0x35e
+codegen/float-round-conv/test_ceil_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_ui16(117452990000000000000000000000000000000)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_ceil_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_ui8(2323.0955)：riscvc Returned 0x14  ≠  llc Returned 0x914
+codegen/float-round-conv/test_floor_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_si16(-2147484000)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_floor_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_si8(-inf)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_floor_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_ui16(4294967300)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_floor_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_ui8(2147483600)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_round_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_si16(inf)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_round_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_si8(inf)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_round_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_ui16(inf)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_round_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_ui8(1109072340000000000000000000)：riscvc Returned 0xff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_roundeven_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_si16(-inf)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_roundeven_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_si8(917.1242)：riscvc Returned 0xffffff95  ≠  llc Returned 0x395
+codegen/float-round-conv/test_roundeven_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_ui16(NaN)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_roundeven_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_ui8(895.0257)：riscvc Returned 0x7f  ≠  llc Returned 0x37f
+codegen/float-round-conv/test_trunc_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_si16(4294967300)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_trunc_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_si8(502.0581)：riscvc Returned 0xfffffff6  ≠  llc Returned 0x1f6
+codegen/float-round-conv/test_trunc_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_ui16(inf)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_trunc_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_ui8(565.0196)：riscvc Returned 0x35  ≠  llc Returned 0x235
 codegen/flt-rounds 解析：`llvm.call_intrinsic`：test_flt_rounds：不支持的 op `llvm.call_intrinsic`
 codegen/fold-addi-loadstore 解析：`llvm.blockaddress`：load_ba_1：不支持的 op `llvm.blockaddress`
 codegen/fp-fcanonicalize 解析：`llvm.call_intrinsic`：fcanonicalize_f16：不支持的 op `llvm.call_intrinsic`

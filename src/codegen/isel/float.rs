@@ -24,7 +24,7 @@ impl Isel<'_> {
     }
 
     /// 结果是整数的浮点指令（比较、`fclass`、`fcvt.w.s` …）。
-    fn fx(&mut self, op: impl Into<Opcode>, uses: Vec<R>, rm: Rm) -> R {
+    pub(super) fn fx(&mut self, op: impl Into<Opcode>, uses: Vec<R>, rm: Rm) -> R {
         let op: Opcode = op.into();
         let d = self.xr();
         self.emit(MOp::Reg(op, rm as u8), &[d], &uses);
@@ -47,6 +47,34 @@ impl Isel<'_> {
             _ => ((e + 16383 - 1023) as u128, (m as u128) << 60),
         };
         sign | qe << 112 | qm
+    }
+
+    /// libm 的 float 取整函数 ⇒ 舍入模式：floor rdn、ceil rup、trunc rtz、round rmm、roundeven rne、rint / nearbyint 跟 frm。
+    pub(super) fn round_mode(name: &str) -> Option<Rm> {
+        Some(match name.strip_suffix('f')? {
+            "floor" => Rm::Rdn,
+            "ceil" => Rm::Rup,
+            "trunc" => Rm::Rtz,
+            "round" => Rm::Rmm,
+            "roundeven" => Rm::Rne,
+            "rint" | "nearbyint" => Rm::Dyn,
+            _ => return None,
+        })
+    }
+
+    /// float 取整（F 扩展，同 LLVM 的 lowerFTRUNC_FCEIL_FFLOOR_FROUND）：|x| < 2²³ ⇒ `fcvt.w.s` 再 `fcvt.s.w`（同一舍入模式），
+    /// 再拿回 x 的符号（−0.5 取整得 −0）；否则（已经是整数、inf、NaN）原样。
+    pub(super) fn fround(&mut self, x: R, rm: Rm) -> R {
+        let k = self.li(0x4b00_0000);
+        let big = self.fr();
+        self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[big], &[k]);
+        let ax = self.ff(Float::FsgnjxS, x, x, Rm::Rne);
+        let small = self.fx(Float::FltS, vec![ax, big], Rm::Rne);
+        let i = self.fx(Float::FcvtWS, vec![x], rm);
+        let f = self.fr();
+        self.emit(MOp::Reg(Float::FcvtSW.into(), rm as u8), &[f], &[i]);
+        let r = self.ff(Float::FsgnjS, f, x, Rm::Rne);
+        self.select_parts(IOp::Bne, small, R::ZERO, &[r], &[x])[0]
     }
 
     /// compiler-rt 名字里的类型后缀（不管有没有硬件）：float `sf`、double `df`、fp128 `tf`。
@@ -269,9 +297,7 @@ impl Isel<'_> {
 
     /// 与浮点相关的转换。软浮点（double；F 没开时 float）调 compiler-rt，名字的后缀按两边的类型拼；
     /// 16 位浮点经 float（见模块说明）。
-    pub(super) fn fcast(&mut self, op: CastOp, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
-        let from = self.ty(a);
-        let x = self.get(a)?;
+    pub(super) fn fcast(&mut self, op: CastOp, from: Ty, x: Vec<R>, to: Ty) -> Result<Vec<R>, Error> {
         let wbits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
         let (pf, pt) = (self.parts(from)?, self.parts(to)?);
         match (op, self.f16_kind(from), self.f16_kind(to)) {
@@ -288,7 +314,7 @@ impl Isel<'_> {
             // 到 16 位：float / double 舍入；整数先转成 float
             (CastOp::FpTrunc, None, Some(bt)) => return Ok(vec![self.trunc16(from, x, bt)?]),
             (CastOp::SiToFp | CastOp::UiToFp, _, Some(bt)) => {
-                let f = self.inttofp(op == CastOp::SiToFp, a, Types::FLOAT)?;
+                let f = self.inttofp(op == CastOp::SiToFp, from, x, Types::FLOAT)?;
                 return Ok(vec![self.trunc16(Types::FLOAT, f, bt)?]);
             }
             _ => {}
@@ -298,7 +324,7 @@ impl Isel<'_> {
             CastOp::FpTrunc => self.libcall(&format!("__trunc{}{}2", self.fsuffix(from), self.fsuffix(to)), &[(x, pf)], &pt)?,
             CastOp::FpExt => self.libcall(&format!("__extend{}{}2", self.fsuffix(from), self.fsuffix(to)), &[(x, pf)], &pt)?,
             CastOp::FpToSi | CastOp::FpToUi => self.fptoint(op == CastOp::FpToSi, from, x, wbits(self, to))?,
-            CastOp::SiToFp | CastOp::UiToFp => self.inttofp(op == CastOp::SiToFp, a, to)?,
+            CastOp::SiToFp | CastOp::UiToFp => self.inttofp(op == CastOp::SiToFp, from, x, to)?,
             _ => return Self::bad(format!("不支持的转换 {op:?}：{:?} ⇒ {:?}", self.kind(from), self.kind(to))),
         })
     }
@@ -325,10 +351,9 @@ impl Isel<'_> {
         Ok(self.int_cast(CastOp::Trunc, &r, 32 * words, w))
     }
 
-    /// 整数值 `a` ⇒ float / double `to` 的部件。
-    fn inttofp(&mut self, signed: bool, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
-        let w = self.types().bits(self.ty(a)).unwrap_or(32);
-        let x = self.get(a)?;
+    /// 整数（`from` 的部件 `x`）⇒ 浮点 `to` 的部件。
+    fn inttofp(&mut self, signed: bool, from: Ty, x: Vec<R>, to: Ty) -> Result<Vec<R>, Error> {
+        let w = self.types().bits(from).unwrap_or(32);
         let pt = self.parts(to)?;
         let (size, words, pf) = Self::conv_width(w)?;
         let src = self.int_cast(if signed { CastOp::SExt } else { CastOp::ZExt }, &x, w, 32 * words);

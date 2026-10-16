@@ -440,14 +440,16 @@ As of 2026-10-15:
 | Division by constants | shifts / magic-number multiply (same as LLVM's BuildUDIV / BuildSDIV): 496 functions (udiv / urem / sdiv / srem × i32 / i16 / i8 × 40-odd divisors), 209,806 calls checked against exact arithmetic |
 | Code size (`.text`, both `-mattr=-relax`, `tools/size_vs_llc.py`) | compiler-rt O2 1.18× llc, O0 0.98×; `tests/programs` O2 1.09×, O0 0.95× |
 | MC fixtures | 277 of 279 identical to llvm-mc (with and without relaxation; branch lengths are settled at layout time, like MC relaxation); remaining: alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
-| LLVM's own tests | 1,080 files from `CodeGen/RISCV` and MLIR `Target/LLVMIR` (9,897 `llvm.func`), 162,608 calls compared with llc; 295 expected failures listed in `tests/fixtures/lit/xfail.txt`: 45 functions not compiled (all vector operations), 129 files not converted (inline asm, `invoke`, `call_intrinsic`, …), 116 result differences, each checked by hand against the IR (and against a Rust reference where the poison boundary was not obvious): all are poison / undefined inputs or information lost by the MLIR importer; the 14 wrong-code bugs this comparison found are fixed, 5 link failures |
+| LLVM's own tests | 1,080 files from `CodeGen/RISCV` and MLIR `Target/LLVMIR` (9,897 `llvm.func`), 164,208 calls compared with llc; 315 expected failures listed in `tests/fixtures/lit/xfail.txt`: 45 functions not compiled (all vector operations), 129 files not converted (inline asm, `invoke`, `call_intrinsic`, …), 136 result differences, each checked by hand against the IR (and against a Rust reference where the poison boundary was not obvious): all are poison / undefined inputs or information lost by the MLIR importer; the 14 wrong-code bugs this comparison found are fixed, 5 link failures |
 
 Wide integers (`i128`, `i256`, any width): word-by-word like LLVM's integer expansion (variable shifts through the
 stack, division as an inline shift-subtract loop); scalars wider than 2×XLEN (wide integers, `fp128`) are passed by
 reference and return values that do not fit in a0 / a1 / fa0 / fa1 go through `sret`, as `CC_RISCV` does; `fp128` is
 soft-float (`__addtf3` …). Not done yet: vector operations, test coverage of stack-passed arguments; `fp128` constants
 are held at double precision by the front end. Code size: the machine-IR passes (constant folding,
-dominator-scoped CSE, branch-condition folding, tail calls) and post-allocation branch folding / relaxation are in;
+dominator-scoped CSE, branch-condition folding, tail calls), post-allocation branch folding / relaxation and llc's
+selection-time rewrites (small constant-length `memcpy` / `memmove` / `memset` inline, `ctpop(x) == 1` as
+`(x - 1) <u (x ^ (x - 1))`, `floor` / `ceil` / `round` … inline and fused into `fcvt` with a rounding mode) are in;
 still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping, jump tables and
 copy coalescing (regalloc2 has no move hints), plus llc's lowering of `cttz` (de Bruijn table).
 
