@@ -67,7 +67,12 @@ impl<'a> Lowering<'_, 'a> {
 
     /// 结果的值（已编好号，类型来自 op 的结果类型）。
     pub fn results(&self) -> Result<Vec<ValId>, Error> {
-        self.op.results.iter().map(|r| self.body.names.get(&*r.name).copied().ok_or_else(|| Error::Parse(format!("没定义的结果 %{}", r.name)))).collect()
+        let mut out = Vec::with_capacity(self.op.ty.results.len());
+        for r in &self.op.results {
+            let &(first, n) = self.body.names.get(&*r.name).ok_or_else(|| Error::Parse(format!("没定义的结果 %{}", r.name)))?;
+            out.extend((first.0..first.0 + n).map(ValId));
+        }
+        Ok(out)
     }
 
     /// 属性（properties 或属性字典）。
@@ -104,13 +109,113 @@ impl<'a> Lowering<'_, 'a> {
         self.insts.push(Inst { result, op });
     }
 
-    /// 内置 `llvm` 方言：一条 op ⇒ 一条指令。
+    /// 内置 `llvm` 方言：一条 op ⇒ 一条指令（几个 intrinsic 用已有指令展开成几条，见 [`Self::expand`]）。
     pub(crate) fn llvm(&mut self) -> Result<(), Error> {
-        let result = self.op.results.first().map(|r| self.body.names[&*r.name]);
+        let result = match self.results()?[..] {
+            [] => None,
+            [r] => Some(r),
+            _ => return Err(Error::Parse(String::from("llvm 方言的 op 至多一个结果"))),
+        };
+        if let Some(r) = result
+            && self.expand(r)?
+        {
+            return Ok(());
+        }
         let o = self.module.op(self.op, self.body, result)?;
         self.emit(result, o);
         Ok(())
     }
+
+    /// 常量（`ty` 的位型）。
+    fn constant(&mut self, ty: Ty, c: Const) -> ValId {
+        let v = self.temp(ty);
+        self.emit(Some(v), Op::Const(c));
+        v
+    }
+
+    /// 出一条带结果的指令，回结果。
+    fn value(&mut self, ty: Ty, op: Op) -> ValId {
+        let v = self.temp(ty);
+        self.emit(Some(v), op);
+        v
+    }
+
+    /// 用已有指令展开的 intrinsic ⇒ 出指令、回 true；别的回 false（⛔ 代码生成不用认它们）：
+    ///
+    /// | intrinsic | 展开 |
+    /// | --- | --- |
+    /// | `scmp` / `ucmp` | `zext(a > b) - zext(a < b)` |
+    /// | `fptosi.sat` / `fptoui.sat`（源 float / double） | NaN ⇒ 0，越界 ⇒ 饱和值，其余 `fptosi` / `fptoui` |
+    /// | `canonicalize`（float） | `minnum(x, x)`（同 llc：`fmin.s x, x, x`） |
+    fn expand(&mut self, r: ValId) -> Result<bool, Error> {
+        let Some(base) = intrinsic_base(self.op) else { return Ok(false) };
+        let rt = self.type_of(r);
+        match base {
+            "scmp" | "ucmp" => {
+                let [a, b] = self.operands()?[..] else { return Err(Error::Parse(format!("{base} 要两个操作数"))) };
+                let (gt, lt) = if base == "scmp" { (IPred::Sgt, IPred::Slt) } else { (IPred::Ugt, IPred::Ult) };
+                let (g, l) = (self.value(Types::I1, Op::ICmp(gt, a, b)), self.value(Types::I1, Op::ICmp(lt, a, b)));
+                let (g, l) = (self.value(rt, Op::Cast(CastOp::ZExt, g)), self.value(rt, Op::Cast(CastOp::ZExt, l)));
+                self.emit(Some(r), Op::Bin(BinOp::Sub, g, l));
+            }
+            "fptosi.sat" | "fptoui.sat" => {
+                let [x] = self.operands()?[..] else { return Err(Error::Parse(format!("{base} 要一个操作数"))) };
+                let (Some(w), xt) = (self.types().bits(rt), self.type_of(x)) else { return Err(Error::Parse(format!("{base} 的结果不是整数"))) };
+                let single = match self.types().kind(xt) {
+                    Kind::Float => true,
+                    Kind::Double => false,
+                    _ => return Ok(false),
+                };
+                let signed = base == "fptosi.sat";
+                // 界都是 2 的幂（float / double 都精确）：signed [-2^(w-1), 2^(w-1))，unsigned [0, 2^w)
+                let (lo, hi) = if signed { (-(2f64.powi(w.cast_signed() - 1)), 2f64.powi(w.cast_signed() - 1)) } else { (0.0, 2f64.powi(w.cast_signed())) };
+                let bits = |v: f64| {
+                    #[allow(clippy::cast_possible_truncation, reason = "2 的幂，float 精确")]
+                    Const::Float(if single { u64::from((v as f32).to_bits()) } else { v.to_bits() })
+                };
+                let mask = if w >= 128 { u128::MAX } else { (1u128 << w) - 1 };
+                let (min, max) = if signed { (Const::Int((mask >> 1) + 1), Const::Int(mask >> 1)) } else { (Const::Int(0), Const::Int(mask)) };
+                let (flo, fhi) = (self.constant(xt, bits(lo)), self.constant(xt, bits(hi)));
+                let (cmin, cmax, zero) = (self.constant(rt, min), self.constant(rt, max), self.constant(rt, Const::Int(0)));
+                let t = self.value(rt, Op::Cast(if signed { CastOp::FpToSi } else { CastOp::FpToUi }, x));
+                let under = self.value(Types::I1, Op::FCmp(FPred::Olt, x, flo));
+                let t = self.value(rt, Op::Select(under, cmin, t));
+                let over = self.value(Types::I1, Op::FCmp(FPred::Oge, x, fhi));
+                let t = self.value(rt, Op::Select(over, cmax, t));
+                let nan = self.value(Types::I1, Op::FCmp(FPred::Uno, x, x));
+                self.emit(Some(r), Op::Select(nan, zero, t));
+            }
+            "canonicalize" if self.types().kind(rt) == &Kind::Float => {
+                let [x] = self.operands()?[..] else { return Err(Error::Parse(format!("{base} 要一个操作数"))) };
+                self.emit(Some(r), Op::Intr(Intr::MinNum, vec![x, x]));
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+}
+
+/// intrinsic 的基名：`llvm.intr.scmp` ⇒ `scmp`；`llvm.call_intrinsic` 的 `intrin = "llvm.fptosi.sat.i32.f32"`
+/// ⇒ `fptosi.sat`（去掉类型后缀）。别的 op ⇒ `None`。
+fn intrinsic_base<'o>(op: &'o Operation<'_>) -> Option<&'o str> {
+    if let Some(n) = op.name.strip_prefix("llvm.intr.") {
+        return Some(n);
+    }
+    if op.name != "llvm.call_intrinsic" {
+        return None;
+    }
+    let mut n = prop(op, "intrin")?.lit()?.strip_prefix("llvm.")?;
+    // 类型后缀：i32、f64、bf16、p0、v4i32、nxv2f32 …
+    let suffix = |s: &str| {
+        let t = s.trim_start_matches("nx").trim_start_matches('v').trim_start_matches(|c: char| c.is_ascii_digit());
+        ["i", "f", "bf", "p"].iter().any(|k| t.strip_prefix(k).is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())))
+    };
+    while let Some((head, last)) = n.rsplit_once('.')
+        && suffix(last)
+    {
+        n = head;
+    }
+    Some(n)
 }
 
 /// 属性的读法。
@@ -214,9 +319,10 @@ fn castop(name: &str) -> Option<CastOp> {
     })
 }
 
+/// 基名（[`intrinsic_base`]）⇒ 代码生成认得的 intrinsic。
 fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
     let libm = |base: &str| Intr::Libm(if float { format!("{base}f") } else { String::from(base) });
-    Some(match name.strip_prefix("llvm.intr.")? {
+    Some(match name {
         "ctlz" => Intr::Ctlz,
         "cttz" => Intr::Cttz,
         "ctpop" => Intr::Ctpop,
@@ -260,38 +366,41 @@ fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
         "vacopy" => Intr::VaCopy,
         "expect" | "expect.with.probability" => Intr::Expect,
         "floor" | "ceil" | "trunc" | "round" | "rint" | "nearbyint" | "pow" | "exp" | "exp2" | "log" | "log2" | "log10" | "sin" | "cos" | "tan" | "roundeven" => {
-            libm(name.trim_start_matches("llvm.intr."))
+            libm(name)
         }
-        n if n.starts_with("lifetime.") || n.starts_with("invariant.") || n.starts_with("dbg.") || n == "assume" || n == "prefetch" || n == "donothing" || n == "sideeffect" => Intr::Nop,
+        // compiler-rt
+        "powi" => Intr::Libm(String::from(if float { "__powisf2" } else { "__powidf2" })),
+        n if n.starts_with("lifetime.") || n.starts_with("invariant.") || n.starts_with("dbg.") || n.starts_with("experimental.noalias.scope.decl") || n == "assume" || n == "prefetch" || n == "donothing" || n == "sideeffect" => Intr::Nop,
         _ => return None,
     })
 }
 
 /// 一个函数体的名字表（MLIR 的 SSA 名 ⇒ `ValId`，块名 ⇒ `BlockId`）。
+/// 一个名字对应连续的几个值（`%0:2` 的两个结果；`%0#1` 是第二个），⛔ 查的时候不拼字符串。
 #[derive(Default)]
 struct Body {
     vals: Vec<Ty>,
-    names: HashMap<String, ValId>,
+    names: HashMap<String, (ValId, u32)>,
     blocks: HashMap<String, BlockId>,
 }
 
 impl Body {
-    fn key(v: &Value<'_>) -> String {
-        match v.index {
-            Some(i) => format!("{}#{i}", v.name),
-            None => String::from(&*v.name),
-        }
-    }
-
-    fn define(&mut self, name: &str, ty: Ty) -> ValId {
-        let id = ValId(u32::try_from(self.vals.len()).expect("值太多"));
-        self.vals.push(ty);
-        self.names.insert(String::from(name), id);
-        id
+    /// 定义名字 `name` 的一组值（各自的类型），回第一个。
+    fn define(&mut self, name: &str, tys: impl IntoIterator<Item = Ty>) -> ValId {
+        let first = ValId(u32::try_from(self.vals.len()).expect("值太多"));
+        self.vals.extend(tys);
+        let n = u32::try_from(self.vals.len()).expect("值太多") - first.0;
+        self.names.insert(String::from(name), (first, n));
+        first
     }
 
     fn get(&self, v: &Value<'_>) -> Result<ValId, Error> {
-        self.names.get(&Self::key(v)).copied().ok_or_else(|| Error::Parse(format!("没定义的值 %{}", Self::key(v))))
+        let i = v.index.unwrap_or(0);
+        self.names
+            .get(&*v.name)
+            .filter(|&&(_, n)| i < n)
+            .map(|&(first, _)| ValId(first.0 + i))
+            .ok_or_else(|| Error::Parse(format!("没定义的值 %{}{}", v.name, v.index.map_or_else(String::new, |i| format!("#{i}")))))
     }
 
     fn all(&self, vs: &[Value<'_>]) -> Result<Vec<ValId>, Error> {
@@ -397,6 +506,10 @@ impl Module {
                 "llvm.sret" => out.sret = true,
                 "llvm.byval" => out.byval = a.value.as_ref().and_then(Attr::ty).map(|t| self.ty(t)).transpose()?,
                 "llvm.align" => out.align = a.value.as_ref().and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
+                // 改调用约定的：⛔ 悄悄当普通参数（`nest` 在 RISC-V 上走 t2）
+                "llvm.nest" | "llvm.inalloca" | "llvm.preallocated" | "llvm.swiftself" | "llvm.swifterror" | "llvm.swiftasync" => {
+                    return Err(Error::Parse(format!("参数属性 `{}` 不支持", a.name)));
+                }
                 _ => {}
             }
         }
@@ -406,6 +519,18 @@ impl Module {
     fn function(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         let f: llvm::LLVMFuncOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.func"), why: e.0 })?;
         let name = String::from(f.sym_name.lit().ok_or_else(|| Error::Parse(String::from("llvm.func 没有名字")))?);
+        // 改函数怎么出代码的属性：⛔ 悄悄当普通函数（`interrupt` 要存全部寄存器、`mret` 返回；`naked` 没有序言 / 尾声）
+        if let Some(Attribute::Array(attrs)) = &f.passthrough {
+            for a in attrs {
+                let key = match a {
+                    Attribute::Array(kv) => kv.first().and_then(Attr::lit),
+                    a => a.lit(),
+                };
+                if let Some(k @ ("interrupt" | "naked")) = key {
+                    return Err(Error::Op { op: String::from("llvm.func"), why: format!("{name}：函数属性 `{k}` 不支持") });
+                }
+            }
+        }
         let fty = self.ty(f.function_type.ty().ok_or_else(|| Error::Parse(format!("{name}：没有 function_type")))?)?;
         let Kind::Func(ret, params, varargs) = self.types.kind(fty).clone() else { return Err(Error::Parse(format!("{name}：function_type 不是函数类型"))) };
         let params = params.iter().enumerate().map(|(i, &ty)| Ok(Param { ty, attrs: self.arg_attrs(f.arg_attrs.as_ref(), i)? })).collect::<Result<Vec<_>, Error>>()?;
@@ -442,16 +567,22 @@ impl Module {
         }
         let mut params = Vec::new();
         for blk in &region.blocks {
-            let mut ps = Vec::new();
+            let mut ps = Vec::with_capacity(blk.args.len());
             for a in &blk.args {
                 let t = self.ty(&a.ty)?;
-                ps.push(b.define(&a.name, t));
+                ps.push(b.define(&a.name, [t]));
             }
             params.push(ps);
             for op in &blk.ops {
-                for (r, t) in op.results.iter().zip(&op.ty.results) {
-                    let t = self.ty(t)?;
-                    b.define(&r.name, t);
+                // `%r:n` 占 n 个结果类型
+                let mut tys = op.ty.results.iter();
+                for r in &op.results {
+                    let n = r.count.unwrap_or(1) as usize;
+                    let ts = tys.by_ref().take(n).map(|t| self.ty(t)).collect::<Result<Vec<_>, _>>()?;
+                    if ts.len() != n {
+                        return Err(Error::Op { op: String::from(&*op.name), why: String::from("结果个数与结果类型对不上") });
+                    }
+                    b.define(&r.name, ts);
                 }
             }
         }
@@ -480,25 +611,27 @@ impl Module {
     #[allow(clippy::too_many_lines, reason = "一种 op 一支")]
     fn op(&mut self, op: &Operation<'_>, b: &Body, result: Option<ValId>) -> Result<Op, Error> {
         let name = &*op.name;
-        let args = b.all(&op.operands)?;
+        // 第 i 个操作数（⛔ 不预先收成 Vec；缺了报错而不是越界）
+        let arg = |i: usize| op.operands.get(i).ok_or_else(|| Error::Parse(format!("少了第 {} 个操作数", i + 1))).and_then(|v| b.get(v));
         let typed = |e: mlirformat::Error| Error::Parse(e.0);
         let res_ty = result.map(|r| b.vals[r.0 as usize]);
         if let Some(k) = binop(name) {
-            return Ok(Op::Bin(k, args[0], args[1]));
+            return Ok(Op::Bin(k, arg(0)?, arg(1)?));
         }
         if let Some(k) = castop(name) {
-            return Ok(Op::Cast(k, args[0]));
+            return Ok(Op::Cast(k, arg(0)?));
         }
         let float = op.ty.inputs.first().is_some_and(|t| matches!(t, Type::Float(FloatKind::F32)));
-        if let Some(i) = intrinsic(name, op, float) {
-            return Ok(Op::Intr(i, args));
+        // `llvm.call_intrinsic`（没有专门 op 的 intrinsic）按基名查同一张表
+        if let Some(i) = intrinsic_base(op).and_then(|base| intrinsic(base, op, float)) {
+            return Ok(Op::Intr(i, b.all(&op.operands)?));
         }
         Ok(match name {
             "llvm.mlir.constant" => Op::Const(self.constant(prop(op, "value").ok_or_else(|| Error::Parse(String::from("没有 value")))?, res_ty.unwrap_or(Types::I32))?),
             "llvm.mlir.zero" => Op::Const(Const::Zero),
             "llvm.mlir.undef" | "llvm.mlir.poison" => Op::Const(Const::Undef),
             "llvm.mlir.addressof" => Op::Const(Const::Global(prop(op, "global_name").and_then(Attr::symbol).ok_or_else(|| Error::Parse(String::from("没有 global_name")))?, 0)),
-            "llvm.return" => Op::Ret(args.first().copied()),
+            "llvm.return" => Op::Ret(op.operands.first().map(|v| b.get(v)).transpose()?),
             "llvm.unreachable" => Op::Unreachable,
             "llvm.br" => {
                 let o: llvm::BrOp<'_> = op.to_op().map_err(typed)?;
@@ -523,20 +656,20 @@ impl Module {
                 }
                 Op::Switch(b.get(&o.value)?, b.target(&o.default_destination, &o.default_operands)?, cases)
             }
-            "llvm.fneg" => Op::FNeg(args[0]),
-            "llvm.icmp" => Op::ICmp(Self::pred(op, [IPred::Eq, IPred::Ne, IPred::Slt, IPred::Sle, IPred::Sgt, IPred::Sge, IPred::Ult, IPred::Ule, IPred::Ugt, IPred::Uge])?, args[0], args[1]),
+            "llvm.fneg" => Op::FNeg(arg(0)?),
+            "llvm.icmp" => Op::ICmp(Self::pred(op, [IPred::Eq, IPred::Ne, IPred::Slt, IPred::Sle, IPred::Sgt, IPred::Sge, IPred::Ult, IPred::Ule, IPred::Ugt, IPred::Uge])?, arg(0)?, arg(1)?),
             "llvm.fcmp" => Op::FCmp(
                 Self::pred(op, [FPred::False, FPred::Oeq, FPred::Ogt, FPred::Oge, FPred::Olt, FPred::Ole, FPred::One, FPred::Ord, FPred::Ueq, FPred::Ugt, FPred::Uge, FPred::Ult, FPred::Ule, FPred::Une, FPred::Uno, FPred::True])?,
-                args[0],
-                args[1],
+                arg(0)?,
+                arg(1)?,
             ),
             "llvm.alloca" => {
                 let o: llvm::AllocaOp<'_> = op.to_op().map_err(typed)?;
                 let ty = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
-                Op::Alloca { ty, count: args[0], align: Self::uint(op, "alignment").max(1) }
+                Op::Alloca { ty, count: arg(0)?, align: Self::uint(op, "alignment").max(1) }
             }
-            "llvm.load" => Op::Load { ptr: args[0], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
-            "llvm.store" => Op::Store { val: args[0], ptr: args[1], align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
+            "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
+            "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
             "llvm.getelementptr" => {
                 let o: llvm::GEPOp<'_> = op.to_op().map_err(typed)?;
                 let src = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
@@ -549,17 +682,17 @@ impl Module {
                     .collect::<Result<Vec<_>, _>>()?;
                 Op::Gep { src, base: b.get(&o.base)?, indices }
             }
-            "llvm.select" => Op::Select(args[0], args[1], args[2]),
-            "llvm.freeze" => Op::Freeze(args[0]),
-            "llvm.extractvalue" => Op::ExtractValue(args[0], Self::position(op)?),
-            "llvm.insertvalue" => Op::InsertValue(args[0], args[1], Self::position(op)?),
+            "llvm.select" => Op::Select(arg(0)?, arg(1)?, arg(2)?),
+            "llvm.freeze" => Op::Freeze(arg(0)?),
+            "llvm.extractvalue" => Op::ExtractValue(arg(0)?, Self::position(op)?),
+            "llvm.insertvalue" => Op::InsertValue(arg(0)?, arg(1)?, Self::position(op)?),
             "llvm.call" => self.call(op, b)?,
             "llvm.atomicrmw" => {
                 const OPS: [RmwOp; 15] = [RmwOp::Xchg, RmwOp::Add, RmwOp::Sub, RmwOp::And, RmwOp::Nand, RmwOp::Or, RmwOp::Xor, RmwOp::Max, RmwOp::Min, RmwOp::UMax, RmwOp::UMin, RmwOp::FAdd, RmwOp::FSub, RmwOp::FMax, RmwOp::FMin];
                 let k = usize::try_from(Self::uint(op, "bin_op")).unwrap_or(usize::MAX);
-                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, args[0], args[1], Self::order(op).unwrap_or(5))
+                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, arg(0)?, arg(1)?, Self::order(op).unwrap_or(5))
             }
-            "llvm.cmpxchg" => Op::CmpXchg(args[0], args[1], args[2]),
+            "llvm.cmpxchg" => Op::CmpXchg(arg(0)?, arg(1)?, arg(2)?),
             "llvm.fence" => Op::Fence,
             "llvm.va_arg" => return Err(Error::Parse(String::from("va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）"))),
             n => return Err(Error::Parse(format!("不支持的 op `{n}`"))),
@@ -593,7 +726,8 @@ impl Module {
         let mut operands = b.all(&o.callee_operands)?;
         let callee = match o.callee.as_ref().and_then(Attr::symbol) {
             Some(name) => Callee::Direct(name),
-            None => Callee::Indirect(operands.remove(0)),
+            None if !operands.is_empty() => Callee::Indirect(operands.remove(0)),
+            None => return Err(Error::Parse(String::from("间接调用没有被调用者"))),
         };
         let fty = match o.var_callee_type.as_ref().and_then(Attr::ty) {
             Some(t) => self.ty(t)?,
@@ -611,6 +745,12 @@ impl Module {
         Ok(Op::Call { fty, callee, args, ret: self.arg_attrs(o.res_attrs.as_ref(), 0)? })
     }
 
+    /// 按 `bits` 位符号扩展。
+    fn signed(v: u128, bits: u32) -> i64 {
+        let s = 128 - bits.clamp(1, 128);
+        i64::try_from((v << s).cast_signed() >> s).unwrap_or(0)
+    }
+
     fn mask(v: i128, bits: u32) -> u128 {
         let v = v.cast_unsigned();
         if bits >= 128 { v } else { v & ((1u128 << bits) - 1) }
@@ -623,13 +763,15 @@ impl Module {
             Attribute::Bool(v) => Const::Int(u128::from(*v)),
             Attribute::Int { .. } => {
                 let v = a.int().map_err(|e| Error::Parse(e.0))?;
+                // 浮点类型上的整数字面量是位型
                 match self.types.kind(ty) {
+                    Kind::Half | Kind::BFloat => Const::Float(Self::mask(v, 16).try_into().unwrap_or(0)),
                     Kind::Float => Const::Float(Self::mask(v, 32).try_into().unwrap_or(0)),
                     Kind::Double => Const::Float(Self::mask(v, 64).try_into().unwrap_or(0)),
                     _ => Const::Int(Self::mask(v, bits.unwrap_or(64))),
                 }
             }
-            Attribute::Float { lit, .. } => Const::Float(Self::float(lit, self.types.kind(ty) == &Kind::Float)?),
+            Attribute::Float { lit, .. } => Const::Float(Self::float(lit, self.types.kind(ty))?),
             Attribute::Str { lit, .. } => Const::Bytes(Self::bytes(lit)),
             Attribute::Builtin { name, body, .. } if name == "dense" => self.dense(body, ty)?,
             Attribute::SymbolRef(_) => Const::Global(a.symbol().unwrap_or_default(), 0),
@@ -637,15 +779,54 @@ impl Module {
         })
     }
 
-    /// 浮点字面量：十进制或十六进制位型。
-    fn float(lit: &str, single: bool) -> Result<u64, Error> {
+    /// 浮点字面量（十进制，或十六进制位型）⇒ `kind` 自己的位型：half / bfloat 16 位、float 32 位、double 64 位。
+    fn float(lit: &str, kind: &Kind) -> Result<u64, Error> {
         let lit = lit.trim();
         if let Some(h) = lit.strip_prefix("0x") {
             return u64::from_str_radix(h, 16).map_err(|_| Error::Parse(format!("浮点 {lit}")));
         }
         let v: f64 = lit.parse().map_err(|_| Error::Parse(format!("浮点 {lit}")))?;
-        #[allow(clippy::cast_possible_truncation, reason = "float 常量本来就是 f32 精度")]
-        Ok(if single { u64::from((v as f32).to_bits()) } else { v.to_bits() })
+        Ok(match kind {
+            Kind::Half => Self::narrow(v, 5, 10),
+            Kind::BFloat => Self::narrow(v, 8, 7),
+            #[allow(clippy::cast_possible_truncation, reason = "float 常量本来就是 f32 精度")]
+            Kind::Float => u64::from((v as f32).to_bits()),
+            _ => v.to_bits(),
+        })
+    }
+
+    /// f64 ⇒ `exp` 位指数、`man` 位尾数的 IEEE 格式（half 5 / 10、bfloat 8 / 7）的位型：最近偶数舍入，
+    /// 太大 ⇒ ±inf，太小 ⇒ 次正规 / ±0，NaN ⇒ 静默 NaN。⚠ 直接从 f64 舍入（bfloat 经 f32 会舍两次）。
+    fn narrow(v: f64, exp: u32, man: u32) -> u64 {
+        let b = v.to_bits();
+        let sign = (b >> 63) << (exp + man);
+        let inf = ((1u64 << exp) - 1) << man;
+        if v.is_nan() {
+            return sign | inf | 1 << (man - 1);
+        }
+        if v.is_infinite() {
+            return sign | inf;
+        }
+        let e = i64::try_from((b >> 52) & 0x7ff).unwrap_or(0);
+        // f64 的次正规数对这两种格式都小于最小次正规的一半 ⇒ ±0
+        if e == 0 {
+            return sign;
+        }
+        let full = (b & ((1 << 52) - 1)) | 1 << 52;
+        let bias = (1i64 << (exp - 1)) - 1;
+        let te = e - 1023 + bias;
+        // 正规：去掉 52 - man 位；次正规（te ≤ 0）：再多去 1 - te 位
+        let shift = u32::try_from(i64::from(52 - man) + (1 - te).max(0)).unwrap_or(u32::MAX);
+        if shift > 53 {
+            return sign;
+        }
+        let (mut m, rem, half) = (full >> shift, full & ((1 << shift) - 1), 1u64 << (shift - 1));
+        if rem > half || (rem == half && m & 1 == 1) {
+            m += 1;
+        }
+        // 正规：指数域 te、隐含位并进去（进位到 2 << man 时指数自然加一）；次正规：m 就是位型（进位到 1 << man 即最小正规数）
+        let r = if te > 0 { (u64::try_from(te).unwrap_or(0) << man) + m - (1 << man) } else { m };
+        sign | r.min(inf)
     }
 
     /// MLIR 字符串的转义（`\00` 两位十六进制、`\\`、`\"`）⇒ 字节。
@@ -683,12 +864,20 @@ impl Module {
     fn dense(&mut self, body: &str, ty: Ty) -> Result<Const, Error> {
         let inner = body.trim().trim_start_matches('<').trim_end_matches('>').trim();
         let flat: Vec<&str> = inner.split(['[', ']', ',']).map(str::trim).filter(|s| !s.is_empty()).collect();
+        // 全零 ⇒ `Zero`，⛔ 按元素展开（`dense<0> : tensor<4294967296xi8>` 展开就是 4G 个叶子）
+        let zero = |s: &str| {
+            let s = s.trim_matches('"');
+            // ⚠ 带负号的不算（`-0.0` 的位型不是零）
+            s == "false" || s.strip_prefix("0x").map_or_else(|| s.parse::<f64>().is_ok_and(|v| v == 0.0 && !s.starts_with('-')), |h| h.bytes().all(|b| b == b'0'))
+        };
+        if flat.iter().all(|s| zero(s)) {
+            return Ok(Const::Zero);
+        }
         let mut leaves = Vec::new();
         self.leaves(ty, &mut leaves);
         let elem = |s: &str, t: Ty, me: &Self| -> Result<Const, Error> {
             match me.types.kind(t) {
-                Kind::Float => Ok(Const::Float(Self::float(s, true)?)),
-                Kind::Double => Ok(Const::Float(Self::float(s, false)?)),
+                k @ (Kind::Half | Kind::BFloat | Kind::Float | Kind::Double) => Ok(Const::Float(Self::float(s, k)?)),
                 _ => {
                     let v: i128 = match s {
                         "true" => 1,
@@ -705,7 +894,8 @@ impl Module {
             && let Some(hex) = blob.strip_prefix("\"0x").and_then(|h| h.strip_suffix('"'))
         {
             let bytes: Vec<u8> = (0..hex.len() / 2).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)).collect::<Result<_, _>>().map_err(|_| Error::Parse(String::from("dense 十六进制块")))?;
-            let width = |t: Ty| self.types.bits(t).unwrap_or(64).div_ceil(8) as usize;
+            // 元素按 store size 排（half 2 字节、i24 3 字节）；⛔ 按位宽：浮点没有位宽
+            let width = |t: Ty| usize::try_from(self.types.store_size(t)).unwrap_or(0);
             let splat = leaves.first().is_some_and(|&t| bytes.len() == width(t)) && leaves.len() > 1;
             let mut at = 0;
             let mut consts = Vec::new();
@@ -717,7 +907,7 @@ impl Module {
                 }
                 let v = chunk.iter().rev().fold(0u128, |acc, &b| acc << 8 | u128::from(b));
                 consts.push(match self.types.kind(t) {
-                    Kind::Float | Kind::Double => Const::Float(u64::try_from(v).unwrap_or(0)),
+                    Kind::Half | Kind::BFloat | Kind::Float | Kind::Double => Const::Float(u64::try_from(v).unwrap_or(0)),
                     _ => Const::Int(Self::mask(i128::try_from(v).unwrap_or(0), self.types.bits(t).unwrap_or(64))),
                 });
             }
@@ -813,7 +1003,15 @@ impl Module {
                     let mut off = off;
                     let mut ty = *src;
                     for (k, i) in indices.iter().enumerate() {
-                        let Index::Const(i) = i else { return Err(Error::Parse(String::from("初值里的 getelementptr 下标要是常数"))) };
+                        // 动态下标也行，只要它是初值里算出来的常数
+                        let i = match i {
+                            Index::Const(i) => *i,
+                            Index::Dyn(v) => match get(v)? {
+                                Const::Int(k) => Self::signed(k, self.types.bits(vals[v.0 as usize]).unwrap_or(64)),
+                                _ => return Err(Error::Parse(String::from("初值里的 getelementptr 下标要是常数"))),
+                            },
+                        };
+                        let i = &i;
                         if k == 0 {
                             off += i * i64::try_from(self.types.size(ty)).unwrap_or(0);
                         } else {

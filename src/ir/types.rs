@@ -29,6 +29,7 @@ pub enum Kind {
 }
 
 /// 类型驻留表。
+#[derive(Clone)]
 pub struct Types {
     kinds: Vec<Kind>,
     map: HashMap<Kind, Ty>,
@@ -114,11 +115,20 @@ impl Types {
             Kind::Fp128 => 16,
             Kind::Array(n, e) => n * self.size(*e),
             Kind::Vector(n, e) => (u64::from(*n) * self.size(*e)).next_power_of_two(),
-            Kind::Struct(..) => {
-                let (fields, size) = self.struct_layout(t);
-                let _ = fields;
-                size
+            Kind::Struct(fields, packed) => {
+                let end = self.offsets(fields, *packed).last().map_or(0, |(f, off)| off + self.size(f));
+                if *packed { end } else { end.next_multiple_of(self.align(t)) }
             }
+        }
+    }
+
+    /// load / store 实际读写的字节数（同 LLVM `getTypeStoreSize`）：整数 ⌈位宽 / 8⌉（i24 是 3、i42 是 6），
+    /// ⚠ 不是 [`Self::size`]（占的空间，补到 2 的幂：i24 是 4、i42 是 8）；别的类型两者相同。
+    #[must_use]
+    pub fn store_size(&self, t: Ty) -> u64 {
+        match self.kind(t) {
+            Kind::Int(n) => u64::from(n.div_ceil(8)),
+            _ => self.size(t),
         }
     }
 
@@ -144,31 +154,27 @@ impl Types {
         }
     }
 
+    /// 各字段与它的偏移（⛔ 不分配）。
+    fn offsets<'t>(&'t self, fields: &'t [Ty], packed: bool) -> impl Iterator<Item = (Ty, u64)> + 't {
+        fields.iter().scan(0u64, move |at, &f| {
+            let off = if packed { *at } else { at.next_multiple_of(self.align(f)) };
+            *at = off + self.size(f);
+            Some((f, off))
+        })
+    }
+
     /// 结构体各字段的偏移与总大小。
     #[must_use]
     pub fn struct_layout(&self, t: Ty) -> (Vec<u64>, u64) {
         let Kind::Struct(fields, packed) = self.kind(t) else { return (Vec::new(), 0) };
-        let mut off = 0u64;
-        let mut offs = Vec::new();
-        for f in fields {
-            if !packed {
-                off = off.next_multiple_of(self.align(*f));
-            }
-            offs.push(off);
-            off += self.size(*f);
-        }
-        let size = if *packed { off } else { off.next_multiple_of(self.align(t)) };
-        (offs, size)
+        (self.offsets(fields, *packed).map(|(_, off)| off).collect(), self.size(t))
     }
 
     /// 聚合类型的第 `i` 个元素：（类型, 偏移）。
     #[must_use]
     pub fn element(&self, t: Ty, i: u64) -> Option<(Ty, u64)> {
         match self.kind(t) {
-            Kind::Struct(fields, _) => {
-                let (offs, _) = self.struct_layout(t);
-                Some((*fields.get(usize::try_from(i).ok()?)?, offs[usize::try_from(i).ok()?]))
-            }
+            Kind::Struct(fields, packed) => self.offsets(fields, *packed).nth(usize::try_from(i).ok()?),
             Kind::Array(_, e) => Some((*e, i * self.size(*e))),
             Kind::Vector(_, e) => Some((*e, i * self.size(*e))),
             _ => None,

@@ -176,33 +176,31 @@ pub enum Op {
 }
 
 impl Op {
-    /// 用到的值（含跳转实参）。
-    #[must_use]
-    pub fn operands(&self) -> Vec<ValId> {
-        let mut vals: Vec<ValId> = self.targets().into_iter().flat_map(|t| t.args.iter().copied()).collect();
+    /// 用到的值（含跳转实参，在前）。⛔ 不分配：定长的几个 + 实参 / 下标切片串起来。
+    pub fn operands(&self) -> impl Iterator<Item = ValId> + '_ {
+        let (mut fixed, mut list, mut dyns, mut args): ([Option<ValId>; 3], &[ValId], &[Index], &[(ValId, ArgAttrs)]) = ([None; 3], &[], &[], &[]);
         match self {
-            Self::CondBr(c, ..) | Self::Switch(c, ..) => vals.push(*c),
-            Self::Ret(v) => vals.extend(v),
-            Self::Bin(_, a, b) | Self::ICmp(_, a, b) | Self::FCmp(_, a, b) | Self::InsertValue(a, b, _) | Self::AtomicRmw(_, a, b, _) => vals.extend([*a, *b]),
-            Self::FNeg(a) | Self::Cast(_, a) | Self::Freeze(a) | Self::ExtractValue(a, _) => vals.push(*a),
-            Self::Alloca { count, .. } => vals.push(*count),
-            Self::Load { ptr, .. } => vals.push(*ptr),
-            Self::Store { val, ptr, .. } => vals.extend([*val, *ptr]),
-            Self::Gep { base, indices, .. } => {
-                vals.push(*base);
-                vals.extend(indices.iter().filter_map(|i| if let Index::Dyn(v) = i { Some(*v) } else { None }));
-            }
-            Self::Select(a, b, c) | Self::CmpXchg(a, b, c) => vals.extend([*a, *b, *c]),
-            Self::Call { callee, args, .. } => {
+            Self::CondBr(c, ..) | Self::Switch(c, ..) => fixed[0] = Some(*c),
+            Self::Ret(v) => fixed[0] = *v,
+            Self::Bin(_, a, b) | Self::ICmp(_, a, b) | Self::FCmp(_, a, b) | Self::InsertValue(a, b, _) | Self::AtomicRmw(_, a, b, _) | Self::Store { val: a, ptr: b, .. } => fixed[..2].copy_from_slice(&[Some(*a), Some(*b)]),
+            Self::FNeg(a) | Self::Cast(_, a) | Self::Freeze(a) | Self::ExtractValue(a, _) | Self::Alloca { count: a, .. } | Self::Load { ptr: a, .. } => fixed[0] = Some(*a),
+            Self::Gep { base, indices, .. } => (fixed[0], dyns) = (Some(*base), indices),
+            Self::Select(a, b, c) | Self::CmpXchg(a, b, c) => fixed = [Some(*a), Some(*b), Some(*c)],
+            Self::Call { callee, args: a, .. } => {
                 if let Callee::Indirect(v) = callee {
-                    vals.push(*v);
+                    fixed[0] = Some(*v);
                 }
-                vals.extend(args.iter().map(|(v, _)| *v));
+                args = a;
             }
-            Self::Intr(_, args) => vals.extend(args),
+            Self::Intr(_, a) => list = a,
             Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
         }
-        vals
+        self.targets()
+            .flat_map(|t| t.args.iter().copied())
+            .chain(fixed.into_iter().flatten())
+            .chain(list.iter().copied())
+            .chain(dyns.iter().filter_map(|i| if let Index::Dyn(v) = i { Some(*v) } else { None }))
+            .chain(args.iter().map(|(v, _)| *v))
     }
 
     /// 没有副作用：结果没人用就能删。
@@ -214,15 +212,15 @@ impl Op {
         )
     }
 
-    /// 终结指令的各出口。
-    #[must_use]
-    pub fn targets(&self) -> Vec<&Target> {
-        match self {
-            Self::Br(t) => vec![t],
-            Self::CondBr(_, a, b) => vec![a, b],
-            Self::Switch(_, d, cases) => core::iter::once(d).chain(cases.iter().map(|(_, t)| t)).collect(),
-            _ => Vec::new(),
-        }
+    /// 终结指令的各出口（⛔ 不分配）。
+    pub fn targets(&self) -> impl Iterator<Item = &Target> + '_ {
+        let (a, b, cases): (Option<&Target>, Option<&Target>, &[(u128, Target)]) = match self {
+            Self::Br(t) => (Some(t), None, &[]),
+            Self::CondBr(_, t, f) => (Some(t), Some(f), &[]),
+            Self::Switch(_, d, cases) => (Some(d), None, cases),
+            _ => (None, None, &[]),
+        };
+        a.into_iter().chain(b).chain(cases.iter().map(|(_, t)| t))
     }
 }
 
@@ -301,8 +299,7 @@ impl Function {
             stack.push((0usize, 0usize));
         }
         while let Some((b, k)) = stack.last_mut() {
-            let succs = self.blocks[*b].insts.last().map(|i| i.op.targets()).unwrap_or_default();
-            if let Some(t) = succs.get(*k) {
+            if let Some(t) = self.blocks[*b].insts.last().and_then(|i| i.op.targets().nth(*k)) {
                 *k += 1;
                 let t = t.block.0 as usize;
                 if !seen[t] {
@@ -341,7 +338,7 @@ pub struct Alias {
     pub target: Const,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Module {
     pub types: Types,
     pub globals: Vec<Global>,
