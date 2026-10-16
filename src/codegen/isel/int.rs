@@ -1,9 +1,9 @@
-//! 整数：≤ 32 位一个寄存器（窄的恒零扩展），33..=64 位拆成低 / 高两半。
-use super::{Error, Isel, Part, R};
-use crate::codegen::mir::{MInst, MOp, Rule};
+//! 整数：≤ 32 位一个寄存器（窄的恒零扩展）；更宽的见 wide.rs。
+use super::{Error, Isel, R};
+use crate::codegen::mir::{self, MInst, MOp, Rule};
 use crate::ir::{BinOp, CastOp, Const, IPred, Kind, Ty, ValId};
 use crate::feature::{Zmmul, M, Float};
-use crate::isa::{Base, Rv32i as IOp, Table};
+use crate::isa::{Base, Rv32i as IOp};
 
 impl Isel<'_> {
     /// 低 `w` 位以外清零（零扩展的不变式）。
@@ -38,7 +38,7 @@ impl Isel<'_> {
 
     fn width(&self, t: Ty) -> Result<u32, Error> {
         match self.kind(t) {
-            Kind::Int(w) if *w <= 64 => Ok(*w),
+            Kind::Int(w) => Ok(*w),
             Kind::Ptr => Ok(32),
             k => Self::bad(format!("整数运算不支持 {k:?}")),
         }
@@ -64,7 +64,7 @@ impl Isel<'_> {
         }
         let w = self.width(t)?;
         if w > 32 {
-            return self.binary64(op, a, b, w);
+            return self.wide_binary(op, a, b, w);
         }
         let x = self.get1(a)?;
         let r = match op {
@@ -126,174 +126,7 @@ impl Isel<'_> {
         Ok(vec![r])
     }
 
-    /// 33..=64 位：低 / 高两半。
-    fn binary64(&mut self, op: BinOp, a: ValId, b: ValId, w: u32) -> Result<Vec<R>, Error> {
-        if w < 64 && matches!(op, BinOp::AShr | BinOp::SDiv | BinOp::SRem) {
-            return Self::bad(format!("i{w} 的有符号 {op:?} 还没做"));
-        }
-        let (al, ah) = self.pair(a)?;
-        let (lo, hi) = match op {
-            BinOp::And | BinOp::Or | BinOp::Xor => {
-                let (bl, bh) = self.pair(b)?;
-                let iop = match op {
-                    BinOp::And => IOp::And,
-                    BinOp::Or => IOp::Or,
-                    _ => IOp::Xor,
-                };
-                (self.rr(iop, al, bl), self.rr(iop, ah, bh))
-            }
-            BinOp::Add => {
-                let b = self.pair(b)?;
-                self.add64((al, ah), b)
-            }
-            BinOp::Sub => {
-                let b = self.pair(b)?;
-                self.sub64((al, ah), b)
-            }
-            BinOp::Mul => {
-                let b = self.pair(b)?;
-                self.mul64((al, ah), b)?
-            }
-            BinOp::Shl | BinOp::LShr | BinOp::AShr => match self.const_i32(b) {
-                Some(c) => self.shift64_const(op, al, ah, c & 63),
-                None => {
-                    let s = self.low(b)?;
-                    self.shift64_var(op, al, ah, s)
-                }
-            },
-            BinOp::UDiv | BinOp::SDiv | BinOp::URem | BinOp::SRem => {
-                let name = match op {
-                    BinOp::UDiv => "__udivdi3",
-                    BinOp::SDiv => "__divdi3",
-                    BinOp::URem => "__umoddi3",
-                    _ => "__moddi3",
-                };
-                let (bl, bh) = self.pair(b)?;
-                let r = self.libcall(name, &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
-                (r[0], r[1])
-            }
-            _ => return Self::bad(format!("i64 不支持 {op:?}")),
-        };
-        let hi = if w < 64 && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl) { self.mask(hi, w - 32) } else { hi };
-        Ok(vec![lo, hi])
-    }
-
-    // ---- 64 位的部件运算（两半：lo, hi）：binary64 与溢出检测共用 ------------------------------
-
-    pub(super) fn add64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> (R, R) {
-        let lo = self.rr(IOp::Add, al, bl);
-        let carry = self.rr(IOp::Sltu, lo, al);
-        let h = self.rr(IOp::Add, ah, bh);
-        (lo, self.rr(IOp::Add, h, carry))
-    }
-
-    pub(super) fn sub64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> (R, R) {
-        let lo = self.rr(IOp::Sub, al, bl);
-        let borrow = self.rr(IOp::Sltu, al, bl);
-        let h = self.rr(IOp::Sub, ah, bh);
-        (lo, self.rr(IOp::Sub, h, borrow))
-    }
-
-    /// 低 64 位的积。没有 Zmmul：整个调 `__muldi3`（同 llc；拆开算的 mulhu 自己就要调它）。
-    pub(super) fn mul64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> Result<(R, R), Error> {
-        if !Zmmul::Mul.enabled() {
-            let r = self.libcall("__muldi3", &[(vec![al, ah], vec![Part::Lo, Part::Hi]), (vec![bl, bh], vec![Part::Lo, Part::Hi])], &[Part::Lo, Part::Hi])?;
-            return Ok((r[0], r[1]));
-        }
-        let lo = self.rr(Zmmul::Mul, al, bl);
-        let h0 = self.rr(Zmmul::Mulhu, al, bl);
-        let h1 = self.rr(Zmmul::Mul, al, bh);
-        let h2 = self.rr(Zmmul::Mul, ah, bl);
-        let h = self.rr(IOp::Add, h0, h1);
-        Ok((lo, self.rr(IOp::Add, h, h2)))
-    }
-
-    /// `a <u b`（64 位）⇒ 0 / 1。
-    pub(super) fn ltu64(&mut self, a: (R, R), b: (R, R)) -> R {
-        self.lt64(false, a, b)
-    }
-
-    /// `a < b`（64 位，`signed` 只管高半）⇒ 0 / 1。
-    pub(super) fn lt64(&mut self, signed: bool, (al, ah): (R, R), (bl, bh): (R, R)) -> R {
-        let hi_lt = self.rr(if signed { IOp::Slt } else { IOp::Sltu }, ah, bh);
-        let d = self.rr(IOp::Xor, ah, bh);
-        let hi_eq = self.ri(IOp::Sltiu, d, 1);
-        let lo_lt = self.rr(IOp::Sltu, al, bl);
-        let t = self.rr(IOp::And, hi_eq, lo_lt);
-        self.rr(IOp::Or, hi_lt, t)
-    }
-
-    /// 64 位值的两半。
-    pub(super) fn pair(&mut self, v: ValId) -> Result<(R, R), Error> {
-        let p = self.get(v)?;
-        match p.as_slice() {
-            [lo, hi] => Ok((*lo, *hi)),
-            [lo] => Ok((*lo, R::ZERO)),
-            _ => Self::bad("不是 64 位值"),
-        }
-    }
-
-    fn shift64_const(&mut self, op: BinOp, lo: R, hi: R, c: i32) -> (R, R) {
-        match (op, c) {
-            (_, 0) => (lo, hi),
-            (BinOp::Shl, 1..32) => {
-                let h = self.ri(IOp::Slli, hi, c);
-                let carry = self.ri(IOp::Srli, lo, 32 - c);
-                (self.ri(IOp::Slli, lo, c), self.rr(IOp::Or, h, carry))
-            }
-            (BinOp::Shl, _) => (R::ZERO, self.ri(IOp::Slli, lo, c - 32)),
-            (_, 1..32) => {
-                let l = self.ri(IOp::Srli, lo, c);
-                let carry = self.ri(IOp::Slli, hi, 32 - c);
-                let lo = self.rr(IOp::Or, l, carry);
-                (lo, self.ri(if op == BinOp::LShr { IOp::Srli } else { IOp::Srai }, hi, c))
-            }
-            (BinOp::LShr, _) => (self.ri(IOp::Srli, hi, c - 32), R::ZERO),
-            _ => (self.ri(IOp::Srai, hi, c - 32), self.ri(IOp::Srai, hi, 31)),
-        }
-    }
-
-    /// 变量移位（0..=63），无分支：按 `s ≥ 32` 做掩码选两种结果。
-    pub(super) fn shift64_var(&mut self, op: BinOp, lo: R, hi: R, s: R) -> (R, R) {
-        let big = self.ri(IOp::Srli, s, 5);
-        let big = self.ri(IOp::Andi, big, 1);
-        let m = self.rr(IOp::Sub, R::ZERO, big); // s ≥ 32 ⇒ 全 1
-        let nm = self.ri(IOp::Addi, big, -1); // s < 32 ⇒ 全 1
-        let inv = self.ri(IOp::Xori, s, 31); // 低 5 位 = 31 − s
-        match op {
-            BinOp::Shl => {
-                let ls = self.rr(IOp::Sll, lo, s);
-                let hs = self.rr(IOp::Sll, hi, s);
-                let c = self.ri(IOp::Srli, lo, 1);
-                let c = self.rr(IOp::Srl, c, inv);
-                let small = self.rr(IOp::Or, hs, c);
-                let a = self.rr(IOp::And, ls, m);
-                let b = self.rr(IOp::And, small, nm);
-                (self.rr(IOp::And, ls, nm), self.rr(IOp::Or, a, b))
-            }
-            _ => {
-                let ls = self.rr(IOp::Srl, lo, s);
-                let hs = self.rr(if op == BinOp::LShr { IOp::Srl } else { IOp::Sra }, hi, s);
-                let c = self.ri(IOp::Slli, hi, 1);
-                let c = self.rr(IOp::Sll, c, inv);
-                let small = self.rr(IOp::Or, ls, c);
-                let a = self.rr(IOp::And, hs, m);
-                let b = self.rr(IOp::And, small, nm);
-                let lo = self.rr(IOp::Or, a, b);
-                let hi = if op == BinOp::LShr {
-                    self.rr(IOp::And, hs, nm)
-                } else {
-                    let sign = self.ri(IOp::Srai, hi, 31);
-                    let a = self.rr(IOp::And, sign, m);
-                    let b = self.rr(IOp::And, hs, nm);
-                    self.rr(IOp::Or, a, b)
-                };
-                (lo, hi)
-            }
-        }
-    }
-
-    const fn signed(p: IPred) -> bool {
+    pub(super) const fn signed(p: IPred) -> bool {
         matches!(p, IPred::Slt | IPred::Sle | IPred::Sgt | IPred::Sge)
     }
 
@@ -308,7 +141,7 @@ impl Isel<'_> {
     pub(super) fn icmp(&mut self, p: IPred, a: ValId, b: ValId) -> Result<R, Error> {
         let w = self.width(self.ty(a))?;
         if w > 32 {
-            return self.icmp64(p, a, b);
+            return self.wide_icmp(p, a, b, w);
         }
         // 与常数比较：能用立即数就用
         if let Some(c) = self.const_i32(b) {
@@ -348,38 +181,6 @@ impl Isel<'_> {
         })
     }
 
-    fn icmp64(&mut self, p: IPred, a: ValId, b: ValId) -> Result<R, Error> {
-        let (al, ah) = self.pair(a)?;
-        let (bl, bh) = self.pair(b)?;
-        let lt = |s: &mut Self, signed: bool, xl: R, xh: R, yl: R, yh: R| {
-            let hi_lt = s.rr(if signed { IOp::Slt } else { IOp::Sltu }, xh, yh);
-            let d = s.rr(IOp::Xor, xh, yh);
-            let hi_eq = s.ri(IOp::Sltiu, d, 1);
-            let lo_lt = s.rr(IOp::Sltu, xl, yl);
-            let t = s.rr(IOp::And, hi_eq, lo_lt);
-            s.rr(IOp::Or, hi_lt, t)
-        };
-        let signed = Self::signed(p);
-        Ok(match p {
-            IPred::Eq | IPred::Ne => {
-                let l = self.rr(IOp::Xor, al, bl);
-                let h = self.rr(IOp::Xor, ah, bh);
-                let t = self.rr(IOp::Or, l, h);
-                if p == IPred::Eq { self.ri(IOp::Sltiu, t, 1) } else { self.rr(IOp::Sltu, R::ZERO, t) }
-            }
-            IPred::Slt | IPred::Ult => lt(self, signed, al, ah, bl, bh),
-            IPred::Sgt | IPred::Ugt => lt(self, signed, bl, bh, al, ah),
-            IPred::Sge | IPred::Uge => {
-                let t = lt(self, signed, al, ah, bl, bh);
-                self.ri(IOp::Xori, t, 1)
-            }
-            IPred::Sle | IPred::Ule => {
-                let t = lt(self, signed, bl, bh, al, ah);
-                self.ri(IOp::Xori, t, 1)
-            }
-        })
-    }
-
     /// 并进跳转的比较 ⇒ `bxx` 与两个操作数。
     pub(super) fn compare_branch(&mut self, p: IPred, a: ValId, b: ValId) -> Result<(IOp, R, R), Error> {
         let w = self.width(self.ty(a))?;
@@ -398,24 +199,20 @@ impl Isel<'_> {
         })
     }
 
-    /// 整数的截断 / 零扩展 / 符号扩展（一个值的部件：≤ 32 位一个，33..=64 位两个）。
-    fn int_cast(&mut self, op: CastOp, x: &[R], wf: u32, wt: u32) -> Vec<R> {
-        match op {
-            CastOp::Trunc if wt > 32 => vec![x[0], self.mask(x[1], wt - 32)],
-            CastOp::Trunc => vec![self.mask(x[0], wt)],
-            // 窄整数恒零扩展 ⇒ 零扩展只差补一个高半
-            CastOp::ZExt if wt > 32 && x.len() == 1 => vec![x[0], R::ZERO],
-            CastOp::ZExt => x.to_vec(),
-            _ => {
-                let s = self.sext(x[0], wf);
-                if wt > 32 {
-                    let h = if wf > 32 { x[1] } else { self.ri(IOp::Srai, s, 31) };
-                    vec![s, h]
-                } else {
-                    vec![self.mask(s, wt)]
-                }
+    /// 整数的截断 / 零扩展 / 符号扩展（一个值的字：⌈w/32⌉ 个，顶字零扩展）。
+    pub(super) fn int_cast(&mut self, op: CastOp, x: &[R], wf: u32, wt: u32) -> Vec<R> {
+        let nt = wt.div_ceil(32) as usize;
+        let mut r = x.to_vec();
+        if op == CastOp::SExt {
+            r = self.sext_top(r, wf);
+            if nt > r.len() {
+                let s = self.ri(IOp::Srai, r[r.len() - 1], 31);
+                r.resize(nt, s);
             }
         }
+        // 窄整数恒零扩展 ⇒ 零扩展只差补高字
+        r.resize(nt, R::ZERO);
+        if op == CastOp::ZExt { r } else { self.mask_top(r, wt) }
     }
 
     /// 类型转换（浮点相关的交给 float.rs）。
@@ -442,7 +239,8 @@ impl Isel<'_> {
             CastOp::PtrToInt => {
                 let x = self.get1(a)?;
                 let w = bits(self, to);
-                if w > 32 { vec![x, R::ZERO] } else { vec![self.mask(x, w)] }
+                let op = if w > 32 { CastOp::ZExt } else { CastOp::Trunc };
+                self.int_cast(op, &[x], 32, w)
             }
             CastOp::IntToPtr => vec![self.low(a)?],
             CastOp::AddrSpaceCast => self.get(a)?,
@@ -460,6 +258,13 @@ impl Isel<'_> {
                         let d = self.fr();
                         self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &x);
                         vec![d]
+                    }
+                    // 部件形状不同（`<16 x i8>` ⇔ i128 一类）：经栈，按一边的类型写、按另一边的读
+                    _ if self.parts(from)?.len() != self.parts(to)?.len() => {
+                        let align = self.types().align(from).max(self.types().align(to));
+                        let obj = self.stack_slot(self.types().size(from).max(self.types().size(to)), align);
+                        self.store_at(from, &x, mir::Base::Frame(obj), 0, align)?;
+                        self.load_at(to, mir::Base::Frame(obj), 0, align)?
                     }
                     _ => x,
                 }

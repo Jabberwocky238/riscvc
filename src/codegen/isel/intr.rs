@@ -1,7 +1,7 @@
 //! `llvm.intr.*`。没有 Zbb：数位用无分支的 SWAR（乘法在 M 扩展里）。
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
-use crate::ir::{IPred, Intr, Kind, Ty, Types, ValId};
+use crate::ir::{BinOp, CastOp, IPred, Intr, Kind, Ty, Types, ValId};
 use crate::feature::{Zmmul, Float};
 use crate::isa::{Opcode, Rv32i as IOp, Rm, Table};
 
@@ -112,28 +112,165 @@ impl Isel<'_> {
         self.bswap32(x)
     }
 
-    /// 64 位的饱和加减：溢出（借位）就换成界值。有符号的界看被加数的符号：非负 ⇒ MAX，负 ⇒ MIN。
-    fn sat64(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
-        let (a, b) = (self.pair(args[0])?, self.pair(args[1])?);
+    /// 33 位以上的饱和加减：顶字不满时先左移占满 32n 位，按 32n 位做，再移回（同 LLVM 提升饱和运算的做法）。
+    /// 溢出（借位）就换成界值；有符号的界看被加数的符号：非负 ⇒ MAX，负 ⇒ MIN。
+    fn wide_sat(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
+        let w = self.bits_of(args[0]);
+        let (x, y) = (self.get(args[0])?, self.get(args[1])?);
+        let n = x.len();
+        let pad = 32 * u32::try_from(n).unwrap_or(0) - w;
+        let (a, b) = if pad == 0 { (x, y) } else { (self.wide_shift_const(BinOp::Shl, &x, pad), self.wide_shift_const(BinOp::Shl, &y, pad)) };
+        let signed = matches!(i, Intr::SAddSat | Intr::SSubSat);
         let (r, over, bound) = match i {
             Intr::UAddSat => {
-                let r = self.add64(a, b);
+                let r = self.wide_add(&a, &b);
                 let m = self.li(-1);
-                (r, self.ltu64(r, a), [m, m])
+                let over = self.wide_lt(false, &r, &a);
+                (r, over, vec![m; n])
             }
-            Intr::USubSat => (self.sub64(a, b), self.ltu64(a, b), [R::ZERO, R::ZERO]),
+            Intr::USubSat => (self.wide_sub(&a, &b), self.wide_lt(false, &a, &b), vec![R::ZERO; n]),
             _ => {
                 let sub = *i == Intr::SSubSat;
-                let r = if sub { self.sub64(a, b) } else { self.add64(a, b) };
-                let over = if sub { self.sign_of_and(a.1, b.1, a.1, r.1) } else { self.sign_of_and(r.1, a.1, r.1, b.1) };
-                let sa = self.ri(IOp::Srai, a.1, 31);
+                let r = if sub { self.wide_sub(&a, &b) } else { self.wide_add(&a, &b) };
+                let (at, bt, rt) = (a[n - 1], b[n - 1], r[n - 1]);
+                let over = if sub { self.sign_of_and(at, bt, at, rt) } else { self.sign_of_and(rt, at, rt, bt) };
+                let sa = self.ri(IOp::Srai, at, 31);
                 let lo = self.ri(IOp::Xori, sa, -1);
                 let k = self.li(i32::MAX);
                 let hi = self.rr(IOp::Xor, sa, k);
-                (r, over, [lo, hi])
+                let mut bound = vec![lo; n - 1];
+                bound.push(hi);
+                (r, over, bound)
             }
         };
-        Ok(self.pick(over, &bound, &[r.0, r.1]))
+        let r = self.pick(over, &bound, &r);
+        if pad == 0 {
+            return Ok(r);
+        }
+        let r = self.wide_shift_const(if signed { BinOp::AShr } else { BinOp::LShr }, &r, pad);
+        Ok(self.mask_top(r, w))
+    }
+
+    /// 33 位以上（i64 之外）的 `*.with.overflow`：加减同 [`Self::wide_sat`] 先左移占满 32n 位；
+    /// 乘按 2n 字算全积（两边先按有无符号扩展），截回 w 位再扩展回去变了 ⇒ 溢出。
+    fn wide_overflow(&mut self, i: &Intr, args: &[ValId]) -> Result<Vec<R>, Error> {
+        let w = self.bits_of(args[0]);
+        let (x, y) = (self.get(args[0])?, self.get(args[1])?);
+        let n = x.len();
+        let full = 32 * u32::try_from(n).unwrap_or(0);
+        let (mut r, ovf) = match i {
+            Intr::SMulOv | Intr::UMulOv => {
+                let ext = if *i == Intr::SMulOv { CastOp::SExt } else { CastOp::ZExt };
+                let (a, b) = (self.int_cast(ext, &x, w, 2 * full), self.int_cast(ext, &y, w, 2 * full));
+                let p = self.wide_mul(&a, &b)?;
+                let r = self.int_cast(CastOp::Trunc, &p, 2 * full, w);
+                let back = self.int_cast(ext, &r, w, 2 * full);
+                let d = self.wide_diff(&p, &back);
+                (r, self.rr(IOp::Sltu, R::ZERO, d))
+            }
+            _ => {
+                let pad = full - w;
+                let (a, b) = if pad == 0 { (x, y) } else { (self.wide_shift_const(BinOp::Shl, &x, pad), self.wide_shift_const(BinOp::Shl, &y, pad)) };
+                let sub = matches!(i, Intr::SSubOv | Intr::USubOv);
+                let r = if sub { self.wide_sub(&a, &b) } else { self.wide_add(&a, &b) };
+                let (at, bt, rt) = (a[n - 1], b[n - 1], r[n - 1]);
+                let ovf = match i {
+                    Intr::UAddOv => self.wide_lt(false, &r, &a),
+                    Intr::USubOv => self.wide_lt(false, &a, &b),
+                    Intr::SAddOv => self.sign_of_and(rt, at, rt, bt),
+                    _ => self.sign_of_and(at, bt, at, rt),
+                };
+                // 移回：逻辑右移后顶字自然零扩展
+                (if pad == 0 { r } else { self.wide_shift_const(BinOp::LShr, &r, pad) }, ovf)
+            }
+        };
+        r.push(ovf);
+        Ok(r)
+    }
+
+    /// 33 位以上的 ctlz / cttz / ctpop：逐字算，「更高（低）的字全是 0」才累加下一字 ⇒ 结果只在低字。
+    fn wide_count(&mut self, i: &Intr, x: &[R], w: u32) -> Vec<R> {
+        let n = x.len();
+        let top = Self::top_bits(w);
+        let r = match i {
+            Intr::Ctpop => {
+                let mut acc = R::ZERO;
+                for &v in x {
+                    let p = self.pop32(v);
+                    acc = self.add0(acc, p);
+                }
+                acc
+            }
+            Intr::Ctlz => {
+                // 顶字不满 32 位：它的 32 − top 个前导零不算
+                let c = self.ctlz32(x[n - 1]);
+                let mut acc = if top < 32 { self.ri(IOp::Addi, c, top.cast_signed() - 32) } else { c };
+                let mut z = self.ri(IOp::Sltiu, x[n - 1], 1);
+                for k in (0..n - 1).rev() {
+                    let c = self.ctlz32(x[k]);
+                    let m = self.rr(IOp::Sub, R::ZERO, z);
+                    let t = self.rr(IOp::And, c, m);
+                    acc = self.rr(IOp::Add, acc, t);
+                    if k > 0 {
+                        let zk = self.ri(IOp::Sltiu, x[k], 1);
+                        z = self.rr(IOp::And, z, zk);
+                    }
+                }
+                acc
+            }
+            _ => {
+                // 顶字不满 32 位：第 w 位放个哨兵，全 0 时得 w
+                let mut ws = x.to_vec();
+                if top < 32 {
+                    let k = self.li(1 << top);
+                    ws[n - 1] = self.rr(IOp::Or, ws[n - 1], k);
+                }
+                let mut acc = self.cttz32(ws[0]);
+                let mut z = self.ri(IOp::Sltiu, ws[0], 1);
+                for k in 1..n {
+                    let c = self.cttz32(ws[k]);
+                    let m = self.rr(IOp::Sub, R::ZERO, z);
+                    let t = self.rr(IOp::And, c, m);
+                    acc = self.rr(IOp::Add, acc, t);
+                    if k + 1 < n {
+                        let zk = self.ri(IOp::Sltiu, ws[k], 1);
+                        z = self.rr(IOp::And, z, zk);
+                    }
+                }
+                acc
+            }
+        };
+        let mut out = vec![r];
+        out.resize(n, R::ZERO);
+        out
+    }
+
+    /// 33 位以上的 bswap / bitreverse（`bits`）：字序倒过来、每字内倒；顶字不满 ⇒ 整体右移 32n − w。
+    fn wide_reverse(&mut self, bits: bool, x: &[R], w: u32) -> Vec<R> {
+        let r: Vec<R> = x.iter().rev().map(|&v| if bits { self.rev32(v) } else { self.bswap32(v) }).collect();
+        let pad = 32 * u32::try_from(x.len()).unwrap_or(0) - w;
+        if pad == 0 { r } else { self.wide_shift_const(BinOp::LShr, &r, pad) }
+    }
+
+    /// i64 以上、位宽是 2 的幂的漏斗移位：`[a:b]` 拼成 2n 字，左（右）移 `s mod w`，取高（低）n 字。
+    fn wide_funnel(&mut self, left: bool, args: &[ValId], w: u32) -> Result<Vec<R>, Error> {
+        if !w.is_power_of_two() || w > 2048 {
+            return Self::bad(format!("{}.i{w} 还没做", if left { "fshl" } else { "fshr" }));
+        }
+        let (a, b) = (self.get(args[0])?, self.get(args[1])?);
+        let n = a.len();
+        let mut cat = b;
+        cat.extend(a);
+        let op = if left { BinOp::Shl } else { BinOp::LShr };
+        let r = match self.const_i32(args[2]) {
+            Some(c) => self.wide_shift_const(op, &cat, c.cast_unsigned() & (w - 1)),
+            None => {
+                let s = self.low(args[2])?;
+                let s = self.ri(IOp::Andi, s, (w - 1).cast_signed());
+                self.wide_shift_mem(op, &cat, s)
+            }
+        };
+        Ok(if left { r[n..].to_vec() } else { r[..n].to_vec() })
     }
 
     /// 64 位的 `*.with.overflow`：（结果两半, 溢出 0 / 1）。
@@ -275,31 +412,8 @@ impl Isel<'_> {
             Intr::Ctlz | Intr::Cttz | Intr::Ctpop => {
                 let w = self.bits_of(args[0]);
                 if w > 32 {
-                    let (lo, hi) = self.pair(args[0])?;
-                    let r = match i {
-                        Intr::Ctlz => {
-                            let ch = self.ctlz32(hi);
-                            let cl = self.ctlz32(lo);
-                            let hz = self.ri(IOp::Sltiu, hi, 1);
-                            let m = self.rr(IOp::Sub, R::ZERO, hz);
-                            let t = self.rr(IOp::And, cl, m);
-                            self.rr(IOp::Add, ch, t)
-                        }
-                        Intr::Cttz => {
-                            let cl = self.cttz32(lo);
-                            let ch = self.cttz32(hi);
-                            let lz = self.ri(IOp::Sltiu, lo, 1);
-                            let m = self.rr(IOp::Sub, R::ZERO, lz);
-                            let t = self.rr(IOp::And, ch, m);
-                            self.rr(IOp::Add, cl, t)
-                        }
-                        _ => {
-                            let a = self.pop32(lo);
-                            let b = self.pop32(hi);
-                            self.rr(IOp::Add, a, b)
-                        }
-                    };
-                    vec![r, R::ZERO]
+                    let x = self.get(args[0])?;
+                    self.wide_count(i, &x, w)
                 } else {
                     let x = self.get1(args[0])?;
                     vec![match i {
@@ -332,23 +446,20 @@ impl Isel<'_> {
                     let x = self.get1(args[0])?;
                     vec![self.bswap32(x)]
                 }
-                64 => {
-                    let (lo, hi) = self.pair(args[0])?;
-                    vec![self.bswap32(hi), self.bswap32(lo)]
+                w if w > 32 && w % 16 == 0 => {
+                    let x = self.get(args[0])?;
+                    self.wide_reverse(false, &x, w)
                 }
                 w => return Self::bad(format!("bswap.i{w}")),
             },
             Intr::Abs => {
                 let w = self.bits_of(args[0]);
                 if w > 32 {
-                    let (lo, hi) = self.pair(args[0])?;
-                    let m = self.ri(IOp::Srai, hi, 31);
-                    let l1 = self.rr(IOp::Xor, lo, m);
-                    let h1 = self.rr(IOp::Xor, hi, m);
-                    let c = self.rr(IOp::Sub, R::ZERO, m);
-                    let l2 = self.rr(IOp::Add, l1, c);
-                    let carry = self.rr(IOp::Sltu, l2, c);
-                    vec![l2, self.rr(IOp::Add, h1, carry)]
+                    let x = self.get(args[0])?;
+                    let x = self.sext_top(x, w);
+                    let m = self.ri(IOp::Srai, x[x.len() - 1], 31);
+                    let r = self.negate_if(&x, m);
+                    self.mask_top(r, w)
                 } else {
                     let x = self.get1(args[0])?;
                     let s = self.sext(x, w);
@@ -369,7 +480,7 @@ impl Isel<'_> {
                 let (a, b) = (self.get(args[0])?, self.get(args[1])?);
                 self.pick(c, &a, &b)
             }
-            Intr::SAddSat | Intr::SSubSat | Intr::UAddSat | Intr::USubSat if self.bits_of(args[0]) == 64 => self.sat64(i, args)?,
+            Intr::SAddSat | Intr::SSubSat | Intr::UAddSat | Intr::USubSat if self.bits_of(args[0]) > 32 => self.wide_sat(i, args)?,
             Intr::SAddSat | Intr::SSubSat => {
                 let (a, b, w) = self.two(args, true)?;
                 let sub = *i == Intr::SSubSat;
@@ -412,9 +523,9 @@ impl Isel<'_> {
             Intr::SAddOv | Intr::SSubOv | Intr::UAddOv | Intr::USubOv | Intr::SMulOv | Intr::UMulOv => {
                 let signed = matches!(i, Intr::SAddOv | Intr::SSubOv | Intr::SMulOv);
                 match self.bits_of(args[0]) {
-                    64 if matches!(i, Intr::SMulOv | Intr::UMulOv) && !Zmmul::Mul.enabled() => return Self::bad(format!("{i:?}.i64 没有 Zmmul 还没做")),
-                    64 => return self.overflow64(i, args),
-                    w if w > 32 => return Self::bad(format!("{i:?}.i{w} 还没做")),
+                    // i64 的乘法溢出要 mulhu：没有 Zmmul 走通用的
+                    64 if !(matches!(i, Intr::SMulOv | Intr::UMulOv) && !Zmmul::Mul.enabled()) => return self.overflow64(i, args),
+                    w if w > 32 => return self.wide_overflow(i, args),
                     _ => {}
                 }
                 let (a, b, w) = self.two(args, signed)?;
@@ -455,7 +566,15 @@ impl Isel<'_> {
                                 }
                             }
                         } else if *i == Intr::SMulOv && w > 16 {
-                            return Self::bad(format!("smul.with.overflow.i{w} 还没做"));
+                            // 积可能出 32 位：放得进 w 位 ⇔ 低 32 位截到 w 位再扩展不变、且高 32 位是低 32 位的符号
+                            let m = self.mask(s, w);
+                            let t = self.sext(m, w);
+                            let d = self.rr(IOp::Xor, t, s);
+                            let h = self.rr(Zmmul::Mulh, a, b);
+                            let sg = self.ri(IOp::Srai, s, 31);
+                            let e = self.rr(IOp::Xor, h, sg);
+                            let d = self.rr(IOp::Or, d, e);
+                            self.rr(IOp::Sltu, R::ZERO, d)
                         } else {
                             let m = self.mask(s, w);
                             let t = self.sext(m, w);
@@ -472,6 +591,9 @@ impl Isel<'_> {
                 let left = *i == Intr::Fshl;
                 if w == 64 {
                     return self.funnel64(left, args);
+                }
+                if w > 64 {
+                    return self.wide_funnel(left, args, w);
                 }
                 if w != 32 {
                     return Self::bad(format!("{i:?}.i{w} 还没做"));
@@ -658,16 +780,15 @@ impl Isel<'_> {
                 self.libcall(name, &ps, &ret)?
             }
             Intr::Bitreverse => match self.bits_of(args[0]) {
-                64 => {
-                    let (lo, hi) = self.pair(args[0])?;
-                    vec![self.rev32(hi), self.rev32(lo)]
+                w if w > 32 => {
+                    let x = self.get(args[0])?;
+                    self.wide_reverse(true, &x, w)
                 }
-                w @ (8 | 16 | 32) => {
+                w => {
                     let x = self.get1(args[0])?;
                     let r = self.rev32(x);
                     vec![if w == 32 { r } else { self.ri(IOp::Srli, r, 32 - w.cast_signed()) }]
                 }
-                w => return Self::bad(format!("bitreverse.i{w}")),
             },
             Intr::PtrMask => {
                 let (p, m) = (self.get1(args[0])?, self.get1(args[1])?);
@@ -689,13 +810,13 @@ impl Isel<'_> {
             }
         };
         let ((xl, xh), (yl, yh)) = if left {
-            let main = self.shift64_var(crate::ir::BinOp::Shl, al, ah, s);
+            let main = self.shift64_var(BinOp::Shl, al, ah, s);
             let (l1, h1) = self.shr1(bl, bh);
-            (main, self.shift64_var(crate::ir::BinOp::LShr, l1, h1, inv))
+            (main, self.shift64_var(BinOp::LShr, l1, h1, inv))
         } else {
-            let main = self.shift64_var(crate::ir::BinOp::LShr, bl, bh, s);
+            let main = self.shift64_var(BinOp::LShr, bl, bh, s);
             let (l1, h1) = self.shl1(al, ah);
-            (main, self.shift64_var(crate::ir::BinOp::Shl, l1, h1, inv))
+            (main, self.shift64_var(BinOp::Shl, l1, h1, inv))
         };
         Ok(vec![self.rr(IOp::Or, xl, yl), self.rr(IOp::Or, xh, yh)])
     }

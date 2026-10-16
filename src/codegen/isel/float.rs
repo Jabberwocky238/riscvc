@@ -15,10 +15,6 @@ use crate::isa::{Opcode, Rv32i as IOp, Rm};
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
 
 impl Isel<'_> {
-    fn double(&self, t: Ty) -> bool {
-        matches!(self.kind(t), Kind::Double)
-    }
-
     /// `op fd, a, b`（F 扩展）。
     fn ff(&mut self, op: impl Into<Opcode>, a: R, b: R, rm: Rm) -> R {
         let op: Opcode = op.into();
@@ -33,6 +29,33 @@ impl Isel<'_> {
         let d = self.xr();
         self.emit(MOp::Reg(op, rm as u8), &[d], &uses);
         d
+    }
+
+    /// double 的位型 ⇒ 同值的 fp128 位型（加宽是精确的：指数换偏置、尾数左移 60 位，次正规数规格化，NaN 保留载荷）。
+    /// ⚠ 前端的 fp128 常量按 double 存。
+    pub(super) const fn quad(bits: u64) -> u128 {
+        let sign = ((bits >> 63) as u128) << 127;
+        let (e, m) = ((bits >> 52) & 0x7ff, bits & ((1 << 52) - 1));
+        let (qe, qm): (u128, u128) = match (e, m) {
+            (0, 0) => (0, 0),
+            (0x7ff, _) => (0x7fff, (m as u128) << 60),
+            // 次正规：值 = m · 2⁻¹⁰⁷⁴，最高位在第 p 位
+            (0, _) => {
+                let p = 63 - m.leading_zeros();
+                ((p + 16383 - 1074) as u128, ((m as u128) << (112 - p)) & ((1 << 112) - 1))
+            }
+            _ => ((e + 16383 - 1023) as u128, (m as u128) << 60),
+        };
+        sign | qe << 112 | qm
+    }
+
+    /// compiler-rt 名字里的类型后缀（不管有没有硬件）：float `sf`、double `df`、fp128 `tf`。
+    fn fsuffix(&self, t: Ty) -> &'static str {
+        match self.kind(t) {
+            Kind::Double => "df",
+            Kind::Fp128 => "tf",
+            _ => "sf",
+        }
     }
 
     /// 16 位浮点：`Some(是 bfloat)`。
@@ -69,7 +92,7 @@ impl Isel<'_> {
 
     /// float / double 的部件 ⇒ 16 位浮点（`__trunc{sf,df}{hf,bf}2`；返回值按调用约定取回零扩展的 16 位）。
     pub(super) fn trunc16(&mut self, from: Ty, x: Vec<R>, bf: bool) -> Result<R, Error> {
-        let name = format!("__trunc{}{}2", if self.double(from) { "df" } else { "sf" }, if bf { "bf" } else { "hf" });
+        let name = format!("__trunc{}{}2", self.fsuffix(from), if bf { "bf" } else { "hf" });
         let pf = self.parts(from)?;
         if Float::ENABLED {
             let r = self.libcall(&name, &[(x, pf)], &[Part::F])?;
@@ -99,7 +122,11 @@ impl Isel<'_> {
                 BinOp::FSub => format!("__sub{sfx}3"),
                 BinOp::FMul => format!("__mul{sfx}3"),
                 BinOp::FDiv => format!("__div{sfx}3"),
-                BinOp::FRem => String::from(if sfx == "df" { "fmod" } else { "fmodf" }),
+                BinOp::FRem => String::from(match sfx {
+                    "df" => "fmod",
+                    "tf" => "fmodl",
+                    _ => "fmodf",
+                }),
                 _ => return Self::bad(format!("软浮点不支持 {op:?}")),
             };
             let ps = self.parts(t)?;
@@ -126,15 +153,13 @@ impl Isel<'_> {
             let sign = self.li(0x8000);
             return Ok(vec![self.rr(IOp::Xor, x, sign)]);
         }
-        if self.soft(self.ty(a)) == Some("sf") {
-            let x = self.get1(a)?;
+        // 软浮点（float / double / fp128 在整数寄存器里）：翻顶字的符号位
+        if self.soft(self.ty(a)).is_some() {
+            let mut x = self.get(a)?;
             let sign = self.li(i32::MIN);
-            return Ok(vec![self.rr(IOp::Xor, x, sign)]);
-        }
-        if self.double(self.ty(a)) {
-            let (lo, hi) = self.pair(a)?;
-            let sign = self.li(i32::MIN);
-            return Ok(vec![lo, self.rr(IOp::Xor, hi, sign)]);
+            let n = x.len();
+            x[n - 1] = self.rr(IOp::Xor, x[n - 1], sign);
+            return Ok(x);
         }
         let x = self.get1(a)?;
         Ok(vec![self.ff(Float::FsgnjnS, x, x, Rm::Rne)])
@@ -256,7 +281,7 @@ impl Isel<'_> {
                 return match (op, t16) {
                     (CastOp::FpToSi | CastOp::FpToUi, _) => self.fptoint(op == CastOp::FpToSi, Types::FLOAT, f, wbits(self, to)),
                     (_, Some(bt)) => Ok(vec![self.trunc16(Types::FLOAT, f, bt)?]),
-                    _ if self.double(to) => self.libcall("__extendsfdf2", &[(f, self.parts(Types::FLOAT)?)], &pt),
+                    _ if !matches!(self.kind(to), Kind::Float) => self.libcall(&format!("__extendsf{}2", self.fsuffix(to)), &[(f, self.parts(Types::FLOAT)?)], &pt),
                     _ => Ok(f),
                 };
             }
@@ -269,11 +294,22 @@ impl Isel<'_> {
             _ => {}
         }
         Ok(match op {
-            CastOp::FpTrunc if self.double(from) && matches!(self.kind(to), Kind::Float) => self.libcall("__truncdfsf2", &[(x, pf)], &pt)?,
-            CastOp::FpExt if matches!(self.kind(from), Kind::Float) && self.double(to) => self.libcall("__extendsfdf2", &[(x, pf)], &pt)?,
+            // float / double / fp128 之间：`__trunc{从}{到}2`、`__extend{从}{到}2`
+            CastOp::FpTrunc => self.libcall(&format!("__trunc{}{}2", self.fsuffix(from), self.fsuffix(to)), &[(x, pf)], &pt)?,
+            CastOp::FpExt => self.libcall(&format!("__extend{}{}2", self.fsuffix(from), self.fsuffix(to)), &[(x, pf)], &pt)?,
             CastOp::FpToSi | CastOp::FpToUi => self.fptoint(op == CastOp::FpToSi, from, x, wbits(self, to))?,
             CastOp::SiToFp | CastOp::UiToFp => self.inttofp(op == CastOp::SiToFp, a, to)?,
             _ => return Self::bad(format!("不支持的转换 {op:?}：{:?} ⇒ {:?}", self.kind(from), self.kind(to))),
+        })
+    }
+
+    /// 整数过 compiler-rt 转换函数时的宽度：（名字里的 `si` / `di` / `ti`, 字数, 部件）。
+    fn conv_width(w: u32) -> Result<(&'static str, u32, Vec<Part>), Error> {
+        Ok(match w {
+            ..=32 => ("si", 1, vec![Part::X]),
+            ..=64 => ("di", 2, PAIR.to_vec()),
+            ..=128 => ("ti", 4, vec![Part::X; 4]),
+            _ => return Self::bad(format!("i{w} 与浮点的转换还没做")),
         })
     }
 
@@ -281,18 +317,12 @@ impl Isel<'_> {
     fn fptoint(&mut self, signed: bool, from: Ty, x: Vec<R>, w: u32) -> Result<Vec<R>, Error> {
         let pf = self.parts(from)?;
         let u = if signed { "" } else { "uns" };
-        Ok(match (self.soft(from), w > 32) {
-            (None, false) => {
-                let r = self.fx(if signed { Float::FcvtWS } else { Float::FcvtWuS }, x, Rm::Rtz);
-                vec![self.mask(r, w)]
-            }
-            (None, true) => self.libcall(&format!("__fix{u}sfdi"), &[(x, pf)], &PAIR)?,
-            (Some(sfx), false) => {
-                let r = self.libcall(&format!("__fix{u}{sfx}si"), &[(x, pf)], &[Part::X])?;
-                vec![self.mask(r[0], w)]
-            }
-            (Some(sfx), true) => self.libcall(&format!("__fix{u}{sfx}di"), &[(x, pf)], &PAIR)?,
-        })
+        let (size, words, pt) = Self::conv_width(w)?;
+        let r = match (self.soft(from), words) {
+            (None, 1) => vec![self.fx(if signed { Float::FcvtWS } else { Float::FcvtWuS }, x, Rm::Rtz)],
+            (sfx, _) => self.libcall(&format!("__fix{u}{}{size}", sfx.unwrap_or("sf")), &[(x, pf)], &pt)?,
+        };
+        Ok(self.int_cast(CastOp::Trunc, &r, 32 * words, w))
     }
 
     /// 整数值 `a` ⇒ float / double `to` 的部件。
@@ -300,24 +330,16 @@ impl Isel<'_> {
         let w = self.types().bits(self.ty(a)).unwrap_or(32);
         let x = self.get(a)?;
         let pt = self.parts(to)?;
-        let src = if w > 32 {
-            let (l, h) = self.pair(a)?;
-            vec![l, h]
-        } else if signed {
-            vec![self.sext(x[0], w)]
-        } else {
-            vec![x[0]]
-        };
+        let (size, words, pf) = Self::conv_width(w)?;
+        let src = self.int_cast(if signed { CastOp::SExt } else { CastOp::ZExt }, &x, w, 32 * words);
         let u = if signed { "" } else { "un" };
-        let sfx = self.soft(to).unwrap_or("sf");
-        Ok(match (self.soft(to), w > 32) {
-            (None, false) => {
+        Ok(match (self.soft(to), words) {
+            (None, 1) => {
                 let d = self.fr();
                 self.emit(MOp::Reg(if signed { Float::FcvtSW } else { Float::FcvtSWu }.into(), Rm::Dyn as u8), &[d], &src);
                 vec![d]
             }
-            (_, true) => self.libcall(&format!("__float{u}di{sfx}"), &[(src, PAIR.to_vec())], &pt)?,
-            (Some(_), false) => self.libcall(&format!("__float{u}si{sfx}"), &[(src, vec![Part::X])], &pt)?,
+            (sfx, _) => self.libcall(&format!("__float{u}{size}{}", sfx.unwrap_or("sf")), &[(src, pf)], &pt)?,
         })
     }
 }

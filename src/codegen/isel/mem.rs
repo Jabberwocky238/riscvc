@@ -1,6 +1,6 @@
 //! 访存：`load` / `store`（标量叶子逐个访问；对齐不够就逐字节）、`alloca`（栈帧对象）、`getelementptr`
 //! （常数偏移并进地址，⛔ 先算出指针再加）、聚合值的 `extractvalue` / `insertvalue`（只是部件的重排）。
-use super::{Error, FrameObj, Isel, R};
+use super::{Error, Isel, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{Index, Kind, Ty, ValId};
 use crate::feature::{Zmmul, Float};
@@ -122,6 +122,7 @@ impl Isel<'_> {
                 })
                 .collect(),
             Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
+            Kind::Fp128 => (0..4).map(|k| one(self, IOp::Lw.into(), false, off + 4 * k)).collect(),
             Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
             Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu.into(), false, off)],
             Kind::Float if crate::feature::Float::ENABLED => vec![one(self, Float::Flw.into(), true, off)],
@@ -143,6 +144,11 @@ impl Isel<'_> {
 
     pub(super) fn load(&mut self, t: Ty, ptr: ValId, align: u64, _volatile: bool) -> Result<Vec<R>, Error> {
         let (base, off) = self.address(ptr)?;
+        self.load_at(t, base, off, align)
+    }
+
+    /// 从 `base + off` 读一个 `t`（聚合按叶子逐个读）。
+    pub(super) fn load_at(&mut self, t: Ty, base: Base, off: i64, align: u64) -> Result<Vec<R>, Error> {
         let mut leaves = Vec::new();
         self.leaves(t, 0, &mut leaves);
         let mut out = Vec::new();
@@ -197,9 +203,10 @@ impl Isel<'_> {
                     }
                 }
             }
-            Kind::Double => {
-                one(self, IOp::Sw.into(), parts[0], off);
-                one(self, IOp::Sw.into(), parts[1], off + 4);
+            Kind::Double | Kind::Fp128 => {
+                for (k, &r) in parts.iter().enumerate() {
+                    one(self, IOp::Sw.into(), r, off + 4 * k as i64);
+                }
             }
             Kind::Ptr => one(self, IOp::Sw.into(), parts[0], off),
             Kind::Half | Kind::BFloat => one(self, IOp::Sh.into(), parts[0], off),
@@ -214,6 +221,11 @@ impl Isel<'_> {
         let t = self.ty(val);
         let parts = self.get(val)?;
         let (base, off) = self.address(ptr)?;
+        self.store_at(t, &parts, base, off, align)
+    }
+
+    /// 把 `t` 的部件写到 `base + off`（聚合按叶子逐个写）。
+    pub(super) fn store_at(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
         let mut leaves = Vec::new();
         self.leaves(t, 0, &mut leaves);
         let mut at = 0;
@@ -232,8 +244,7 @@ impl Isel<'_> {
         let Some(r) = r else { return Ok(()) };
         let size = self.types().size(t);
         if self.cur == 0 && let Some(n) = self.const_i32(count) {
-            let obj = u32::try_from(self.frame.len()).expect("帧对象太多");
-            self.frame.push(FrameObj { size: (size * u64::try_from(n.max(0)).unwrap_or(0)).max(1), align: align.max(1) });
+            let obj = self.stack_slot(size * u64::try_from(n.max(0)).unwrap_or(0), align);
             self.allocas.insert(r, obj);
             return Ok(());
         }

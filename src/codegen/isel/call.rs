@@ -1,6 +1,6 @@
 //! 调用与返回（ilp32f，见 `abi.rs`）：实参拆成部件逐个分配，寄存器上的作为调用指令的固定 use，
 //! 栈上的先存进出参区；返回值是固定 def；调用方保存的寄存器记成 clobber。库函数调用走同一条路。
-use super::{Error, FrameObj, Isel, R};
+use super::{Error, Isel, R};
 use regalloc2::VReg;
 use crate::codegen::abi::{Abi, Assign, Loc, Part};
 use crate::codegen::mir::{Base, MInst, MOp, Rule};
@@ -16,6 +16,37 @@ struct Actual {
 }
 
 impl Isel<'_> {
+    /// 按引用传的值（同 LLVM 的 CC_RISCV：比 2×XLEN 宽的标量，宽整数与 fp128）：调用方拷一份到本帧、传地址。
+    pub(super) fn indirect(&self, t: Ty) -> bool {
+        matches!(self.kind(t), Kind::Int(w) if *w > 64) || matches!(self.kind(t), Kind::Fp128)
+    }
+
+    /// 本帧的一份拷贝（按引用传参）⇒ 地址。
+    fn spill(&mut self, t: Option<Ty>, regs: &[R]) -> Result<R, Error> {
+        let (size, align) = t.map_or((4 * regs.len() as u64, 16), |t| (self.types().size(t), self.types().align(t)));
+        let obj = self.stack_slot(size, align);
+        match t {
+            Some(t) => self.store_at(t, regs, Base::Frame(obj), 0, align)?,
+            None => {
+                for (k, &r) in regs.iter().enumerate() {
+                    self.emit(MOp::Store(IOp::Sw.into(), Base::Frame(obj), 4 * i32::try_from(k).unwrap_or(0)), &[], &[r]);
+                }
+            }
+        }
+        let d = self.xr();
+        self.emit(MOp::Addr(Base::Frame(obj), 0), &[d], &[]);
+        Ok(d)
+    }
+
+    /// 返回值放不进寄存器（sret）：本帧给一块返回区，地址当第一个实参 ⇒ 对象号。
+    fn sret_slot(&mut self, size: u64, align: u64, actuals: &mut Vec<Actual>) -> u32 {
+        let obj = self.stack_slot(size, align);
+        let a = self.xr();
+        self.emit(MOp::Addr(Base::Frame(obj), 0), &[a], &[]);
+        actuals.insert(0, Actual { regs: vec![a], parts: vec![Part::X], variadic: false });
+        obj
+    }
+
     /// 返回值放不进寄存器（要调用方给地址）。
     pub(super) fn sret_demoted(&self) -> Result<bool, Error> {
         let parts = self.parts(self.f.ret)?;
@@ -26,7 +57,7 @@ impl Isel<'_> {
     fn emit_call(&mut self, target: Option<String>, indirect: Option<R>, actuals: Vec<Actual>, ret: &[Part]) -> Result<Vec<R>, Error> {
         let mut assign = Assign::default();
         let mut inst = MInst::new(MOp::Call(target), &[], &[]);
-        let ret_regs = Abi::returns(ret).ok_or_else(|| Error::Select(String::from("返回值放不进寄存器的调用还没做（sret 降级）")))?;
+        let ret_regs = Abi::returns(ret).ok_or_else(|| Error::Select(String::from("返回值放不进寄存器：调用方先给返回区（sret_slot）")))?;
         for a in actuals {
             let locs = assign.parts(&a.parts, a.variadic);
             for ((r, part), loc) in a.regs.into_iter().zip(a.parts).zip(locs) {
@@ -68,10 +99,28 @@ impl Isel<'_> {
         Ok(out)
     }
 
-    /// 库函数调用：（部件, 种类）列表 ⇒ 返回值部件。
+    /// 库函数调用：（部件, 种类）列表 ⇒ 返回值部件。超过两个部件的实参（宽整数）按引用传；放不进寄存器的返回值走 sret。
     pub(super) fn libcall(&mut self, name: &str, args: &[(Vec<R>, Vec<Part>)], ret: &[Part]) -> Result<Vec<R>, Error> {
-        let actuals = args.iter().map(|(regs, parts)| Actual { regs: regs.clone(), parts: parts.clone(), variadic: false }).collect();
-        self.emit_call(Some(String::from(name)), None, actuals, ret)
+        let mut actuals = Vec::new();
+        for (regs, parts) in args {
+            actuals.push(if parts.len() > 2 {
+                Actual { regs: vec![self.spill(None, regs)?], parts: vec![Part::X], variadic: false }
+            } else {
+                Actual { regs: regs.clone(), parts: parts.clone(), variadic: false }
+            });
+        }
+        if Abi::returns(ret).is_some() {
+            return self.emit_call(Some(String::from(name)), None, actuals, ret);
+        }
+        let obj = self.sret_slot(4 * ret.len() as u64, 16, &mut actuals);
+        self.emit_call(Some(String::from(name)), None, actuals, &[])?;
+        Ok((0..ret.len())
+            .map(|k| {
+                let d = self.xr();
+                self.emit(MOp::Load(IOp::Lw.into(), Base::Frame(obj), 4 * i32::try_from(k).unwrap_or(0)), &[d], &[]);
+                d
+            })
+            .collect())
     }
 
     /// IR 的 `call`。
@@ -95,6 +144,7 @@ impl Isel<'_> {
             };
             let (regs, parts) = match attrs.byval {
                 Some(_) => (regs, vec![Part::X]),
+                None if self.indirect(t) => (vec![self.spill(Some(t), &regs)?], vec![Part::X]),
                 None if self.boxed(t) => (vec![self.nan_box(regs[0])], vec![Part::F]),
                 None => (regs, self.parts(t)?),
             };
@@ -105,6 +155,12 @@ impl Isel<'_> {
             Callee::Direct(name) => (Some(name.clone()), None),
             Callee::Indirect(v) => (None, Some(self.get1(*v)?)),
         };
+        if !ret_parts.is_empty() && Abi::returns(&ret_parts).is_none() {
+            let align = self.types().align(ret);
+            let obj = self.sret_slot(self.types().size(ret), align, &mut actuals);
+            self.emit_call(target, indirect, actuals, &[])?;
+            return self.load_at(ret, Base::Frame(obj), 0, align);
+        }
         let out = self.emit_call(target, indirect, actuals, &ret_parts)?;
         if self.boxed(ret) {
             return Ok(vec![self.unbox(out[0])]);
@@ -120,8 +176,7 @@ impl Isel<'_> {
     fn byval_copy(&mut self, src: ValId, t: Ty, align: Option<u64>) -> Result<R, Error> {
         let size = self.types().size(t);
         let align = align.unwrap_or_else(|| self.types().align(t)).max(1);
-        let obj = u32::try_from(self.frame.len()).expect("帧对象太多");
-        self.frame.push(FrameObj { size: size.max(1), align });
+        let obj = self.stack_slot(size, align);
         let (sb, so) = self.address(src)?;
         let step: u64 = if align >= 4 && size.is_multiple_of(4) { 4 } else { 1 };
         let (lop, sop): (Opcode, Opcode) = if step == 4 { (IOp::Lw.into(), IOp::Sw.into()) } else { (IOp::Lbu.into(), IOp::Sb.into()) };
@@ -183,7 +238,11 @@ impl Isel<'_> {
                         inst.use_on(R::V(v), Rule::Fixed(p));
                     }
                 }
-                None => return Self::bad("返回值放不进寄存器（sret 降级）还没做"),
+                // sret：写进调用方给的返回区
+                None => {
+                    let p = self.sret.ok_or_else(|| Error::Select(String::from("返回值放不进寄存器，入口却没收返回区")))?;
+                    self.store_at(t, &regs, Base::Reg(p), 0, self.types().align(t))?;
+                }
             }
         }
         self.push(inst);
@@ -268,9 +327,7 @@ impl Isel<'_> {
 
     /// 期望值的栈槽（`n` 字节、按 `n` 对齐）：帧对象号。
     fn atomic_slot(&mut self, n: u64) -> u32 {
-        let obj = u32::try_from(self.frame.len()).expect("帧对象太多");
-        self.frame.push(FrameObj { size: n.max(1), align: n.clamp(1, 8) });
-        obj
+        self.stack_slot(n, n.clamp(1, 8))
     }
 
     /// `__atomic_compare_exchange_N(ptr, &槽, 新值, 成功序, 失败序)`：槽里放着期望值，失败时库函数把读到的写回槽。
@@ -286,14 +343,14 @@ impl Isel<'_> {
         Ok(self.ri(IOp::Andi, ok[0], 0xff))
     }
 
-    /// `cmpxchg p, c, v` ⇒（读到的值的部件…, 成功 0 / 1）。⚠ IR 里没带内存序，按 seq_cst（5）传（同 LLVM 对 seq_cst 的）。
-    pub(super) fn cmpxchg(&mut self, p: ValId, c: ValId, v: ValId) -> Result<Vec<R>, Error> {
+    /// `cmpxchg p, c, v` ⇒（读到的值的部件…, 成功 0 / 1）。`order`：（成功序, 失败序），C 内存序编码。
+    pub(super) fn cmpxchg(&mut self, p: ValId, c: ValId, v: ValId, order: (u8, u8)) -> Result<Vec<R>, Error> {
         let t = self.ty(c);
         let n = self.types().size(t);
         let (ptr, cmp, new) = (self.get1(p)?, self.get(c)?, self.get(v)?);
         let obj = self.atomic_slot(n);
         self.store_leaf(t, &cmp, Base::Frame(obj), 0, n)?;
-        let ok = self.cas(ptr, obj, &new, n, (5, 5))?;
+        let ok = self.cas(ptr, obj, &new, n, order)?;
         let ok = self.rr(IOp::Sltu, R::ZERO, ok);
         let mut out = self.load_leaf(t, Base::Frame(obj), 0, n)?;
         out.push(ok);
@@ -328,9 +385,9 @@ impl Isel<'_> {
             RmwOp::Max | RmwOp::Min | RmwOp::UMax | RmwOp::UMin => {
                 let signed = matches!(op, RmwOp::Max | RmwOp::Min);
                 let keep_old = if w > 32 {
-                    let (o, x) = ((old[0], old[1]), (val[0], val[1]));
+                    let (o, x) = if signed { (self.sext_top(old.clone(), w), self.sext_top(val.clone(), w)) } else { (old.clone(), val.clone()) };
                     // max：v < old ⇒ 留 old；min：old < v ⇒ 留 old
-                    if matches!(op, RmwOp::Max | RmwOp::UMax) { self.lt64(signed, x, o) } else { self.lt64(signed, o, x) }
+                    if matches!(op, RmwOp::Max | RmwOp::UMax) { self.wide_lt(signed, &x, &o) } else { self.wide_lt(signed, &o, &x) }
                 } else {
                     let (o, x) = if signed { (self.sext(old[0], w), self.sext(val[0], w)) } else { (old[0], val[0]) };
                     let cmp = if signed { IOp::Slt } else { IOp::Sltu };

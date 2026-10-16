@@ -1,45 +1,10 @@
 # tests/lit_vs_llc.rs 的预期失败：`份/函数 类：原因`（整份的不写函数）。RISCVC_LIT_UPDATE=1 重写；`【…】` 是核实过的说明，同一类时保留。
-codegen/abds-neg/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds-neg/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds-neg/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abds-neg/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
-codegen/abds-neg/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
-codegen/abds-neg/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds-neg/abd_subnsw_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds-neg/abd_subnsw_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
-codegen/abds/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
-codegen/abds/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_select_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_subnsw_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abds/abd_subnsw_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu-neg/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu-neg/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu-neg/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu-neg/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
-codegen/abdu-neg/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
-codegen/abdu-neg/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
-codegen/abdu/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
-codegen/abdu/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/abdu/abd_select_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/add-before-shl/add_wide_operand 编译：指令选择：不支持的类型 Int(128)
 codegen/addcarry 解析：`llvm.call_intrinsic`：addcarry：不支持的 op `llvm.call_intrinsic`
 codegen/alu64/sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sll(0x20, 0x80000000)：riscvc Returned 0x20  ≠  llc Returned 0x2000000000
 codegen/alu64/sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra(0x7fffffffffffffff, 0x80000000)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
 codegen/alu64/srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】srl(0x650804b5b9af21bf, 0x80)：riscvc Returned 0x650804b5b9af21bf  ≠  llc Returned 0x650804b5
 codegen/atomicrmw-cond-sub-clamp 解析：`llvm.atomicrmw`：atomicrmw_usub_cond_i8：bin_op 17
 codegen/atomicrmw-uinc-udec-wrap 解析：`llvm.atomicrmw`：atomicrmw_uinc_wrap_i8：bin_op 15
-codegen/avgceils/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
-codegen/avgceilu/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
-codegen/avgfloors/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
-codegen/avgflooru/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
 codegen/bfloat-convert 解析：`llvm.call_intrinsic`：fcvt_si_bf16_sat：不支持的 op `llvm.call_intrinsic`
 codegen/bittest/bittest_constant_by_var_shl_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bittest_constant_by_var_shl_i64(0xf2128aaf902f1f61)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/bittest/bittest_constant_by_var_shr_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bittest_constant_by_var_shr_i64(0xde657ff302024706)：riscvc Returned 0x1  ≠  llc Returned 0x0
@@ -47,49 +12,7 @@ codegen/blockaddress 解析：`llvm.blockaddress`：test_blockaddress：不支�
 codegen/branch-relaxation-rv32 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
 codegen/branch-relaxation-rv32e 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
 codegen/branch-relaxation-rv64 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
-codegen/bswap-bitreverse/test_bitreverse_i7 编译：指令选择：test_bitreverse_i7：bitreverse.i7（Intr(Bitreverse, [ValId(0)])）
 codegen/callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
-codegen/calling-conv-ilp32-ilp32f-common/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
-codegen/calling-conv-ilp32-ilp32f-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(14), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalar_ret 编译：指令选择：不支持的类型 Fp128
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalars 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(22), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Fp128（Call { fty: Ty(27), callee: Direct("callee_large_scalar_ret"), args: [], re
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(128)（Call { fty: Ty(15), callee: Direct("callee_large_scalars"), args: [(ValId(0
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(128)（Call { fty: Ty(16), callee: Direct("callee_large_scalars_exh
-codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
-codegen/calling-conv-ilp32e/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
-codegen/calling-conv-ilp32e/callee_large_scalar_ret 编译：指令选择：不支持的类型 Fp128
-codegen/calling-conv-ilp32e/callee_large_scalars 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-ilp32e/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-ilp32e/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(17), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
-codegen/calling-conv-ilp32e/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Fp128（Call { fty: Ty(32), callee: Direct("callee_large_scalar_ret"), args: [], re
-codegen/calling-conv-ilp32e/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(128)（Call { fty: Ty(24), callee: Direct("callee_large_scalars"), args: [(ValId(0
-codegen/calling-conv-ilp32e/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(128)（Call { fty: Ty(25), callee: Direct("callee_large_scalars_exh
-codegen/calling-conv-ilp32e/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_aligned_stack 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_i128_in_regs 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalar_ret 编译：指令选择：不支持的类型 Int(256)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalars 编译：指令选择：不支持的类型 Int(256)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(256)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_many_scalars 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_small_scalar_ret 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64-lp64f-lp64d-common/callee_small_struct_ret 编译：指令选择：callee_small_struct_ret：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(4)))）
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Int(128)（Call { fty: Ty(24), callee: Direct("callee_aligned_stack"), args: [(ValId(0
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_i128_in_regs 编译：指令选择：caller_i128_in_regs：不支持的类型 Int(128)（Call { fty: Ty(11), callee: Direct("callee_i128_in_regs"), args: [(ValId(0),
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Int(256)（Call { fty: Ty(29), callee: Direct("callee_large_scalar_ret"), args: [],
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(256)（Call { fty: Ty(16), callee: Direct("callee_large_scalars"), args: [(ValId(0
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(256)（Call { fty: Ty(17), callee: Direct("callee_large_scalars_exh
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_many_scalars 编译：指令选择：caller_many_scalars：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_many_scalars"), args: [(ValId(0),
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_small_scalar_ret 编译：指令选择：caller_small_scalar_ret：不支持的类型 Int(128)（Call { fty: Ty(26), callee: Direct("callee_small_scalar_ret"), args: [],
-codegen/calling-conv-lp64-lp64f-lp64d-common/caller_small_struct_ret 编译：指令选择：caller_small_struct_ret：返回值放不进寄存器的调用还没做（sret 降级）（Call { fty: Ty(28), callee: Direct("callee_small_struct_ret"), 
-codegen/calling-conv-lp64/callee_float_on_stack 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64/caller_float_on_stack 编译：指令选择：caller_float_on_stack：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_float_on_stack"), args: [(ValId
-codegen/calling-conv-lp64e/callee_float_on_stack 编译：指令选择：不支持的类型 Int(128)
-codegen/calling-conv-lp64e/caller_float_on_stack 编译：指令选择：caller_float_on_stack：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_float_on_stack"), args: [(ValId
 codegen/calling-conv-preserve-most 解析：`llvm.inline_asm`：preserve_mostcc3：不支持的 op `llvm.inline_asm`
 codegen/calling-conv-vector-float/callee_v2f32 编译：指令选择：callee_v2f32：整数运算不支持 Vector(2, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
 codegen/calling-conv-vector-float/callee_v4f32 编译：指令选择：callee_v4f32：整数运算不支持 Vector(4, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
@@ -99,11 +22,8 @@ codegen/compress-inline-asm 解析：`llvm.inline_asm`：compress_test：不支�
 codegen/condbinops/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0xad71a19a25626f15, 0xffffffffffffffff, 0x1)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff5ae
 codegen/condbinops/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0xffffffffffffffff, 0xa17b35a1dcb010ac, 0x1)：riscvc Returned 0xfffff  ≠  llc Returned 0xfffffffffffff
 codegen/condbinops/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x7fffffff, 0x1fcb8c8914f90914, 0x1)：riscvc Returned 0x7fffffff00000  ≠  llc Returned 0xfff0000000000000
-codegen/condops/single_bit3 编译：指令选择：不支持的类型 Int(80)
 codegen/ctlz-cttz-ctpop/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
 codegen/ctlz-cttz-ctpop/test_cttz_i64_zero_undef 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0x0)：riscvc Returned 0x40  ≠  llc Returned 0x20
-codegen/div_minsize/i128_sdiv 编译：指令选择：不支持的类型 Int(128)
-codegen/div_minsize/i256_sdiv 编译：指令选择：不支持的类型 Int(256)
 codegen/double-convert/fcvt_w_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i16(-1123368718087100800000000000000000000000000000000000000000000000)：riscvc Returned 0x0  ≠  llc Returned
 codegen/double-convert/fcvt_w_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i8(376.0000000021074)：riscvc Returned 0x78  ≠  llc Returned 0x178
 codegen/double-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i16(2163380399120945800000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -140,28 +60,10 @@ codegen/flt-rounds 解析：`llvm.call_intrinsic`：test_flt_rounds：不支持�
 codegen/fold-addi-loadstore 解析：`llvm.blockaddress`：load_ba_1：不支持的 op `llvm.blockaddress`
 codegen/fp-fcanonicalize 解析：`llvm.call_intrinsic`：fcanonicalize_f16：不支持的 op `llvm.call_intrinsic`
 codegen/fp128 解析：`llvm.intr.maximum`：fmaximum：不支持的 op `llvm.intr.maximum`
-codegen/fpclamptosat/stest_f16i64 编译：指令选择：stest_f16i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/stest_f16i64_mm 编译：指令选择：stest_f16i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
 codegen/fpclamptosat/stest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】stest_f32i32_mm(-inf)：riscvc Returned 0x1  ≠  llc Returned 0x80000000
-codegen/fpclamptosat/stest_f32i64 编译：指令选择：stest_f32i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/stest_f32i64_mm 编译：指令选择：stest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/stest_f64i64 编译：指令选择：stest_f64i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/stest_f64i64_mm 编译：指令选择：stest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/ustest_f16i64 编译：指令选择：ustest_f16i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/ustest_f16i64_mm 编译：指令选择：ustest_f16i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
 codegen/fpclamptosat/ustest_f32i32 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32(-186055700000000000000)：riscvc Returned 0x1  ≠  llc Returned 0x0
 codegen/fpclamptosat/ustest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32_mm(inf)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
-codegen/fpclamptosat/ustest_f32i64 编译：指令选择：ustest_f32i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/ustest_f32i64_mm 编译：指令选择：ustest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/ustest_f64i64 编译：指令选择：ustest_f64i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
-codegen/fpclamptosat/ustest_f64i64_mm 编译：指令选择：ustest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
 codegen/fpclamptosat/utest_f32i32 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】utest_f32i32(NaN)：riscvc Returned 0xffffffff  ≠  llc Returned 0x0
-codegen/fpclamptosat/utest_f32i64 编译：指令选择：utest_f32i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
-codegen/fpclamptosat/utest_f32i64_mm 编译：指令选择：utest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
-codegen/fpclamptosat/utest_f64i64 编译：指令选择：utest_f64i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
-codegen/fpclamptosat/utest_f64i64_mm 编译：指令选择：utest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
-codegen/fpclamptosat/utesth_f16i64 编译：指令选择：utesth_f16i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
-codegen/fpclamptosat/utesth_f16i64_mm 编译：指令选择：utesth_f16i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
 codegen/fpenv 解析：`llvm.call_intrinsic`：func_01：不支持的 op `llvm.call_intrinsic`
 codegen/fpenv-xlen 解析：`llvm.call_intrinsic`：func_get_fpenv：不支持的 op `llvm.call_intrinsic`
 codegen/frameaddr-returnaddr 解析：`llvm.call_intrinsic`：test_frameaddress_0：不支持的 op `llvm.call_intrinsic`
@@ -170,12 +72,6 @@ codegen/half-convert 解析：`llvm.call_intrinsic`：fcvt_si_h_sat：不支持�
 codegen/half-intrinsics 解析：`llvm.intr.exp10`：exp10_f16：不支持的 op `llvm.intr.exp10`
 codegen/half-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f16：不支持的 op `llvm.intr.minimum`
 codegen/half-round-conv-sat 解析：`llvm.call_intrinsic`：test_floor_si32：不支持的 op `llvm.call_intrinsic`
-codegen/iabs/abs128 编译：指令选择：不支持的类型 Int(128)
-codegen/iabs/select_abs128 编译：指令选择：不支持的类型 Int(128)
-codegen/icmp-non-byte-sized/icmp_non_byte_type 编译：指令选择：icmp_non_byte_type：整数运算不支持 Int(127)（ICmp(Eq, ValId(2), ValId(3))）
-codegen/idiv_large/udiv_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/idiv_large/udiv_i129 编译：指令选择：不支持的类型 Int(129)
-codegen/idiv_large/udiv_i65 编译：指令选择：不支持的类型 Int(65)
 codegen/indirectbr 解析：`llvm.indirectbr`：indirectbr：不支持的 op `llvm.indirectbr`
 codegen/inline-asm-abi-names 解析：`llvm.inline_asm`：explicit_register_x0：不支持的 op `llvm.inline_asm`
 codegen/inline-asm-clobbers 解析：`llvm.inline_asm`：testcase：不支持的 op `llvm.inline_asm`
@@ -199,7 +95,6 @@ codegen/kcfi-patchable-function-prefix/f4 结果：【fixture：MLIR 导入丢�
 codegen/kcfi/f1 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f1(ptr0)：riscvc Trap(2750864610)   ≠  llc Trap(1048691)
 codegen/kcfi/f2 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f2(ptr0)：riscvc Trap(2354360551)   ≠  llc Trap(1048691)
 codegen/large-stack 解析：`llvm.inline_asm`：test_emergency_spill_slot：不支持的 op `llvm.inline_asm`
-codegen/legalize-fneg/test3 编译：指令选择：test3：不能 load Fp128（Load { ptr: ValId(1), align: 16, volatile: false, atomic: None }）
 codegen/libcall-tail-calls 解析：`llvm.intr.llround`：llround_f32：不支持的 op `llvm.intr.llround`
 codegen/llvm.exp10 解析：`llvm.intr.exp10`：exp10_v1f16：不支持的 op `llvm.intr.exp10`
 codegen/llvm.frexp 解析：`llvm.intr.frexp`：test_frexp_f16_i32：不支持的 op `llvm.intr.frexp`
@@ -207,7 +102,6 @@ codegen/load-store-pair 解析：`llvm.inline_asm`：testi：不支持的 op `ll
 codegen/loop-strength-reduce-add-cheaper-than-mul/test 域外：【UB：i 为负时下标 zext 成巨大的数，store 写出 @flags2（8193 字节）的边界；⛔ 移位问题】test(0xfffffffe)：riscvc Trap(4244692480)   ≠  llc Trap(32768)
 codegen/lpad 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
 codegen/machinelicm-address-pseudos 链接：codegen/machinelicm-address-pseudos：.text 里不支持的重定位类型 21
-codegen/mask-variable-shift/mask_pair_128 编译：指令选择：不支持的类型 Int(128)
 codegen/mask-variable-shift/mask_pair_64 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】mask_pair_64(0xffffffffffffffff, 0x7746434ecbf2c43b)：riscvc Returned 0xf800000000000000  ≠  llc Returned 0xfffffffff8
 codegen/mem/disjoint_or_lb 结果：【poison：or disjoint 的两边有重叠位】disjoint_or_lb(ptr0, 0x1)：riscvc Returned 0x88  ≠  llc Returned 0xeb
 codegen/mem/disjoint_or_lw 结果：【poison：or disjoint 的两边有重叠位】disjoint_or_lw(ptr0, 0x29)：riscvc Returned 0xdcacad9d  ≠  llc Returned 0xc8d5c373
@@ -218,31 +112,8 @@ codegen/mem64/load_sext_zext_anyext_i1_i16 结果：【未定义：load i1 读�
 codegen/memset-pattern 解析：`llvm.call_intrinsic`：memset_1：不支持的 op `llvm.call_intrinsic`
 codegen/mir-target-flags 链接：codegen/mir-target-flags：.text 里不支持的重定位类型 21
 codegen/miss-sp-restore-eh 解析：`llvm.invoke`：foo：不支持的 op `llvm.invoke`
-codegen/mul/mulhsu_i64 编译：指令选择：mulhsu_i64：整数运算不支持 Int(128)（Bin(Mul, ValId(3), ValId(4))）
-codegen/mul/muli128_m3840 编译：指令选择：不支持的类型 Int(128)
-codegen/mul/muli128_m63 编译：指令选择：不支持的类型 Int(128)
 codegen/naked-fn-with-frame-pointer 解析：`llvm.func`：naked：函数属性 `naked` 不支持
 codegen/nest-register 解析：MLIR：参数属性 `llvm.nest` 不支持
-codegen/nontemporal/test_nontemporal_ALL_load_v16i8 编译：指令选择：test_nontemporal_ALL_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_ALL_load_v2i64 编译：指令选择：test_nontemporal_ALL_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_ALL_load_v4i32 编译：指令选择：test_nontemporal_ALL_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_ALL_load_v8i16 编译：指令选择：test_nontemporal_ALL_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_P1_load_v16i8 编译：指令选择：test_nontemporal_P1_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_P1_load_v2i64 编译：指令选择：test_nontemporal_P1_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_P1_load_v4i32 编译：指令选择：test_nontemporal_P1_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_P1_load_v8i16 编译：指令选择：test_nontemporal_P1_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_PALL_load_v16i8 编译：指令选择：test_nontemporal_PALL_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_PALL_load_v2i64 编译：指令选择：test_nontemporal_PALL_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_PALL_load_v4i32 编译：指令选择：test_nontemporal_PALL_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_PALL_load_v8i16 编译：指令选择：test_nontemporal_PALL_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_S1_load_v16i8 编译：指令选择：test_nontemporal_S1_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_S1_load_v2i64 编译：指令选择：test_nontemporal_S1_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_S1_load_v4i32 编译：指令选择：test_nontemporal_S1_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_S1_load_v8i16 编译：指令选择：test_nontemporal_S1_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_load_v16i8 编译：指令选择：test_nontemporal_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_load_v2i64 编译：指令选择：test_nontemporal_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_load_v4i32 编译：指令选择：test_nontemporal_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
-codegen/nontemporal/test_nontemporal_load_v8i16 编译：指令选择：test_nontemporal_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
 codegen/option-exact-inlineasm 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
 codegen/option-nopic 解析：`llvm.inline_asm`：get_symbol：不支持的 op `llvm.inline_asm`
 codegen/option-norelax 解析：`llvm.inline_asm`：bar：不支持的 op `llvm.inline_asm`
@@ -256,9 +127,7 @@ codegen/poison-legalization/PromoteHalf 结果：【poison：store poison】Prom
 codegen/poison-legalization/SoftenFloat 结果：【poison：store poison】SoftenFloat(ptr0)：指针实参指向的内存不同
 codegen/pr145360/signed 域外：【poison：exact 除法除不尽】signed(0xffffffff, ptr1)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
 codegen/pr145360/unsigned 结果：【poison：exact 除法除不尽】unsigned(0x3a, ptr1)：riscvc Returned 0x2  ≠  llc Returned 0xaaaaaaad
-codegen/pr56110/foo_set 编译：指令选择：foo_set：整数运算不支持 Int(96)（Bin(Shl, ValId(7), ValId(3))）
 codegen/pr58025/f 编译：指令选择：f：整数运算不支持 Vector(1, Ty(6))（Bin(FDiv, ValId(0), ValId(0))）
-codegen/pr63816/test 编译：指令选择：test：不支持的转换 FpExt：Vector(8, Ty(11)) ⇒ Vector(8, Ty(7))（Cast(FpExt, ValId(2))）
 codegen/pr64503/f 结果：【poison：srem 1, 0（除以零）/ store poison】f(0xf57863d13d3a9fd7)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/pr64503/g 结果：【poison：srem 1, 0（除以零）/ store poison】g(ptr0, 0x2c)：riscvc Returned 0x0  ≠  llc Returned 0x2c00000001
 codegen/pr64645/v2f64 编译：指令选择：v2f64：整数运算不支持 Vector(2, Ty(7))（Bin(FAdd, ValId(0), ValId(1))）
@@ -297,33 +166,14 @@ codegen/rv32zbb/ctpop_v2i64_eq_one 编译：指令选择：ctpop_v2i64_eq_one：
 codegen/rv32zbb/ctpop_v2i64_ne_one 编译：指令选择：ctpop_v2i64_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv32zbb/ctpop_v2i64_ugt_one 编译：指令选择：ctpop_v2i64_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv32zbb/ctpop_v2i64_ult_two 编译：指令选择：ctpop_v2i64_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
-codegen/rv32zbb/sub_if_uge_i128 编译：指令选择：不支持的类型 Int(128)
 codegen/rv32zbs/bset_i64_zero 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bset_i64_zero(0x80000000)：riscvc Returned 0x1  ≠  llc Returned 0x100000000
 codegen/rv32zbs/bset_trailing_ones_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】bset_trailing_ones_i64_no_mask(0x7fffffffffffffff)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
-codegen/rv64-double-convert/fptosi_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-double-convert/fptosi_sat_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-double-convert/fptoui_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-double-convert/fptoui_sat_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-double-convert/sitofp_i128_to_f64 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-double-convert/uitofp_i128_to_f64 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/fptosi_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/fptosi_sat_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/fptoui_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/fptoui_sat_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/sitofp_i128_to_f32 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64-float-convert/uitofp_i128_to_f32 编译：指令选择：不支持的类型 Int(128)
 codegen/rv64-half-convert 解析：`llvm.call_intrinsic`：fptosi_sat_f16_to_i128：不支持的 op `llvm.call_intrinsic`
 codegen/rv64i-demanded-bits/and_allones 结果：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】and_allones(0xfffffffe)：riscvc Returned 0x2000000000000000  ≠  llc Returned 0x20000000
 codegen/rv64i-tricky-shifts/tricky_ashr 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_ashr(0xf6b305aa2ec7ff97, 0x67ff8481dcbfede7)：riscvc Returned 0x0  ≠  llc Returned 0x5d8fff
 codegen/rv64i-tricky-shifts/tricky_lshr 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_lshr(0xffffffffffffffff, 0xffffffffffffffff)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/rv64i-tricky-shifts/tricky_shl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_shl(0x38, 0x93d210071f60fc11)：riscvc Returned 0x700000  ≠  llc Returned 0x0
-codegen/rv64p/slx_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64p/slxi_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64p/srx_i128 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64p/srxi_i128 编译：指令选择：不支持的类型 Int(128)
 codegen/rv64xtheadbb/cttz_zero_undef_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
-codegen/rv64zba/slliuw_2 编译：指令选择：不支持的类型 Int(128)
-codegen/rv64zba/slliuw_ptrdiff 编译：指令选择：不支持的类型 Int(128)
 codegen/rv64zbb-zbkb/not_shl_one_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】not_shl_one_i64(0xdf5622fda0ba197a)：riscvc Returned 0xfbffffffffffffff  ≠  llc Returned 0xfffffffffbffffff
 codegen/rv64zbb/ctpop32_ne_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
 codegen/rv64zbb/ctpop64_eq_one_nonzero 域外：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop64_eq_one_nonzero(0x0)：riscvc Returned 0x0  ≠  llc Returned 0x1
@@ -338,7 +188,6 @@ codegen/rv64zbb/ctpop_v2i64_ne_one 编译：指令选择：ctpop_v2i64_ne_one：
 codegen/rv64zbb/ctpop_v2i64_ugt_one 编译：指令选择：ctpop_v2i64_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/ctpop_v2i64_ult_two 编译：指令选择：ctpop_v2i64_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/cttz_zero_undef_i32 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
-codegen/rv64zbb/sub_if_uge_i128 编译：指令选择：不支持的类型 Int(128)
 codegen/rv64zbs/bclr_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bclr_i64_no_mask(0xffff, 0x7830ae7e279793c0)：riscvc Returned 0xfffe  ≠  llc Returned 0xffff
 codegen/rv64zbs/bext_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bext_i64_no_mask(0xffff, 0x52e4c708d9892c25)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/rv64zbs/binv_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】binv_i64_no_mask(0x8f470954cf1323f6, 0x3cd89c392debca93)：riscvc Returned 0x8f470954cf1b23f6  ≠  llc Returned 0x8f4f09
@@ -350,29 +199,18 @@ codegen/rv64zfhmin-half-intrinsics 解析：`llvm.intr.llrint`：llrint_f16：�
 codegen/rvp-ext-rv32 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
 codegen/rvp-ext-rv64 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
 codegen/saverestore 解析：`llvm.inline_asm`：callee_saved_fp：不支持的 op `llvm.inline_asm`
-codegen/scmp/scmp.8.128 编译：指令选择：不支持的类型 Int(128)
-codegen/select-optimize-multiple/cmov128 编译：指令选择：不支持的类型 Int(128)
-codegen/select-optimize-multiple/cmovcc128 编译：指令选择：不支持的类型 Int(128)
 codegen/select/select_ashr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_ashr_3(0x0, 0xffff)：riscvc Returned 0x3f  ≠  llc Returned 0xffff
 codegen/select/select_lshr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_lshr_3(0x0, 0x40e8f2f4)：riscvc Returned 0x103a3c  ≠  llc Returned 0x40e8f2f4
 codegen/select/select_shl_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_shl_3(0x0, 0x3e)：riscvc Returned 0xf800  ≠  llc Returned 0x3e
 codegen/shift-amount-mod/ashr_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr_by_complemented_64(0xf17a11e07e3fe749)：riscvc Returned 0xffffffffffffffc5  ≠  llc Returned 0xffffffc5e84781f8
 codegen/shift-amount-mod/lshr_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr_by_complemented_64(0x7fffffffffffffff)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
 codegen/shift-amount-mod/shl_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl_by_complemented_64(0xffffffffffffffff)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff00000000
-codegen/shifts/ashr128 编译：指令选择：不支持的类型 Int(128)
-codegen/shifts/ashr128_shamt32 编译：指令选择：不支持的类型 Int(128)
 codegen/shifts/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0x29, 0xcc5810799f4fe2e0)：riscvc Returned 0x0  ≠  llc Returned 0x29
 codegen/shifts/ashr64_minsize 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64_minsize(0x12b7c37f19e22920, 0x935b050251480140)：riscvc Returned 0x12b7c37f19e22920  ≠  llc Returned 0x12b7c37f
 codegen/shifts/ashr64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64_shamt32(0x80000000, 0x5da4bf11)：riscvc Returned 0x4000  ≠  llc Returned 0x0
-codegen/shifts/fshr128_minsize 编译：指令选择：不支持的类型 Int(128)
-codegen/shifts/lshr128 编译：指令选择：不支持的类型 Int(128)
-codegen/shifts/lshr128_shamt32 编译：指令选择：不支持的类型 Int(128)
 codegen/shifts/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0x7fffffff, 0x65d5bde4b58276ae)：riscvc Returned 0x0  ≠  llc Returned 0x1ffff
 codegen/shifts/lshr64_minsize 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_minsize(0xb4898d17257d794, 0x80000000)：riscvc Returned 0xb4898d17257d794  ≠  llc Returned 0xb4898d17b5fdfd5
 codegen/shifts/lshr64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_shamt32(0x40efb830d6bb1d10, 0x80000000)：riscvc Returned 0x40efb830d6bb1d10  ≠  llc Returned 0x40efb830
-codegen/shifts/shl128 编译：指令选择：不支持的类型 Int(128)
-codegen/shifts/shl128_shamt32 编译：指令选择：不支持的类型 Int(128)
-codegen/shifts/shl128_shamt32_arith 编译：指令选择：不支持的类型 Int(128)
 codegen/shifts/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x8, 0xb8592bc868ce0195)：riscvc Returned 0x1000000  ≠  llc Returned 0x100000000000000
 codegen/shifts/shl64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64_shamt32(0x27, 0xdf5d93ae)：riscvc Returned 0x9c00000000000  ≠  llc Returned 0x9c000
 codegen/shl-cttz/shl_cttz_constant_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_constant_i32(0x0)：riscvc Returned 0x4  ≠  llc Returned 0x0
@@ -381,32 +219,8 @@ codegen/shl-cttz/shl_cttz_i64 结果：【poison：cttz(0, zero_poison)；非零
 codegen/short-forward-branch-opt/select_sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sll(0x4685c7ec68d9a1f9, 0x9143326e75bd5115, 0x0, 0x0)：riscvc Returned 0xfd8d1b343f200000  ≠  llc Returned 0x3f
 codegen/short-forward-branch-opt/select_sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sra(0x9ddc357a5210b102, 0x7fffffffffffffff, 0xcb2d42bfd788931c, 0x0)：riscvc Returned 0xffffffffffffffff  ≠  ll
 codegen/short-forward-branch-opt/select_srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_srl(0x6ddf493bea42edf2, 0x1b454d08391ca48f, 0x80, 0x0)：riscvc Returned 0xdbbe9277d485  ≠  llc Returned 0xdbbe
-codegen/sincos-expansion/test_sincos_f128 编译：指令选择：不支持的类型 Fp128
-codegen/sincos-expansion/test_sincos_f128_errno 编译：指令选择：不支持的类型 Fp128
 codegen/spill-fill-fold 解析：`llvm.inline_asm`：spill_i32_to_float：不支持的 op `llvm.inline_asm`
 codegen/spill-fpr-scalar 解析：`llvm.inline_asm`：spill_half：不支持的 op `llvm.inline_asm`
-codegen/split-udiv-by-constant/test_udiv_12 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_15 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_17 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_255 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_257 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_3 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_5 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_65535 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_65537 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_7 编译：指令选择：不支持的类型 Int(322)
-codegen/split-udiv-by-constant/test_udiv_9 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_12 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_15 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_17 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_255 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_257 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_3 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_5 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_65535 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_65537 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_7 编译：指令选择：不支持的类型 Int(322)
-codegen/split-urem-by-constant/test_urem_9 编译：指令选择：不支持的类型 Int(322)
 codegen/sra-xor-sra/sra_xor_sra_overflow 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra_xor_sra_overflow(0x39, 0x2b)：riscvc Returned 0x2b  ≠  llc Returned 0x0
 codegen/srem-seteq-illegal-types/test_srem_vec 编译：指令选择：test_srem_vec：整数运算不支持 Vector(3, Ty(17))（Bin(SRem, ValId(9), ValId(4))）
 codegen/srem-vector-lkk/combine_srem_sdiv 编译：指令选择：combine_srem_sdiv：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
@@ -417,18 +231,11 @@ codegen/srem-vector-lkk/dont_fold_urem_i16_smax 编译：指令选择：dont_fol
 codegen/srem-vector-lkk/fold_srem_vec_1 编译：指令选择：fold_srem_vec_1：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
 codegen/srem-vector-lkk/fold_srem_vec_2 编译：指令选择：fold_srem_vec_2：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
 codegen/stack-folding 解析：`llvm.inline_asm`：test_sext_w：不支持的 op `llvm.inline_asm`
-codegen/stack-slot-size/caller129 编译：指令选择：caller129：不支持的类型 Int(129)（Call { fty: Ty(11), callee: Direct("callee129"), args: [(ValId(2), ArgAttrs { signext:
-codegen/stack-slot-size/caller160 编译：指令选择：caller160：不支持的类型 Int(160)（Call { fty: Ty(13), callee: Direct("callee160"), args: [(ValId(2), ArgAttrs { signext:
-codegen/stack-slot-size/caller161 编译：指令选择：caller161：不支持的类型 Int(161)（Call { fty: Ty(15), callee: Direct("callee161"), args: [(ValId(2), ArgAttrs { signext:
-codegen/stack-store-check/main 编译：指令选择：main：不能 load Fp128（Load { ptr: ValId(0), align: 16, volatile: false, atomic: None }）
-codegen/switch-width/native_i64 编译：指令选择：native_i64：值 %0 有 2 个部件，这里只收一个（Switch(ValId(0), Target { block: BlockId(3), args: [] }, [(1, Target { block: Blo
 codegen/tail-calls 解析：`llvm.func`：caller_irq：函数属性 `interrupt` 不支持
 codegen/thread-pointer 解析：`llvm.call_intrinsic`：thread_pointer：不支持的 op `llvm.call_intrinsic`
 codegen/tls-models 链接：codegen/tls-models：.text 里不支持的重定位类型 21
 codegen/tlsdesc-symbol 链接：codegen/tlsdesc-symbol：.text 里不支持的重定位类型 21
 codegen/trunc-nsw-nuw/trunc_nsw_add 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】trunc_nsw_add(0xdc9aed7f)：riscvc Returned 0xffffff80  ≠  llc Returned 0xdc9aed80
-codegen/ucmp/ucmp.8.128 编译：指令选择：不支持的类型 Int(128)
-codegen/umulo-128-legalisation-lowering/muloti_test 编译：指令选择：不支持的类型 Int(128)
 codegen/urem-seteq-illegal-types/test_urem_vec 编译：指令选择：test_urem_vec：整数运算不支持 Vector(3, Ty(19))（Bin(URem, ValId(9), ValId(4))）
 codegen/urem-vector-lkk/combine_urem_udiv 编译：指令选择：combine_urem_udiv：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
 codegen/urem-vector-lkk/dont_fold_urem_i16_smax 编译：指令选择：dont_fold_urem_i16_smax：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
@@ -441,32 +248,11 @@ codegen/usub_sat/fun12 编译：指令选择：fun12：值 %0 有 4 个部件，
 codegen/usub_sat/fun13 编译：指令选择：fun13：值 %0 有 4 个部件，这里只收一个（Intr(USubSat, [ValId(0), ValId(1)])）
 codegen/usub_sat/fun14 编译：指令选择：fun14：值 %0 有 4 个部件，这里只收一个（Intr(USubSat, [ValId(0), ValId(2)])）
 codegen/vararg 解析：`llvm.va_arg`：va1_va_arg：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_16bytes 编译：指令选择：ashr_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_16bytes_wordOff 编译：指令选择：ashr_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes 编译：指令选择：ashr_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes_dwordOff 编译：指令选择：ashr_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes_wordOff 编译：指令选择：ashr_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
 codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】ashr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
-codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_16bytes 编译：指令选择：lshr_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_16bytes_wordOff 编译：指令选择：lshr_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes 编译：指令选择：lshr_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes_dwordOff 编译：指令选择：lshr_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes_wordOff 编译：指令选择：lshr_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
 codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】lshr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
-codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_16bytes 编译：指令选择：shl_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_16bytes_wordOff 编译：指令选择：shl_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes 编译：指令选择：shl_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes_dwordOff 编译：指令选择：shl_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
-codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes_wordOff 编译：指令选择：shl_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
 codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】shl_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
-codegen/wide-scalar-shift-legalization/ashr_16bytes 编译：指令选择：ashr_16bytes：整数运算不支持 Int(128)（Bin(AShr, ValId(3), ValId(4))）
-codegen/wide-scalar-shift-legalization/ashr_32bytes 编译：指令选择：ashr_32bytes：整数运算不支持 Int(256)（Bin(AShr, ValId(3), ValId(4))）
 codegen/wide-scalar-shift-legalization/ashr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】ashr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
-codegen/wide-scalar-shift-legalization/lshr_16bytes 编译：指令选择：lshr_16bytes：整数运算不支持 Int(128)（Bin(LShr, ValId(3), ValId(4))）
-codegen/wide-scalar-shift-legalization/lshr_32bytes 编译：指令选择：lshr_32bytes：整数运算不支持 Int(256)（Bin(LShr, ValId(3), ValId(4))）
 codegen/wide-scalar-shift-legalization/lshr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】lshr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
-codegen/wide-scalar-shift-legalization/shl_16bytes 编译：指令选择：shl_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(3), ValId(4))）
-codegen/wide-scalar-shift-legalization/shl_32bytes 编译：指令选择：shl_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(3), ValId(4))）
 codegen/wide-scalar-shift-legalization/shl_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】shl_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
 codegen/xcvmem 解析：`llvm.insertelement`：lb_ri_inc：不支持的 op `llvm.insertelement`
 codegen/xqccmp-callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
@@ -474,8 +260,6 @@ codegen/xqccmp-push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属�
 codegen/xqcia 解析：`llvm.intr.ushl.sat`：shlusat：不支持的 op `llvm.intr.ushl.sat`
 codegen/xqcibm-cto-clo-brev/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0xffffffff)：riscvc Returned 0x20  ≠  llc Returned 0x0
 codegen/xqcibm-cto-clo-brev/test_cttz_i64_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0xffffffffffffffff)：riscvc Returned 0x40  ≠  llc Returned 0x20
-codegen/xtheadmempair/ld128 编译：指令选择：不支持的类型 Int(128)
-codegen/xtheadmempair/sd128 编译：指令选择：不支持的类型 Int(128)
 codegen/zdinx-spill 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
 codegen/zfh-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
 codegen/zfhmin-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
@@ -483,7 +267,6 @@ codegen/zicfilp-indirect-branch 解析：`llvm.blockaddress`：不支持的 op `
 codegen/zilsd-spill 解析：`llvm.inline_asm`：cmpxchg_i64_monotonic_monotonic：不支持的 op `llvm.inline_asm`
 import/basic 解析：`llvm.va_arg`：variadic_function：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
 import/blockaddress 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
-import/control-flow/simple_switch 编译：指令选择：simple_switch：值 %0 有 2 个部件，这里只收一个（Switch(ValId(0), Target { block: BlockId(3), args: [] }, [(0, Target { block: 
 import/fastmath 解析：`llvm.intr.vector.reduce.fmin`：fastmath_intr：不支持的 op `llvm.intr.vector.reduce.fmin`
 import/incorrect-scalable-vector-check 解析：`llvm.shufflevector`：shufflevector_crash：不支持的 op `llvm.shufflevector`
 import/indirectbr 解析：`llvm.indirectbr`：basic：不支持的 op `llvm.indirectbr`
@@ -511,5 +294,3 @@ target/llvmir.84 解析：`llvm.dso_local_equivalent`：call_alias_func：不支
 target/nvvmir.18 解析：`llvm.call_intrinsic`：nvvm_mapa：不支持的 op `llvm.call_intrinsic`
 target/nvvmir.22 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_4way：不支持的 op `llvm.call_intrinsic`
 target/nvvmir.23 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_2way：不支持的 op `llvm.call_intrinsic`
-target/openmp-teams.3/omp_teams_branching_shared 编译：指令选择：不支持的类型 Fp128
-target/openmp-teams.3/omp_teams_branching_shared..omp_par 编译：指令选择：omp_teams_branching_shared..omp_par：不能 load Fp128（Load { ptr: ValId(18), align: 16, volatile: false, atomic: Non

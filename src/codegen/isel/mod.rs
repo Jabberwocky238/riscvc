@@ -6,7 +6,8 @@
 //!
 //! ```text
 //! mod.rs   骨架：值表、块、跳转（关键边切开、块参数）、入口取参
-//! int.rs   整数运算与比较（≤ 32 位直接做，i64 拆两半，除法走 __divdi3 一类）
+//! int.rs   整数运算与比较（≤ 32 位）、整数转换、select
+//! wide.rs  宽整数（33 位以上，逐字）：进位链、竖式乘、经栈的变量移位、除法循环
 //! divc.rs  除以常数：移位 / 乘魔数（不出除法指令）
 //! float.rs float 用 F 扩展；double 全走 compiler-rt 软浮点（__adddf3 …）
 //! mem.rs   load / store / alloca / getelementptr、聚合值
@@ -19,6 +20,7 @@ mod float;
 mod int;
 mod intr;
 mod mem;
+mod wide;
 
 use super::abi::{Assign, Loc, Part};
 use super::mir::{Base, MBlock, MInst, MOp, R, Rule};
@@ -193,10 +195,11 @@ impl<'m> Isel<'m> {
 
     // ---- 小工具 -------------------------------------------------------------------------
 
-    /// 软浮点类型：compiler-rt 函数名的后缀（`df` = double，F 没开时 `sf` = float）；硬件做的 ⇒ `None`。
+    /// 软浮点类型：compiler-rt 函数名的后缀（`df` = double，`tf` = fp128，F 没开时 `sf` = float）；硬件做的 ⇒ `None`。
     fn soft(&self, t: Ty) -> Option<&'static str> {
         match self.kind(t) {
             Kind::Double => Some("df"),
+            Kind::Fp128 => Some("tf"),
             Kind::Float if !crate::feature::Float::ENABLED => Some("sf"),
             _ => None,
         }
@@ -238,16 +241,26 @@ impl<'m> Isel<'m> {
             Kind::Void => Vec::new(),
             Kind::Int(w) if *w <= 32 => vec![Part::X],
             Kind::Int(w) if *w <= 64 => vec![Part::Lo, Part::Hi],
+            // 更宽的整数：⌈w/32⌉ 个字（过调用边界按引用，见 call.rs）
+            Kind::Int(w) => vec![Part::X; w.div_ceil(32) as usize],
             Kind::Ptr | Kind::Half | Kind::BFloat => vec![Part::X],
             Kind::Float if crate::feature::Float::ENABLED => vec![Part::F],
             // 没有 F（ilp32）：float 是一个整数部件
             Kind::Float => vec![Part::X],
             Kind::Double => vec![Part::Lo, Part::Hi],
+            Kind::Fp128 => vec![Part::X; 4],
             Kind::Array(n, e) => self.parts(*e)?.repeat(usize::try_from(*n).unwrap_or(0)),
             Kind::Vector(n, e) => self.parts(*e)?.repeat(*n as usize),
             Kind::Struct(fields, _) => fields.iter().map(|f| self.parts(*f)).collect::<Result<Vec<_>, _>>()?.concat(),
             k => return Self::bad(format!("不支持的类型 {k:?}")),
         })
+    }
+
+    /// 一个栈帧对象 ⇒ 对象号。
+    fn stack_slot(&mut self, size: u64, align: u64) -> u32 {
+        let obj = u32::try_from(self.frame.len()).expect("帧对象太多");
+        self.frame.push(FrameObj { size: size.max(1), align: align.max(1) });
+        obj
     }
 
     /// 一组新的虚拟寄存器，形状同类型 `t`。
@@ -380,8 +393,7 @@ impl<'m> Isel<'m> {
                     _ => R::ZERO,
                 })
                 .collect(),
-            (Const::Int(v), Kind::Int(w)) if *w <= 32 => vec![self.li(*v as u32 as i32)],
-            (Const::Int(v), Kind::Int(_)) => vec![self.li(*v as u32 as i32), self.li((*v >> 32) as u32 as i32)],
+            (Const::Int(v), Kind::Int(w)) => self.int_words(*v, *w),
             (Const::Int(v), Kind::Ptr) => vec![self.li(*v as u32 as i32)],
             (Const::Float(bits), Kind::Float) if !crate::feature::Float::ENABLED => vec![self.li(*bits as u32 as i32)],
             (Const::Float(bits), Kind::Float) => {
@@ -392,6 +404,8 @@ impl<'m> Isel<'m> {
             }
             (Const::Float(bits), Kind::Double) => vec![self.li(*bits as u32 as i32), self.li((*bits >> 32) as u32 as i32)],
             (Const::Float(bits), Kind::Half | Kind::BFloat) => vec![self.li(*bits as u32 as i32)],
+            (Const::Float(bits), Kind::Fp128) => self.int_words(Self::quad(*bits), 128),
+            (Const::Int(v), Kind::Fp128) => self.int_words(*v, 128),
             (Const::Global(name, off), _) => {
                 let d = self.xr();
                 self.emit(MOp::La(name.clone(), *off), &[d], &[]);
@@ -508,8 +522,8 @@ impl<'m> Isel<'m> {
                 let parts = self.atomic_rmw(*op, *p, *v, *order)?;
                 self.set(r, parts);
             }
-            Op::CmpXchg(p, c, v, ..) => {
-                let parts = self.cmpxchg(*p, *c, *v)?;
+            Op::CmpXchg(p, c, v, success, failure) => {
+                let parts = self.cmpxchg(*p, *c, *v, (*success, *failure))?;
                 self.set(r, parts);
             }
             Op::Fence => self.emit(MOp::Fence, &[], &[]),
@@ -589,17 +603,19 @@ impl<'m> Isel<'m> {
         Ok(())
     }
 
-    /// `switch`：逐个比较的链（`beq v, case`），最后到缺省。
+    /// `switch`：逐个比较的链（`beq v, case`；宽整数比各字的异或之或），最后到缺省。
     fn switch(&mut self, v: ValId, d: &Target, cases: &[(u128, Target)]) -> Result<(), Error> {
-        let x = self.get1(v)?;
-        if self.types().bits(self.ty(v)).is_some_and(|w| w > 32) {
-            return Self::bad("switch 的值超过 32 位");
-        }
+        let x = self.get(v)?;
+        let w = self.types().bits(self.ty(v)).unwrap_or(32);
         for (k, t) in cases {
             let to = self.edge(t)?;
-            let kr = self.li(*k as u32 as i32);
+            let ks = self.int_words(*k, w);
+            let (a, b) = match (&x[..], &ks[..]) {
+                ([a], [b]) => (*a, *b),
+                _ => (self.wide_diff(&x, &ks), R::ZERO),
+            };
             let next = self.new_block();
-            self.branch(IOp::Beq, x, kr, to, next);
+            self.branch(IOp::Beq, a, b, to, next);
             self.cur = next;
         }
         let to = self.edge(d)?;
@@ -624,7 +640,9 @@ impl<'m> Isel<'m> {
         // ⚠ 先推 `Args`（定义寄存器上的参数）、再读栈上的、再做零扩展：⛔ 先用后定义
         let (mut params, mut moves) = (Vec::new(), Vec::new());
         for &p in &blk.params {
-            let parts = if self.boxed(self.ty(p)) { vec![Part::F] } else { self.parts(self.ty(p))? };
+            let t = self.ty(p);
+            // 按引用传的（宽整数）：一个指针
+            let parts = if self.boxed(t) { vec![Part::F] } else if self.indirect(t) { vec![Part::X] } else { self.parts(t)? };
             let locs = assign.parts(&parts, false);
             let mut regs = Vec::new();
             for (part, loc) in parts.iter().zip(locs) {
@@ -652,8 +670,15 @@ impl<'m> Isel<'m> {
             self.emit(MOp::Load(op, Base::Incoming, off), &[d], &[]);
         }
         for (i, (&p, regs)) in blk.params.iter().zip(params).enumerate() {
-            // half / bfloat：从 NaN-box 的浮点寄存器拿回 16 位
-            let regs = if self.boxed(self.ty(p)) { vec![self.unbox(regs[0])] } else { regs };
+            let t = self.ty(p);
+            // half / bfloat：从 NaN-box 的浮点寄存器拿回 16 位；按引用传的：从指针读
+            let regs = if self.boxed(t) {
+                vec![self.unbox(regs[0])]
+            } else if self.indirect(t) {
+                self.load_at(t, Base::Reg(regs[0]), 0, self.types().align(t))?
+            } else {
+                regs
+            };
             // 窄整数：调用方按 signext / zeroext 扩展过，这里统一成零扩展
             let regs = match self.types().bits(self.ty(p)) {
                 Some(w) if w < 32 && self.f.params.get(i).is_some_and(|p| p.attrs.signext) => vec![self.mask(regs[0], w)],
