@@ -121,6 +121,15 @@ impl<'a> Lowering<'_, 'a> {
         {
             return Ok(());
         }
+        // `memcpy.inline` / `memset.inline`：长度在属性 `len` 上 ⇒ 补成第三个实参（同 memcpy / memset）
+        if matches!(&*self.op.name, "llvm.intr.memcpy.inline" | "llvm.intr.memset.inline") {
+            let len = self.attr("len").and_then(Attr::i64).ok_or_else(|| Error::Parse(String::from("没有 len")))?;
+            let mut args = self.operands()?;
+            args.push(self.constant(Types::I64, Const::Int(u128::from(len.cast_unsigned()))));
+            let i = if self.op.name.starts_with("llvm.intr.memcpy") { Intr::Memcpy } else { Intr::Memset };
+            self.emit(None, Op::Intr(i, args));
+            return Ok(());
+        }
         let o = self.module.op(self.op, self.body, result)?;
         self.emit(result, o);
         Ok(())
@@ -273,6 +282,12 @@ fn prop<'x, 'a>(op: &'x Operation<'a>, name: &str) -> Option<&'x Attribute<'a>> 
         }
     };
     op.properties.as_ref().and_then(dict).or_else(|| op.attributes.iter().find(|n| n.name == name).and_then(|n| n.value.as_ref()))
+}
+
+/// 单位属性（`constant`、`thread_local_`：只有名字没有值；`prop` 分不出没有和有）在不在。
+fn flag(op: &Operation<'_>, name: &str) -> bool {
+    let set = |a: &NamedAttr<'_>| a.name == name && !matches!(a.value, Some(Attribute::Bool(false)));
+    matches!(&op.properties, Some(Attribute::Dict(v)) if v.iter().any(set)) || op.attributes.iter().any(set)
 }
 
 /// 按名字查表：二元运算、转换、intrinsic。
@@ -516,11 +531,16 @@ impl Module {
         Ok(out)
     }
 
+    /// `visibility_ = 1`（hidden）。
+    fn hidden(op: &Operation<'_>) -> bool {
+        prop(op, "visibility_").and_then(Attr::i64) == Some(1)
+    }
+
+    /// ⚠ 直接读属性、借用函数体，⛔ `to_op::<LLVMFuncOp>()`：它经 serde 把整个函数体深拷贝一遍（大模块里占了转换时间的大头）。
     fn function(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
-        let f: llvm::LLVMFuncOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.func"), why: e.0 })?;
-        let name = String::from(f.sym_name.lit().ok_or_else(|| Error::Parse(String::from("llvm.func 没有名字")))?);
+        let name = String::from(prop(op, "sym_name").and_then(Attr::lit).ok_or_else(|| Error::Parse(String::from("llvm.func 没有名字")))?);
         // 改函数怎么出代码的属性：⛔ 悄悄当普通函数（`interrupt` 要存全部寄存器、`mret` 返回；`naked` 没有序言 / 尾声）
-        if let Some(Attribute::Array(attrs)) = &f.passthrough {
+        if let Some(Attribute::Array(attrs)) = prop(op, "passthrough") {
             for a in attrs {
                 let key = match a {
                     Attribute::Array(kv) => kv.first().and_then(Attr::lit),
@@ -531,24 +551,24 @@ impl Module {
                 }
             }
         }
-        let fty = self.ty(f.function_type.ty().ok_or_else(|| Error::Parse(format!("{name}：没有 function_type")))?)?;
+        let fty = self.ty(prop(op, "function_type").and_then(Attr::ty).ok_or_else(|| Error::Parse(format!("{name}：没有 function_type")))?)?;
         let Kind::Func(ret, params, varargs) = self.types.kind(fty).clone() else { return Err(Error::Parse(format!("{name}：function_type 不是函数类型"))) };
-        let params = params.iter().enumerate().map(|(i, &ty)| Ok(Param { ty, attrs: self.arg_attrs(f.arg_attrs.as_ref(), i)? })).collect::<Result<Vec<_>, Error>>()?;
+        let params = params.iter().enumerate().map(|(i, &ty)| Ok(Param { ty, attrs: self.arg_attrs(prop(op, "arg_attrs"), i)? })).collect::<Result<Vec<_>, Error>>()?;
         let mut func = Function {
-            hidden: matches!(f.visibility_, Some(llvm::Visibility::Hidden)),
-            linkage: Self::linkage(f.linkage.as_ref()),
+            hidden: Self::hidden(op),
+            linkage: Self::linkage(prop(op, "linkage")),
             ret,
-            ret_attrs: self.arg_attrs(f.res_attrs.as_ref(), 0)?,
+            ret_attrs: self.arg_attrs(prop(op, "res_attrs"), 0)?,
             params,
             varargs,
-            section: f.section.as_ref().and_then(Attr::lit).map(String::from),
-            align: f.alignment.as_ref().and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
+            section: prop(op, "section").and_then(Attr::lit).map(String::from),
+            align: prop(op, "alignment").and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
             blocks: Vec::new(),
             vals: Vec::new(),
             name,
         };
-        if !f.body.blocks.is_empty() {
-            let (blocks, vals) = self.body(&f.body, reg).map_err(|e| match e {
+        if let Some(body) = op.regions.first().filter(|r| !r.blocks.is_empty()) {
+            let (blocks, vals) = self.body(body, reg).map_err(|e| match e {
                 Error::Op { op, why } => Error::Op { op, why: format!("{}：{why}", func.name) },
                 e => e,
             })?;
@@ -668,8 +688,8 @@ impl Module {
                 let ty = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
                 Op::Alloca { ty, count: arg(0)?, align: Self::uint(op, "alignment").max(1) }
             }
-            "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
-            "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op) },
+            "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op, "ordering") },
+            "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op, "ordering") },
             "llvm.getelementptr" => {
                 let o: llvm::GEPOp<'_> = op.to_op().map_err(typed)?;
                 let src = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
@@ -690,18 +710,18 @@ impl Module {
             "llvm.atomicrmw" => {
                 const OPS: [RmwOp; 15] = [RmwOp::Xchg, RmwOp::Add, RmwOp::Sub, RmwOp::And, RmwOp::Nand, RmwOp::Or, RmwOp::Xor, RmwOp::Max, RmwOp::Min, RmwOp::UMax, RmwOp::UMin, RmwOp::FAdd, RmwOp::FSub, RmwOp::FMax, RmwOp::FMin];
                 let k = usize::try_from(Self::uint(op, "bin_op")).unwrap_or(usize::MAX);
-                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, arg(0)?, arg(1)?, Self::order(op).unwrap_or(5))
+                Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, arg(0)?, arg(1)?, Self::order(op, "ordering").unwrap_or(5))
             }
-            "llvm.cmpxchg" => Op::CmpXchg(arg(0)?, arg(1)?, arg(2)?),
+            "llvm.cmpxchg" => Op::CmpXchg(arg(0)?, arg(1)?, arg(2)?, Self::order(op, "success_ordering").unwrap_or(5), Self::order(op, "failure_ordering").unwrap_or(5)),
             "llvm.fence" => Op::Fence,
             "llvm.va_arg" => return Err(Error::Parse(String::from("va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）"))),
             n => return Err(Error::Parse(format!("不支持的 op `{n}`"))),
         })
     }
 
-    /// MLIR 的 `ordering`（not_atomic 0、unordered 1、monotonic 2、acquire 4、release 5、acq_rel 6、seq_cst 7）⇒ C 内存序。
-    fn order(op: &Operation<'_>) -> Option<u8> {
-        Some(match Self::uint(op, "ordering") {
+    /// MLIR 的内存序属性 `attr`（`ordering`、cmpxchg 的 `success_ordering` / `failure_ordering`；not_atomic 0、unordered 1、monotonic 2、acquire 4、release 5、acq_rel 6、seq_cst 7）⇒ C 内存序。
+    fn order(op: &Operation<'_>, attr: &str) -> Option<u8> {
+        Some(match Self::uint(op, attr) {
             0 => return None,
             1 | 2 => 0,
             4 => 2,
@@ -940,42 +960,43 @@ impl Module {
         }
     }
 
+    /// ⚠ 同 [`Self::function`]：直接读属性，⛔ `to_op`（`value` 可能是几 MB 的 dense 常量，serde 会整个拷一遍）。
     fn global(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
-        let g: llvm::GlobalOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.mlir.global"), why: e.0 })?;
-        let name = String::from(g.sym_name.lit().unwrap_or_default());
+        let name = String::from(prop(op, "sym_name").and_then(Attr::lit).unwrap_or_default());
         // llvm.used / llvm.compiler.used / llvm.global_ctors 一类（appending）：只给优化器 / 链接器看，⛔ 不出数据
         if name.starts_with("llvm.") {
             return Ok(());
         }
-        let ty = self.ty(g.global_type.ty().ok_or_else(|| Error::Parse(format!("{name}：没有 global_type")))?)?;
-        let linkage = Self::linkage(Some(&g.linkage));
-        let init = match (&g.value, g.initializer.blocks.is_empty()) {
+        let ty = self.ty(prop(op, "global_type").and_then(Attr::ty).ok_or_else(|| Error::Parse(format!("{name}：没有 global_type")))?)?;
+        let linkage = Self::linkage(prop(op, "linkage"));
+        let region = op.regions.first().filter(|r| !r.blocks.is_empty());
+        let init = match (prop(op, "value"), region) {
             (Some(v), _) => Some(self.constant(v, ty)?),
-            (None, false) => Some(self.initializer(&g.initializer, reg)?),
-            (None, true) if linkage == Linkage::Common => Some(Const::Zero),
-            (None, true) => None,
+            (None, Some(r)) => Some(self.initializer(r, reg)?),
+            (None, None) if linkage == Linkage::Common => Some(Const::Zero),
+            (None, None) => None,
         };
         self.globals.push(Global {
             name,
             linkage,
-            hidden: matches!(g.visibility_, Some(llvm::Visibility::Hidden)),
+            hidden: Self::hidden(op),
             ty,
             init,
-            constant: g.constant,
-            align: g.alignment.as_ref().and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
-            section: g.section.as_ref().and_then(Attr::lit).map(String::from),
-            thread_local: g.thread_local_,
+            constant: flag(op, "constant"),
+            align: prop(op, "alignment").and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
+            section: prop(op, "section").and_then(Attr::lit).map(String::from),
+            thread_local: flag(op, "thread_local_"),
         });
         Ok(())
     }
 
     fn alias(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
-        let a: llvm::AliasOp<'_> = op.to_op().map_err(|e| Error::Op { op: String::from("llvm.mlir.alias"), why: e.0 })?;
-        let target = self.initializer(&a.initializer, reg)?;
+        let region = op.regions.first().ok_or_else(|| Error::Op { op: String::from("llvm.mlir.alias"), why: String::from("没有初值区域") })?;
+        let target = self.initializer(region, reg)?;
         self.aliases.push(Alias {
-            name: String::from(a.sym_name.lit().unwrap_or_default()),
-            linkage: Self::linkage(Some(&a.linkage)),
-            hidden: matches!(a.visibility_, Some(llvm::Visibility::Hidden)),
+            name: String::from(prop(op, "sym_name").and_then(Attr::lit).unwrap_or_default()),
+            linkage: Self::linkage(prop(op, "linkage")),
+            hidden: Self::hidden(op),
             target,
         });
         Ok(())

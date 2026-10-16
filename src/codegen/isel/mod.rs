@@ -508,7 +508,7 @@ impl<'m> Isel<'m> {
                 let parts = self.atomic_rmw(*op, *p, *v, *order)?;
                 self.set(r, parts);
             }
-            Op::CmpXchg(p, c, v) => {
+            Op::CmpXchg(p, c, v, ..) => {
                 let parts = self.cmpxchg(*p, *c, *v)?;
                 self.set(r, parts);
             }

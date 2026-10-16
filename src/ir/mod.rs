@@ -171,7 +171,8 @@ pub enum Op {
     Intr(Intr, Vec<ValId>),
     /// 运算、指针、值、C 内存序。
     AtomicRmw(RmwOp, ValId, ValId, u8),
-    CmpXchg(ValId, ValId, ValId),
+    /// 指针、期望值、新值、成功 / 失败时的 C 内存序（编码同 `AtomicRmw`）。
+    CmpXchg(ValId, ValId, ValId, u8, u8),
     Fence,
 }
 
@@ -185,7 +186,7 @@ impl Op {
             Self::Bin(_, a, b) | Self::ICmp(_, a, b) | Self::FCmp(_, a, b) | Self::InsertValue(a, b, _) | Self::AtomicRmw(_, a, b, _) | Self::Store { val: a, ptr: b, .. } => fixed[..2].copy_from_slice(&[Some(*a), Some(*b)]),
             Self::FNeg(a) | Self::Cast(_, a) | Self::Freeze(a) | Self::ExtractValue(a, _) | Self::Alloca { count: a, .. } | Self::Load { ptr: a, .. } => fixed[0] = Some(*a),
             Self::Gep { base, indices, .. } => (fixed[0], dyns) = (Some(*base), indices),
-            Self::Select(a, b, c) | Self::CmpXchg(a, b, c) => fixed = [Some(*a), Some(*b), Some(*c)],
+            Self::Select(a, b, c) | Self::CmpXchg(a, b, c, ..) => fixed = [Some(*a), Some(*b), Some(*c)],
             Self::Call { callee, args: a, .. } => {
                 if let Callee::Indirect(v) = callee {
                     fixed[0] = Some(*v);

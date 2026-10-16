@@ -249,7 +249,9 @@ Built-in plugins: dialect `llvm`; pass `dce` (removes side-effect-free instructi
 Parallelism: inputs are parsed in parallel, and each module is split into contiguous runs of functions (balanced by
 instruction count) that are compiled in parallel and concatenated in order, so the output is **byte-identical** to a
 serial (`-j 1`) build (checked by `tests/cli.rs`). Functions outside a run are kept as declarations, globals go
-with the last run.
+with the last run. Measured on a 16-thread machine under load: 656 input files 0.37 s → 0.15 s (`-j 1` → `-j 16`);
+for a single 1,244-function module code generation goes 78 ms → 16 ms, but the whole run is dominated by the serial
+parts (MLIR parsing ≈ 65 ms, conversion ≈ 65 ms, assembling ≈ 100 ms), so `-j` matters mostly for many inputs.
 
 ## Library usage
 
