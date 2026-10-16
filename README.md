@@ -293,6 +293,7 @@ Main entry points:
 | `riscvc::sim::Cpu` | RV32 interpreter: `load` an ELF, `run` / `step`, or `run_on` / `step_on` with custom extensions and MMIO `Device`s; registers `x`, `f`, `pc`, `csr`, sparse `mem` |
 | `riscvc::ext::{Extension, Device}` | traits for custom instructions and memory-mapped devices |
 | `riscvc::feature::Target` | the enabled extensions: `march()` (attribute arch string) and `mattr()` (LLVM `-mattr`) |
+| `riscvc::elf::Elf` | ELF32 read (`TryFrom<&[u8]>`) / write (`pack(Layout::Verbatim \| Canonical)`); `Attributes` for `.riscv.attributes`-style sections; the only module without `toolchain` |
 | `riscvc::macros::{Isa, Opcode}` | derive macros for instruction tables (re-exported from `riscvc-macros`) |
 
 `riscvc::sim::Stop` tells why execution stopped: `Returned` (reached the return address), `Trap(word)`
@@ -369,8 +370,10 @@ pub enum Zmmul {
 
 ## Cargo features
 
-One feature = one target extension, exactly like a `-march` component. The components (assembler, linker, code
-generator, simulator, CLI) are always built.
+`toolchain` *(default)* is the toolchain itself (compiler, assembler, linker, disassembler, simulator, CLI). Every
+other feature is one target extension, exactly like a `-march` component. With `default-features = false` and no
+`toolchain`, only `riscvc::elf` is left: the ELF32 little-endian RISC-V read/write model, `no_std` + `alloc`,
+depending on `thiserror` only.
 
 | Feature | What it is | When disabled |
 | --- | --- | --- |
@@ -383,7 +386,10 @@ generator, simulator, CLI) are always built.
 
 ```toml
 # plain rv32i with soft-float
-riscvc = { version = "0.1", default-features = false, features = ["zicsr"] }
+riscvc = { version = "0.1", default-features = false, features = ["toolchain", "zicsr"] }
+
+# only the ELF model (no_std)
+riscvc = { version = "0.1", default-features = false }
 
 # defaults plus all T-Head extensions
 riscvc = { version = "0.1", features = ["xthead"] }
@@ -428,7 +434,7 @@ reuse) has not been compared with llc.
 ```bash
 cargo build --release
 cargo test --release
-cargo build --release --no-default-features --features zicsr   # rv32i, no M, no F (soft-float)
+cargo build --release --no-default-features --features toolchain,zicsr   # rv32i, no M, no F (soft-float)
 cargo test  --release --features xthead                        # include the T-Head tests
 ```
 

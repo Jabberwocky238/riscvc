@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT"
@@ -14,7 +14,10 @@ exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 # 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 开标准的 m、f。没开的扩展：汇编器不认、译码不认、
 # 解释器陷入，代码生成改走 compiler-rt（乘除 libcall、软浮点）。组件（汇编器、链接器、代码生成 …）总在，不是 feature。
 [features]
-default = ["m", "f"]
+default = ["toolchain", "m", "f"]
+# ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
+# ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
+toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:regalloc2", "dep:xxhash-rust", "thiserror/std"]
 # M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
 m = ["zmmul"]
 # Zmmul：只有乘法；没开 ⇒ 乘法调 __mulsi3
@@ -41,14 +44,19 @@ xthead = ["xtheadba", "xtheadbb", "xtheadbs", "xtheadcmo", "xtheadcondmov", "xth
 members = [".", "macros"]
 
 [dependencies]
-riscvc-macros = { path = "macros", version = "0.1.1" }
-clap = { version = "4.6.7", features = ["derive"] }
-mlirformat = { version = "0.2.1", default-features = false }
-object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"] }
-regalloc2 = "0.15.2"
-thiserror = "2"
+riscvc-macros = { path = "macros", version = "0.1.1", optional = true }
+clap = { version = "4.6.7", features = ["derive"], optional = true }
+mlirformat = { version = "0.2.1", default-features = false, optional = true }
+object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
+regalloc2 = { version = "0.15.2", optional = true }
+thiserror = { version = "2", default-features = false }
 # SHF_MERGE 去重的分片哈希（同 lld：llvm::xxh3_64bits）
-xxhash-rust = { version = "0.8", features = ["xxh3"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
+
+[[bin]]
+name = "riscvc"
+path = "src/main.rs"
+required-features = ["toolchain"]
 
 # 实参按 ilp32f 放（float 进 fa 寄存器）
 [[test]]
