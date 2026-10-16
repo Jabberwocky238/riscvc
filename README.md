@@ -232,17 +232,24 @@ Undecodable words print as `<unknown>`, again matching llvm-objdump.
 ### `riscvc llc` — compiler (like `mlir-translate --mlir-to-llvmir | llc`)
 
 ```text
-riscvc llc [OPTIONS] [INPUT]
+riscvc llc [OPTIONS] -o <OUTPUT> <INPUTS>...
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `-o <OUTPUT>` | output; a `.o` extension produces an object file, anything else produces assembly |
+| `-o <OUTPUT>` | one input: the output file (a `.o` extension produces an object file, anything else assembly); several inputs: a directory, one `<input name>.o` (or `.s`) each |
+| `--emit <asm\|obj>` | what to produce (default: from the `-o` extension for one input, `obj` for several) |
+| `-j, --jobs <N>` | worker threads (default: number of CPUs) |
 | `--pass <NAME>` | run a pass on the internal IR before code generation (repeatable, runs in order) |
 | `--list-plugins` | list registered dialects and passes |
 | `--no-relax` | object output without `R_RISCV_RELAX` / `R_RISCV_ALIGN` (like `llc -mattr=-relax`; default on, like llc) |
 
 Built-in plugins: dialect `llvm`; pass `dce` (removes side-effect-free instructions whose results are unused).
+
+Parallelism: inputs are parsed in parallel, and each module is split into contiguous runs of functions (balanced by
+instruction count) that are compiled in parallel and concatenated in order, so the output is **byte-identical** to a
+serial (`-j 1`) build (checked by `tests/cli.rs`). Functions outside a run are kept as declarations, globals go
+with the last run.
 
 ## Library usage
 
@@ -412,6 +419,8 @@ it replaces:
 | Linker | same objects + script → `riscvc ld` and `ld.lld` produce identical loadable sections (type, flags, entry size, bytes), program headers, entry point and global symbols |
 | Code generator | `llc` compiles the `.ll`, `riscvc llc` compiles the `.mlir` converted from it; both are linked and run in `riscvc::sim` with the same arguments; return values and memory behind pointer arguments must match |
 | End to end | compiler-rt builtins unit tests (which have `main` and self-check) are built both ways and run to completion; exit codes must match |
+| LLVM's own tests | `llvm/test/CodeGen/RISCV/*.ll`, `mlir/test/Target/LLVMIR/Import/*.ll` and `mlir/test/Target/LLVMIR/*.mlir` (1,080 files) converted to generic-form `.mlir`, with llc's object file checked in: every function is compiled in isolation and, if it has a scalar signature, called with the same random arguments on both sides (return value, memory behind pointer arguments, global data objects). Expected failures are listed with a reason in `tests/fixtures/lit/xfail.txt`; an unlisted failure *and* a listed function that now passes both fail the test. Needs no LLVM at test time |
+| Command line | `tests/cli.rs` runs the `riscvc` binary: the Quick start above end to end (result checked in the simulator), parallel = serial byte for byte, bad input exits with status 1 and a message (never a panic) |
 
 ## Status
 
@@ -429,6 +438,7 @@ As of 2026-10-15:
 | Division by constants | shifts / magic-number multiply (same as LLVM's BuildUDIV / BuildSDIV): 496 functions (udiv / urem / sdiv / srem × i32 / i16 / i8 × 40-odd divisors), 209,806 calls checked against exact arithmetic |
 | Code size (`.text`, both `-mattr=-relax`, `tools/size_vs_llc.py`) | compiler-rt O2 1.18× llc, O0 0.98×; `tests/programs` O2 1.09×, O0 0.95× |
 | MC fixtures | 277 of 279 identical to llvm-mc (with and without relaxation; branch lengths are settled at layout time, like MC relaxation); remaining: alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
+| LLVM's own tests | 1,080 files from `CodeGen/RISCV` and MLIR `Target/LLVMIR` (9,897 `llvm.func`), 159,086 calls compared with llc; 757 expected failures listed in `tests/fixtures/lit/xfail.txt`: 507 functions not compiled (i128, vectors, …), 129 files not converted (inline asm, `invoke`, vectors, …), 116 result differences, each checked by hand against the IR (and against a Rust reference where the poison boundary was not obvious): all are poison / undefined inputs or information lost by the MLIR importer; the 13 wrong-code bugs this comparison found are fixed, 5 link failures |
 
 Not done yet: `sret` lowering (return values that do not fit in registers), test coverage of stack-passed
 arguments, `cmpxchg`, `i128` / `fp128`, vector operations. Code size: the machine-IR passes (constant folding,
@@ -453,7 +463,16 @@ To run the full comparison you need an LLVM 22.1.8 build with the RISC-V target 
 tools/corpus.sh          # compiler-rt builtins -> target/corpus/{s,ll,mlir}
 tools/programs.sh        # regenerate tests/fixtures/{unit,builtins,programs,support} (checked in; ONLY=programs: just programs/)
 tools/fixtures.py        # regenerate tests/fixtures/mc (checked in)
+tools/lit.sh             # regenerate tests/fixtures/lit (checked in; LLVM IR kept in target/lit for debugging)
 cargo test --release
+```
+
+`tests/lit_vs_llc.rs` does not need LLVM (the reference objects are checked in). After a change that makes listed
+functions pass (or fail differently), regenerate the expected-failure list and review the diff:
+
+```bash
+RISCVC_LIT_UPDATE=1 cargo test --release --test lit_vs_llc
+git diff tests/fixtures/lit/xfail.txt
 ```
 
 ## Limitations and non-goals

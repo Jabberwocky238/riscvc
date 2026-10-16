@@ -1,0 +1,758 @@
+# tests/lit_vs_llc.rs 的预期失败：`份/函数 类：原因`（整份的不写函数）。RISCVC_LIT_UPDATE=1 重写；`【…】` 是核实过的说明，同一类时保留。
+codegen/abds-neg/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds-neg/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds-neg/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abds-neg/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
+codegen/abds-neg/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
+codegen/abds-neg/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds-neg/abd_subnsw_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds-neg/abd_subnsw_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
+codegen/abds/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
+codegen/abds/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_select_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_subnsw_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abds/abd_subnsw_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu-neg/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu-neg/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu-neg/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu-neg/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
+codegen/abdu-neg/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(3), ValId(4))）
+codegen/abdu-neg/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu/abd_cmp_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu/abd_ext_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu/abd_ext_i128_undef 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu/abd_ext_i64 编译：指令选择：abd_ext_i64：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
+codegen/abdu/abd_ext_i64_undef 编译：指令选择：abd_ext_i64_undef：整数运算不支持 Int(128)（Bin(Sub, ValId(2), ValId(3))）
+codegen/abdu/abd_minmax_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/abdu/abd_select_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/add-before-shl/add_wide_operand 编译：指令选择：不支持的类型 Int(128)
+codegen/addcarry 解析：`llvm.call_intrinsic`：addcarry：不支持的 op `llvm.call_intrinsic`
+codegen/alu64/sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sll(0x20, 0x80000000)：riscvc Returned 0x20  ≠  llc Returned 0x2000000000
+codegen/alu64/sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra(0x7fffffffffffffff, 0x80000000)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
+codegen/alu64/srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】srl(0x650804b5b9af21bf, 0x80)：riscvc Returned 0x650804b5b9af21bf  ≠  llc Returned 0x650804b5
+codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_branch1 编译：指令选择：cmpxchg_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2))）
+codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_branch2 编译：指令选择：cmpxchg_and_branch2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2))）
+codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_irrelevant_branch 编译：指令选择：cmpxchg_and_irrelevant_branch：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg-branch-on-result/cmpxchg_masked_and_branch1 编译：指令选择：cmpxchg_masked_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg-branch-on-result/cmpxchg_masked_and_branch2 编译：指令选择：cmpxchg_masked_and_branch2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg-flag/cmpxchg_i32_seq_cst_seq_cst 编译：指令选择：cmpxchg_i32_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i16_acq_rel_acquire 编译：指令选择：cmpxchg_i16_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i16_acq_rel_monotonic 编译：指令选择：cmpxchg_i16_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i16_acquire_acquire 编译：指令选择：cmpxchg_i16_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i16_acquire_monotonic 编译：指令选择：cmpxchg_i16_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i16_monotonic_monotonic 编译：指令选择：cmpxchg_i16_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
+codegen/atomic-cmpxchg/cmpxchg_i16_release_acquire 编译：指令选择：cmpxchg_i16_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i16_release_monotonic 编译：指令选择：cmpxchg_i16_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_acquire 编译：指令选择：cmpxchg_i16_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_monotonic 编译：指令选择：cmpxchg_i16_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_seq_cst 编译：指令选择：cmpxchg_i16_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i32_acq_rel_acquire 编译：指令选择：cmpxchg_i32_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i32_acq_rel_monotonic 编译：指令选择：cmpxchg_i32_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i32_acquire_acquire 编译：指令选择：cmpxchg_i32_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i32_acquire_monotonic 编译：指令选择：cmpxchg_i32_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i32_monotonic_monotonic 编译：指令选择：cmpxchg_i32_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
+codegen/atomic-cmpxchg/cmpxchg_i32_release_acquire 编译：指令选择：cmpxchg_i32_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i32_release_monotonic 编译：指令选择：cmpxchg_i32_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_acquire 编译：指令选择：cmpxchg_i32_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_monotonic 编译：指令选择：cmpxchg_i32_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_seq_cst 编译：指令选择：cmpxchg_i32_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i64_acq_rel_acquire 编译：指令选择：cmpxchg_i64_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i64_acq_rel_monotonic 编译：指令选择：cmpxchg_i64_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i64_acquire_acquire 编译：指令选择：cmpxchg_i64_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i64_acquire_monotonic 编译：指令选择：cmpxchg_i64_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i64_monotonic_monotonic 编译：指令选择：cmpxchg_i64_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
+codegen/atomic-cmpxchg/cmpxchg_i64_release_acquire 编译：指令选择：cmpxchg_i64_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i64_release_monotonic 编译：指令选择：cmpxchg_i64_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_acquire 编译：指令选择：cmpxchg_i64_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_monotonic 编译：指令选择：cmpxchg_i64_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_seq_cst 编译：指令选择：cmpxchg_i64_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
+codegen/atomic-cmpxchg/cmpxchg_i8_acq_rel_acquire 编译：指令选择：cmpxchg_i8_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg/cmpxchg_i8_acq_rel_monotonic 编译：指令选择：cmpxchg_i8_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
+codegen/atomic-cmpxchg/cmpxchg_i8_acquire_acquire 编译：指令选择：cmpxchg_i8_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg/cmpxchg_i8_acquire_monotonic 编译：指令选择：cmpxchg_i8_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
+codegen/atomic-cmpxchg/cmpxchg_i8_monotonic_monotonic 编译：指令选择：cmpxchg_i8_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Val
+codegen/atomic-cmpxchg/cmpxchg_i8_release_acquire 编译：指令选择：cmpxchg_i8_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg/cmpxchg_i8_release_monotonic 编译：指令选择：cmpxchg_i8_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
+codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_acquire 编译：指令选择：cmpxchg_i8_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_monotonic 编译：指令选择：cmpxchg_i8_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
+codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_seq_cst 编译：指令选择：cmpxchg_i8_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/atomic-rmw-discard/amomax_d_discard 编译：指令选择：amomax_d_discard：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amomax_w_discard 编译：指令选择：amomax_w_discard：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amomaxu_d_discard 编译：指令选择：amomaxu_d_discard：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amomaxu_w_discard 编译：指令选择：amomaxu_w_discard：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amomin_d_discard 编译：指令选择：amomin_d_discard：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amomin_w_discard 编译：指令选择：amomin_w_discard：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amominu_d_discard 编译：指令选择：amominu_d_discard：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-discard/amominu_w_discard 编译：指令选择：amominu_w_discard：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_max_i32_seq_cst 编译：指令选择：atomicrmw_max_i32_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_max_i64_seq_cst 编译：指令选择：atomicrmw_max_i64_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_min_i32_seq_cst 编译：指令选择：atomicrmw_min_i32_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_min_i64_seq_cst 编译：指令选择：atomicrmw_min_i64_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_umax_i32_seq_cst 编译：指令选择：atomicrmw_umax_i32_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_umax_i64_seq_cst 编译：指令选择：atomicrmw_umax_i64_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_umin_i32_seq_cst 编译：指令选择：atomicrmw_umin_i32_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw-minmax/atomicrmw_umin_i64_seq_cst 编译：指令选择：atomicrmw_umin_i64_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_max_i16_acq_rel 编译：指令选择：atomicrmw_max_i16_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_max_i16_acquire 编译：指令选择：atomicrmw_max_i16_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_max_i16_monotonic 编译：指令选择：atomicrmw_max_i16_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_max_i16_release 编译：指令选择：atomicrmw_max_i16_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_max_i16_seq_cst 编译：指令选择：atomicrmw_max_i16_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_max_i32_acq_rel 编译：指令选择：atomicrmw_max_i32_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_max_i32_acquire 编译：指令选择：atomicrmw_max_i32_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_max_i32_monotonic 编译：指令选择：atomicrmw_max_i32_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_max_i32_release 编译：指令选择：atomicrmw_max_i32_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_max_i32_seq_cst 编译：指令选择：atomicrmw_max_i32_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_max_i64_acq_rel 编译：指令选择：atomicrmw_max_i64_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_max_i64_acquire 编译：指令选择：atomicrmw_max_i64_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_max_i64_monotonic 编译：指令选择：atomicrmw_max_i64_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_max_i64_release 编译：指令选择：atomicrmw_max_i64_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_max_i64_seq_cst 编译：指令选择：atomicrmw_max_i64_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_max_i8_acq_rel 编译：指令选择：atomicrmw_max_i8_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_max_i8_acquire 编译：指令选择：atomicrmw_max_i8_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_max_i8_monotonic 编译：指令选择：atomicrmw_max_i8_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_max_i8_release 编译：指令选择：atomicrmw_max_i8_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_max_i8_seq_cst 编译：指令选择：atomicrmw_max_i8_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_min_i16_acq_rel 编译：指令选择：atomicrmw_min_i16_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_min_i16_acquire 编译：指令选择：atomicrmw_min_i16_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_min_i16_monotonic 编译：指令选择：atomicrmw_min_i16_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_min_i16_release 编译：指令选择：atomicrmw_min_i16_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_min_i16_seq_cst 编译：指令选择：atomicrmw_min_i16_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_min_i32_acq_rel 编译：指令选择：atomicrmw_min_i32_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_min_i32_acquire 编译：指令选择：atomicrmw_min_i32_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_min_i32_monotonic 编译：指令选择：atomicrmw_min_i32_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_min_i32_release 编译：指令选择：atomicrmw_min_i32_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_min_i32_seq_cst 编译：指令选择：atomicrmw_min_i32_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_min_i64_acq_rel 编译：指令选择：atomicrmw_min_i64_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_min_i64_acquire 编译：指令选择：atomicrmw_min_i64_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_min_i64_monotonic 编译：指令选择：atomicrmw_min_i64_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_min_i64_release 编译：指令选择：atomicrmw_min_i64_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_min_i64_seq_cst 编译：指令选择：atomicrmw_min_i64_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_min_i8_acq_rel 编译：指令选择：atomicrmw_min_i8_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_min_i8_acquire 编译：指令选择：atomicrmw_min_i8_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_min_i8_monotonic 编译：指令选择：atomicrmw_min_i8_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_min_i8_release 编译：指令选择：atomicrmw_min_i8_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_min_i8_seq_cst 编译：指令选择：atomicrmw_min_i8_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umax_i16_acq_rel 编译：指令选择：atomicrmw_umax_i16_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umax_i16_acquire 编译：指令选择：atomicrmw_umax_i16_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umax_i16_monotonic 编译：指令选择：atomicrmw_umax_i16_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umax_i16_release 编译：指令选择：atomicrmw_umax_i16_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umax_i16_seq_cst 编译：指令选择：atomicrmw_umax_i16_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umax_i32_acq_rel 编译：指令选择：atomicrmw_umax_i32_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umax_i32_acquire 编译：指令选择：atomicrmw_umax_i32_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umax_i32_monotonic 编译：指令选择：atomicrmw_umax_i32_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umax_i32_release 编译：指令选择：atomicrmw_umax_i32_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umax_i32_seq_cst 编译：指令选择：atomicrmw_umax_i32_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umax_i64_acq_rel 编译：指令选择：atomicrmw_umax_i64_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umax_i64_acquire 编译：指令选择：atomicrmw_umax_i64_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umax_i64_monotonic 编译：指令选择：atomicrmw_umax_i64_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umax_i64_release 编译：指令选择：atomicrmw_umax_i64_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umax_i64_seq_cst 编译：指令选择：atomicrmw_umax_i64_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umax_i8_acq_rel 编译：指令选择：atomicrmw_umax_i8_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umax_i8_acquire 编译：指令选择：atomicrmw_umax_i8_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umax_i8_monotonic 编译：指令选择：atomicrmw_umax_i8_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umax_i8_release 编译：指令选择：atomicrmw_umax_i8_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umax_i8_seq_cst 编译：指令选择：atomicrmw_umax_i8_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umin_i16_acq_rel 编译：指令选择：atomicrmw_umin_i16_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umin_i16_acquire 编译：指令选择：atomicrmw_umin_i16_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umin_i16_monotonic 编译：指令选择：atomicrmw_umin_i16_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umin_i16_release 编译：指令选择：atomicrmw_umin_i16_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umin_i16_seq_cst 编译：指令选择：atomicrmw_umin_i16_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umin_i32_acq_rel 编译：指令选择：atomicrmw_umin_i32_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umin_i32_acquire 编译：指令选择：atomicrmw_umin_i32_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umin_i32_monotonic 编译：指令选择：atomicrmw_umin_i32_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umin_i32_release 编译：指令选择：atomicrmw_umin_i32_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umin_i32_seq_cst 编译：指令选择：atomicrmw_umin_i32_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umin_i64_acq_rel 编译：指令选择：atomicrmw_umin_i64_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umin_i64_acquire 编译：指令选择：atomicrmw_umin_i64_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umin_i64_monotonic 编译：指令选择：atomicrmw_umin_i64_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umin_i64_release 编译：指令选择：atomicrmw_umin_i64_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umin_i64_seq_cst 编译：指令选择：atomicrmw_umin_i64_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-rmw/atomicrmw_umin_i8_acq_rel 编译：指令选择：atomicrmw_umin_i8_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
+codegen/atomic-rmw/atomicrmw_umin_i8_acquire 编译：指令选择：atomicrmw_umin_i8_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
+codegen/atomic-rmw/atomicrmw_umin_i8_monotonic 编译：指令选择：atomicrmw_umin_i8_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-rmw/atomicrmw_umin_i8_release 编译：指令选择：atomicrmw_umin_i8_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
+codegen/atomic-rmw/atomicrmw_umin_i8_seq_cst 编译：指令选择：atomicrmw_umin_i8_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
+codegen/atomic-signext/atomicrmw_max_i16_monotonic 编译：指令选择：atomicrmw_max_i16_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_max_i32_monotonic 编译：指令选择：atomicrmw_max_i32_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_max_i32_monotonic_crossbb 编译：指令选择：atomicrmw_max_i32_monotonic_crossbb：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(2), 0)）
+codegen/atomic-signext/atomicrmw_max_i64_monotonic 编译：指令选择：atomicrmw_max_i64_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_max_i8_monotonic 编译：指令选择：atomicrmw_max_i8_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_min_i16_monotonic 编译：指令选择：atomicrmw_min_i16_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_min_i32_monotonic 编译：指令选择：atomicrmw_min_i32_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_min_i32_monotonic_crossbb 编译：指令选择：atomicrmw_min_i32_monotonic_crossbb：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(2), 0)）
+codegen/atomic-signext/atomicrmw_min_i64_monotonic 编译：指令选择：atomicrmw_min_i64_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_min_i8_monotonic 编译：指令选择：atomicrmw_min_i8_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umax_i16_monotonic 编译：指令选择：atomicrmw_umax_i16_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umax_i32_monotonic 编译：指令选择：atomicrmw_umax_i32_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umax_i32_monotonic_crossbb 编译：指令选择：atomicrmw_umax_i32_monotonic_crossbb：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(2), 0)）
+codegen/atomic-signext/atomicrmw_umax_i64_monotonic 编译：指令选择：atomicrmw_umax_i64_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umax_i8_monotonic 编译：指令选择：atomicrmw_umax_i8_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umin_i16_monotonic 编译：指令选择：atomicrmw_umin_i16_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umin_i32_monotonic 编译：指令选择：atomicrmw_umin_i32_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umin_i32_monotonic_crossbb 编译：指令选择：atomicrmw_umin_i32_monotonic_crossbb：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(2), 0)）
+codegen/atomic-signext/atomicrmw_umin_i64_monotonic 编译：指令选择：atomicrmw_umin_i64_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/atomicrmw_umin_i8_monotonic 编译：指令选择：atomicrmw_umin_i8_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
+codegen/atomic-signext/cmpxchg_i16_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i16_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
+codegen/atomic-signext/cmpxchg_i16_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i16_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
+codegen/atomic-signext/cmpxchg_i32_monotonic_crossbb 编译：指令选择：cmpxchg_i32_monotonic_crossbb：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
+codegen/atomic-signext/cmpxchg_i32_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i32_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
+codegen/atomic-signext/cmpxchg_i32_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i32_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
+codegen/atomic-signext/cmpxchg_i8_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i8_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1)
+codegen/atomic-signext/cmpxchg_i8_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i8_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1)
+codegen/atomicrmw-cond-sub-clamp 解析：`llvm.atomicrmw`：atomicrmw_usub_cond_i8：bin_op 17
+codegen/atomicrmw-uinc-udec-wrap 解析：`llvm.atomicrmw`：atomicrmw_uinc_wrap_i8：bin_op 15
+codegen/avgceils/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
+codegen/avgceilu/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
+codegen/avgfloors/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
+codegen/avgflooru/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
+codegen/bfloat-convert 解析：`llvm.call_intrinsic`：fcvt_si_bf16_sat：不支持的 op `llvm.call_intrinsic`
+codegen/bittest/bittest_constant_by_var_shl_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bittest_constant_by_var_shl_i64(0xf2128aaf902f1f61)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/bittest/bittest_constant_by_var_shr_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bittest_constant_by_var_shr_i64(0xde657ff302024706)：riscvc Returned 0x1  ≠  llc Returned 0x0
+codegen/blockaddress 解析：`llvm.blockaddress`：test_blockaddress：不支持的 op `llvm.blockaddress`
+codegen/branch-relaxation-rv32 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
+codegen/branch-relaxation-rv32e 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
+codegen/branch-relaxation-rv64 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
+codegen/bswap-bitreverse/test_bitreverse_i7 编译：指令选择：test_bitreverse_i7：bitreverse.i7（Intr(Bitreverse, [ValId(0)])）
+codegen/callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
+codegen/calling-conv-ilp32-ilp32f-common/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
+codegen/calling-conv-ilp32-ilp32f-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(14), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalar_ret 编译：指令选择：不支持的类型 Fp128
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalars 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(22), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Fp128（Call { fty: Ty(27), callee: Direct("callee_large_scalar_ret"), args: [], re
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(128)（Call { fty: Ty(15), callee: Direct("callee_large_scalars"), args: [(ValId(0
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(128)（Call { fty: Ty(16), callee: Direct("callee_large_scalars_exh
+codegen/calling-conv-ilp32-ilp32f-ilp32d-common/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
+codegen/calling-conv-ilp32e/callee_aligned_stack 编译：指令选择：不支持的类型 Fp128
+codegen/calling-conv-ilp32e/callee_large_scalar_ret 编译：指令选择：不支持的类型 Fp128
+codegen/calling-conv-ilp32e/callee_large_scalars 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-ilp32e/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-ilp32e/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Fp128（Call { fty: Ty(17), callee: Direct("callee_aligned_stack"), args: [(ValId(0), 
+codegen/calling-conv-ilp32e/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Fp128（Call { fty: Ty(32), callee: Direct("callee_large_scalar_ret"), args: [], re
+codegen/calling-conv-ilp32e/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(128)（Call { fty: Ty(24), callee: Direct("callee_large_scalars"), args: [(ValId(0
+codegen/calling-conv-ilp32e/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(128)（Call { fty: Ty(25), callee: Direct("callee_large_scalars_exh
+codegen/calling-conv-ilp32e/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
+codegen/calling-conv-ilp32f-ilp32d-common/callee_float_in_gpr_exhausted_fprs 编译：panic：Could not allocate minimal bundle, but the allocation problem should be possible to solve
+codegen/calling-conv-ilp32f-ilp32d-common/caller_float_in_gpr_exhausted_fprs 编译：panic：Could not allocate minimal bundle, but the allocation problem should be possible to solve
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_aligned_stack 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_i128_in_regs 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalar_ret 编译：指令选择：不支持的类型 Int(256)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalars 编译：指令选择：不支持的类型 Int(256)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalars_exhausted_regs 编译：指令选择：不支持的类型 Int(256)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_many_scalars 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_small_scalar_ret 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64-lp64f-lp64d-common/callee_small_struct_ret 编译：指令选择：callee_small_struct_ret：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(4)))）
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_aligned_stack 编译：指令选择：caller_aligned_stack：不支持的类型 Int(128)（Call { fty: Ty(24), callee: Direct("callee_aligned_stack"), args: [(ValId(0
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_i128_in_regs 编译：指令选择：caller_i128_in_regs：不支持的类型 Int(128)（Call { fty: Ty(11), callee: Direct("callee_i128_in_regs"), args: [(ValId(0),
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalar_ret 编译：指令选择：caller_large_scalar_ret：不支持的类型 Int(256)（Call { fty: Ty(29), callee: Direct("callee_large_scalar_ret"), args: [],
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(256)（Call { fty: Ty(16), callee: Direct("callee_large_scalars"), args: [(ValId(0
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(256)（Call { fty: Ty(17), callee: Direct("callee_large_scalars_exh
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_many_scalars 编译：指令选择：caller_many_scalars：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_many_scalars"), args: [(ValId(0),
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_small_scalar_ret 编译：指令选择：caller_small_scalar_ret：不支持的类型 Int(128)（Call { fty: Ty(26), callee: Direct("callee_small_scalar_ret"), args: [],
+codegen/calling-conv-lp64-lp64f-lp64d-common/caller_small_struct_ret 编译：指令选择：caller_small_struct_ret：返回值放不进寄存器的调用还没做（sret 降级）（Call { fty: Ty(28), callee: Direct("callee_small_struct_ret"), 
+codegen/calling-conv-lp64/callee_float_on_stack 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64/caller_float_on_stack 编译：指令选择：caller_float_on_stack：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_float_on_stack"), args: [(ValId
+codegen/calling-conv-lp64e/callee_float_on_stack 编译：指令选择：不支持的类型 Int(128)
+codegen/calling-conv-lp64e/caller_float_on_stack 编译：指令选择：caller_float_on_stack：不支持的类型 Int(128)（Call { fty: Ty(13), callee: Direct("callee_float_on_stack"), args: [(ValId
+codegen/calling-conv-preserve-most 解析：`llvm.inline_asm`：preserve_mostcc3：不支持的 op `llvm.inline_asm`
+codegen/calling-conv-vector-float/callee_v2f32 编译：指令选择：callee_v2f32：整数运算不支持 Vector(2, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
+codegen/calling-conv-vector-float/callee_v4f32 编译：指令选择：callee_v4f32：整数运算不支持 Vector(4, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
+codegen/clear-cache 解析：`llvm.call_intrinsic`：foo：不支持的 op `llvm.call_intrinsic`
+codegen/clmul 解析：`llvm.call_intrinsic`：clmul_i4：不支持的 op `llvm.call_intrinsic`
+codegen/combine-storetomstore/test_masked_store_zextload 编译：指令选择：test_masked_store_zextload：select 的 4 条 lane 对不上 8 / 4 个部件（Select(ValId(2), ValId(0), ValId(4))）
+codegen/compress-inline-asm 解析：`llvm.inline_asm`：compress_test：不支持的 op `llvm.inline_asm`
+codegen/condbinops/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0xad71a19a25626f15, 0xffffffffffffffff, 0x1)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff5ae
+codegen/condbinops/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0xffffffffffffffff, 0xa17b35a1dcb010ac, 0x1)：riscvc Returned 0xfffff  ≠  llc Returned 0xfffffffffffff
+codegen/condbinops/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x7fffffff, 0x1fcb8c8914f90914, 0x1)：riscvc Returned 0x7fffffff00000  ≠  llc Returned 0xfff0000000000000
+codegen/condops/single_bit3 编译：指令选择：不支持的类型 Int(80)
+codegen/ctlz-cttz-ctpop/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
+codegen/ctlz-cttz-ctpop/test_cttz_i64_zero_undef 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0x0)：riscvc Returned 0x40  ≠  llc Returned 0x20
+codegen/div_minsize/i128_sdiv 编译：指令选择：不支持的类型 Int(128)
+codegen/div_minsize/i256_sdiv 编译：指令选择：不支持的类型 Int(256)
+codegen/double-convert/fcvt_w_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i16(-1123368718087100800000000000000000000000000000000000000000000000)：riscvc Returned 0x0  ≠  llc Returned
+codegen/double-convert/fcvt_w_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i8(376.0000000021074)：riscvc Returned 0x78  ≠  llc Returned 0x178
+codegen/double-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i16(2163380399120945800000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+codegen/double-convert/fcvt_wu_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i8(inf)：riscvc Returned 0xff  ≠  llc Returned 0xffffffff
+codegen/double-intrinsics 解析：`llvm.intr.exp10`：exp10_f64：不支持的 op `llvm.intr.exp10`
+codegen/double-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f64：不支持的 op `llvm.intr.minimum`
+codegen/double_reduct 解析：`llvm.intr.vector.reduce.fadd`：add_f32：不支持的 op `llvm.intr.vector.reduce.fadd`
+codegen/dso_local_equivalent 解析：`llvm.dso_local_equivalent`：不支持的 op `llvm.dso_local_equivalent`
+codegen/dwarf-eh 解析：`llvm.invoke`：test1：不支持的 op `llvm.invoke`
+codegen/eh-dwarf-cfa 解析：`llvm.call_intrinsic`：dwarf：不支持的 op `llvm.call_intrinsic`
+codegen/emutls 链接：codegen/emutls：.text 里不支持的重定位类型 21
+codegen/exception-pointer-register 解析：`llvm.invoke`：caller：不支持的 op `llvm.invoke`
+codegen/fastcc-bf16 解析：`llvm.extractelement`：callee：不支持的 op `llvm.extractelement`
+codegen/fastcc-float 解析：`llvm.extractelement`：callee：不支持的 op `llvm.extractelement`
+codegen/fastcc-half 解析：`llvm.extractelement`：callee：不支持的 op `llvm.extractelement`
+codegen/fastcc-int 解析：`llvm.extractelement`：callee：不支持的 op `llvm.extractelement`
+codegen/fastcc-without-f-reg 解析：`llvm.extractelement`：callee_half_32：不支持的 op `llvm.extractelement`
+codegen/fixups-diff 解析：`llvm.inline_asm`：main：不支持的 op `llvm.inline_asm`
+codegen/float-arith/fmadd_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fmadd_s_contract(-308.03195, 596.08826, -645.0741)：riscvc Returned 0xc833f0d4  ≠  llc Returned 0xc833f0d3
+codegen/float-arith/fmsub_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fmsub_s_contract(-28.003525, 552.0523, 509.03436)：riscvc Returned 0xc67981c7  ≠  llc Returned 0xc67981c8
+codegen/float-arith/fnmadd_nsz 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】fnmadd_nsz(583023200000000000000000000000000000, 589.0227, NaN)：riscvc Returned 0xffc00000  ≠  llc Returned 0x7fc0000
+codegen/float-arith/fnmadd_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fnmadd_s_contract(-258.05145, 674.03986, 768.0515)：riscvc Returned 0x48291c3b  ≠  llc Returned 0x48291c3a
+codegen/float-bit-preserving-dagcombines/bitcast_double_or 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_double_or(NaN, -0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+codegen/float-bit-preserving-dagcombines/bitcast_double_xor 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_double_xor(NaN, 42.00000000033805)：riscvc Returned 0x7ff8000000000000  ≠  llc Returned 0xfff8000000000000
+codegen/float-bit-preserving-dagcombines/bitcast_or 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_or(NaN, 775667140000000000000000)：riscvc Returned 0x7fc00000  ≠  llc Returned 0xffc00000
+codegen/float-bit-preserving-dagcombines/bitcast_xor 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_xor(NaN, 0.5)：riscvc Returned 0x7fc00000  ≠  llc Returned 0xffc00000
+codegen/float-convert/fcvt_w_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i16(-inf)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-convert/fcvt_w_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i8(-853.09436)：riscvc Returned 0xffffffab  ≠  llc Returned 0xfffffcab
+codegen/float-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i16(16777216)：riscvc Returned 0x0  ≠  llc Returned 0x1000000
+codegen/float-convert/fcvt_wu_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i8(257.04236)：riscvc Returned 0x1  ≠  llc Returned 0x101
+codegen/float-intrinsics 解析：`llvm.intr.exp10`：exp10_f32：不支持的 op `llvm.intr.exp10`
+codegen/float-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f32：不支持的 op `llvm.intr.minimum`
+codegen/flt-rounds 解析：`llvm.call_intrinsic`：test_flt_rounds：不支持的 op `llvm.call_intrinsic`
+codegen/fold-addi-loadstore 解析：`llvm.blockaddress`：load_ba_1：不支持的 op `llvm.blockaddress`
+codegen/fp-fcanonicalize 解析：`llvm.call_intrinsic`：fcanonicalize_f16：不支持的 op `llvm.call_intrinsic`
+codegen/fp128 解析：`llvm.intr.maximum`：fmaximum：不支持的 op `llvm.intr.maximum`
+codegen/fpclamptosat/stest_f16i64 编译：指令选择：stest_f16i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/stest_f16i64_mm 编译：指令选择：stest_f16i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/stest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】stest_f32i32_mm(-inf)：riscvc Returned 0x1  ≠  llc Returned 0x80000000
+codegen/fpclamptosat/stest_f32i64 编译：指令选择：stest_f32i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/stest_f32i64_mm 编译：指令选择：stest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/stest_f64i64 编译：指令选择：stest_f64i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/stest_f64i64_mm 编译：指令选择：stest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f16i64 编译：指令选择：ustest_f16i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f16i64_mm 编译：指令选择：ustest_f16i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f32i32 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32(-186055700000000000000)：riscvc Returned 0x1  ≠  llc Returned 0x0
+codegen/fpclamptosat/ustest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32_mm(inf)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
+codegen/fpclamptosat/ustest_f32i64 编译：指令选择：ustest_f32i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f32i64_mm 编译：指令选择：ustest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f64i64 编译：指令选择：ustest_f64i64：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/ustest_f64i64_mm 编译：指令选择：ustest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToSi, ValId(0))）
+codegen/fpclamptosat/utest_f32i32 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】utest_f32i32(NaN)：riscvc Returned 0xffffffff  ≠  llc Returned 0x0
+codegen/fpclamptosat/utest_f32i64 编译：指令选择：utest_f32i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpclamptosat/utest_f32i64_mm 编译：指令选择：utest_f32i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpclamptosat/utest_f64i64 编译：指令选择：utest_f64i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpclamptosat/utest_f64i64_mm 编译：指令选择：utest_f64i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpclamptosat/utesth_f16i64 编译：指令选择：utesth_f16i64：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpclamptosat/utesth_f16i64_mm 编译：指令选择：utesth_f16i64_mm：不支持的类型 Int(128)（Cast(FpToUi, ValId(0))）
+codegen/fpenv 解析：`llvm.call_intrinsic`：func_01：不支持的 op `llvm.call_intrinsic`
+codegen/fpenv-xlen 解析：`llvm.call_intrinsic`：func_get_fpenv：不支持的 op `llvm.call_intrinsic`
+codegen/frameaddr-returnaddr 解析：`llvm.call_intrinsic`：test_frameaddress_0：不支持的 op `llvm.call_intrinsic`
+codegen/get-setcc-result-type/getSetCCResultType 编译：指令选择：getSetCCResultType：整数运算不支持 Vector(4, Ty(4))（ICmp(Eq, ValId(4), ValId(3))）
+codegen/half-convert 解析：`llvm.call_intrinsic`：fcvt_si_h_sat：不支持的 op `llvm.call_intrinsic`
+codegen/half-intrinsics 解析：`llvm.intr.exp10`：exp10_f16：不支持的 op `llvm.intr.exp10`
+codegen/half-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f16：不支持的 op `llvm.intr.minimum`
+codegen/half-round-conv-sat 解析：`llvm.call_intrinsic`：test_floor_si32：不支持的 op `llvm.call_intrinsic`
+codegen/iabs/abs128 编译：指令选择：不支持的类型 Int(128)
+codegen/iabs/select_abs128 编译：指令选择：不支持的类型 Int(128)
+codegen/icmp-non-byte-sized/icmp_non_byte_type 编译：指令选择：icmp_non_byte_type：整数运算不支持 Int(127)（ICmp(Eq, ValId(2), ValId(3))）
+codegen/idiv_large/udiv_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/idiv_large/udiv_i129 编译：指令选择：不支持的类型 Int(129)
+codegen/idiv_large/udiv_i65 编译：指令选择：不支持的类型 Int(65)
+codegen/indirectbr 解析：`llvm.indirectbr`：indirectbr：不支持的 op `llvm.indirectbr`
+codegen/inline-asm-abi-names 解析：`llvm.inline_asm`：explicit_register_x0：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-clobbers 解析：`llvm.inline_asm`：testcase：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-f-abi-names 解析：`llvm.inline_asm`：explicit_register_f0：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-f-constraint-f 解析：`llvm.inline_asm`：constraint_f_float：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-f-modifier-N 解析：`llvm.inline_asm`：constraint_f_modifier_N_float：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-i-constraint-i1 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
+codegen/inline-asm-s-constraint 解析：`llvm.inline_asm`：test：不支持的 op `llvm.inline_asm`
+codegen/inline-option-directive 解析：`llvm.inline_asm`：test：不支持的 op `llvm.inline_asm`
+codegen/interrupt-attr 解析：`llvm.func`：foo_supervisor：函数属性 `interrupt` 不支持
+codegen/interrupt-attr-nocall 解析：`llvm.func`：foo_i32：函数属性 `interrupt` 不支持
+codegen/intrinsic-cttz-elts 解析：`llvm.call_intrinsic`：ctz_v4i32：不支持的 op `llvm.call_intrinsic`
+codegen/kcfi-isel-mir/f1 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f1(ptr0)：riscvc Trap(439431568)   ≠  llc Trap(1048691)
+codegen/kcfi-isel-mir/f2 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f2(ptr0)：riscvc Trap(26390228)   ≠  llc Trap(1048691)
+codegen/kcfi-mir/f1 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f1(ptr0)：riscvc Trap(0)   ≠  llc Trap(1048691)
+codegen/kcfi-mir/f2 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f2(ptr0)：riscvc Trap(3658387931)   ≠  llc Trap(1048691)
+codegen/kcfi-patchable-function-prefix/f1 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f1(ptr0)：riscvc Trap(990022866)   ≠  llc Trap(1048691)
+codegen/kcfi-patchable-function-prefix/f2 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f2(ptr0)：riscvc Trap(3262335798)   ≠  llc Trap(1048691)
+codegen/kcfi-patchable-function-prefix/f3 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f3(ptr0)：riscvc Trap(1646215635)   ≠  llc Trap(1048691)
+codegen/kcfi-patchable-function-prefix/f4 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f4(ptr0)：riscvc Trap(1371594613)   ≠  llc Trap(1048691)
+codegen/kcfi/f1 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f1(ptr0)：riscvc Trap(2750864610)   ≠  llc Trap(1048691)
+codegen/kcfi/f2 结果：【fixture：MLIR 导入丢了 kcfi operand bundle（llc 的 .ll 有类型检查 + ebreak），riscvc 看不到】f2(ptr0)：riscvc Trap(2354360551)   ≠  llc Trap(1048691)
+codegen/large-stack 解析：`llvm.inline_asm`：test_emergency_spill_slot：不支持的 op `llvm.inline_asm`
+codegen/legalize-fneg/test3 编译：指令选择：test3：不能 load Fp128（Load { ptr: ValId(1), align: 16, volatile: false, atomic: None }）
+codegen/libcall-tail-calls 解析：`llvm.intr.llround`：llround_f32：不支持的 op `llvm.intr.llround`
+codegen/llvm.exp10 解析：`llvm.intr.exp10`：exp10_v1f16：不支持的 op `llvm.intr.exp10`
+codegen/llvm.frexp 解析：`llvm.intr.frexp`：test_frexp_f16_i32：不支持的 op `llvm.intr.frexp`
+codegen/load-store-pair 解析：`llvm.inline_asm`：testi：不支持的 op `llvm.inline_asm`
+codegen/loop-strength-reduce-add-cheaper-than-mul/test 域外：【UB：i 为负时下标 zext 成巨大的数，store 写出 @flags2（8193 字节）的边界；⛔ 移位问题】test(0xfffffffe)：riscvc Trap(4244692480)   ≠  llc Trap(32768)
+codegen/lpad 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
+codegen/machinelicm-address-pseudos 链接：codegen/machinelicm-address-pseudos：.text 里不支持的重定位类型 21
+codegen/mask-variable-shift/mask_pair_128 编译：指令选择：不支持的类型 Int(128)
+codegen/mask-variable-shift/mask_pair_64 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】mask_pair_64(0xffffffffffffffff, 0x7746434ecbf2c43b)：riscvc Returned 0xf800000000000000  ≠  llc Returned 0xfffffffff8
+codegen/mem/disjoint_or_lb 结果：【poison：or disjoint 的两边有重叠位】disjoint_or_lb(ptr0, 0x1)：riscvc Returned 0x88  ≠  llc Returned 0xeb
+codegen/mem/disjoint_or_lw 结果：【poison：or disjoint 的两边有重叠位】disjoint_or_lw(ptr0, 0x29)：riscvc Returned 0xdcacad9d  ≠  llc Returned 0xc8d5c373
+codegen/mem/load_sext_zext_anyext_i1 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1(ptr0)：riscvc Returned 0x4a  ≠  llc Returned 0xfffffffc
+codegen/mem/load_sext_zext_anyext_i1_i16 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1_i16(ptr0)：riscvc Returned 0x39  ≠  llc Returned 0xff91
+codegen/mem64/load_sext_zext_anyext_i1 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1(ptr0)：riscvc Returned 0xcc  ≠  llc Returned 0x92
+codegen/mem64/load_sext_zext_anyext_i1_i16 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1_i16(ptr0)：riscvc Returned 0xca  ≠  llc Returned 0xbe
+codegen/memcpy-inline/aligned_memcpy0 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy1 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy15 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy3 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy31 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy7 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/memcpy11_align8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/memcpy16_align4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy0 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy1 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy15 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy3 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy31 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy7 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/unaligned_memcpy8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_32 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_64 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_15 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_32 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_64 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_7 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/aligned_memset_zero_8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_1 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_32 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_64 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_1 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_16 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_2 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_32 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_4 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_64 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-inline/memset_zero_8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memset-pattern 解析：`llvm.call_intrinsic`：memset_1：不支持的 op `llvm.call_intrinsic`
+codegen/mir-target-flags 链接：codegen/mir-target-flags：.text 里不支持的重定位类型 21
+codegen/miss-sp-restore-eh 解析：`llvm.invoke`：foo：不支持的 op `llvm.invoke`
+codegen/mul/mulhsu_i64 编译：指令选择：mulhsu_i64：整数运算不支持 Int(128)（Bin(Mul, ValId(3), ValId(4))）
+codegen/mul/muli128_m3840 编译：指令选择：不支持的类型 Int(128)
+codegen/mul/muli128_m63 编译：指令选择：不支持的类型 Int(128)
+codegen/naked-fn-with-frame-pointer 解析：`llvm.func`：naked：函数属性 `naked` 不支持
+codegen/nest-register 解析：MLIR：参数属性 `llvm.nest` 不支持
+codegen/nontemporal/test_nontemporal_ALL_load_v16i8 编译：指令选择：test_nontemporal_ALL_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_ALL_load_v2i64 编译：指令选择：test_nontemporal_ALL_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_ALL_load_v4i32 编译：指令选择：test_nontemporal_ALL_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_ALL_load_v8i16 编译：指令选择：test_nontemporal_ALL_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_P1_load_v16i8 编译：指令选择：test_nontemporal_P1_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_P1_load_v2i64 编译：指令选择：test_nontemporal_P1_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_P1_load_v4i32 编译：指令选择：test_nontemporal_P1_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_P1_load_v8i16 编译：指令选择：test_nontemporal_P1_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_PALL_load_v16i8 编译：指令选择：test_nontemporal_PALL_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_PALL_load_v2i64 编译：指令选择：test_nontemporal_PALL_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_PALL_load_v4i32 编译：指令选择：test_nontemporal_PALL_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_PALL_load_v8i16 编译：指令选择：test_nontemporal_PALL_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_S1_load_v16i8 编译：指令选择：test_nontemporal_S1_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_S1_load_v2i64 编译：指令选择：test_nontemporal_S1_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_S1_load_v4i32 编译：指令选择：test_nontemporal_S1_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_S1_load_v8i16 编译：指令选择：test_nontemporal_S1_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_load_v16i8 编译：指令选择：test_nontemporal_load_v16i8：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_load_v2i64 编译：指令选择：test_nontemporal_load_v2i64：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_load_v4i32 编译：指令选择：test_nontemporal_load_v4i32：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/nontemporal/test_nontemporal_load_v8i16 编译：指令选择：test_nontemporal_load_v8i16：返回值放不进寄存器（sret 降级）还没做（Ret(Some(ValId(1)))）
+codegen/option-exact-inlineasm 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
+codegen/option-nopic 解析：`llvm.inline_asm`：get_symbol：不支持的 op `llvm.inline_asm`
+codegen/option-norelax 解析：`llvm.inline_asm`：bar：不支持的 op `llvm.inline_asm`
+codegen/option-norvc 解析：`llvm.inline_asm`：add：不支持的 op `llvm.inline_asm`
+codegen/option-pic 解析：`llvm.inline_asm`：get_symbol：不支持的 op `llvm.inline_asm`
+codegen/option-relax 解析：`llvm.inline_asm`：bar：不支持的 op `llvm.inline_asm`
+codegen/option-rvc 解析：`llvm.inline_asm`：add：不支持的 op `llvm.inline_asm`
+codegen/or-is-add/test7 结果：【poison：or disjoint 的两边有重叠位】test7(0x3)：riscvc Returned 0x3  ≠  llc Returned 0x4
+codegen/pei-crash 解析：`llvm.call_intrinsic`：a：不支持的 op `llvm.call_intrinsic`
+codegen/poison-legalization/PromoteHalf 结果：【poison：store poison】PromoteHalf(ptr0)：指针实参指向的内存不同
+codegen/poison-legalization/SoftenFloat 结果：【poison：store poison】SoftenFloat(ptr0)：指针实参指向的内存不同
+codegen/pr145360/signed 域外：【poison：exact 除法除不尽】signed(0xffffffff, ptr1)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
+codegen/pr145360/unsigned 结果：【poison：exact 除法除不尽】unsigned(0x3a, ptr1)：riscvc Returned 0x2  ≠  llc Returned 0xaaaaaaad
+codegen/pr56110/foo_set 编译：指令选择：foo_set：整数运算不支持 Int(96)（Bin(Shl, ValId(7), ValId(3))）
+codegen/pr58025/f 编译：指令选择：f：整数运算不支持 Vector(1, Ty(6))（Bin(FDiv, ValId(0), ValId(0))）
+codegen/pr63816/test 编译：指令选择：test：不支持的转换 FpExt：Vector(8, Ty(11)) ⇒ Vector(8, Ty(7))（Cast(FpExt, ValId(2))）
+codegen/pr64503/f 结果：【poison：srem 1, 0（除以零）/ store poison】f(0xf57863d13d3a9fd7)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/pr64503/g 结果：【poison：srem 1, 0（除以零）/ store poison】g(ptr0, 0x2c)：riscvc Returned 0x0  ≠  llc Returned 0x2c00000001
+codegen/pr64645/v2f64 编译：指令选择：v2f64：整数运算不支持 Vector(2, Ty(7))（Bin(FAdd, ValId(0), ValId(1))）
+codegen/pr65025/cmpxchg_masked_and_branch1 编译：指令选择：cmpxchg_masked_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
+codegen/pr92193 解析：`llvm.insertelement`：foo：不支持的 op `llvm.insertelement`
+codegen/pr94265/PR94265 编译：指令选择：PR94265：整数运算不支持 Vector(8, Ty(4))（Bin(SDiv, ValId(0), ValId(1))）
+codegen/push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属性 `interrupt` 不支持
+codegen/readcyclecounter 解析：`llvm.call_intrinsic`：test_builtin_readcyclecounter：不支持的 op `llvm.call_intrinsic`
+codegen/readsteadycounter 解析：`llvm.call_intrinsic`：test_builtin_readsteadycounter：不支持的 op `llvm.call_intrinsic`
+codegen/reduction-formation 解析：`llvm.extractelement`：reduce_sum_4xi32：不支持的 op `llvm.extractelement`
+codegen/relative-reloc 解析：MLIR：初值里的 Sub 不支持
+codegen/remat 解析：`llvm.inline_asm`：remat_load：不支持的 op `llvm.inline_asm`
+codegen/repeated-fp-divisors/two_fdivs 结果：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】two_fdivs(-2240998814143733100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+codegen/reserved-reg-errors 解析：`llvm.inline_asm`：clobber：不支持的 op `llvm.inline_asm`
+codegen/rotl-rotr/rotl_32_mask_or_64_or_32 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_32_mask_or_64_or_32(0x5, 0x37)：riscvc Returned 0x2800000  ≠  llc Returned 0x0
+codegen/rotl-rotr/rotl_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_64(0xc9edba38725f7d11, 0x0)：riscvc Returned 0xc9edba38725f7d11  ≠  llc Returned 0xc9edba38fbffff39
+codegen/rotl-rotr/rotl_64_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_64_mask(0x1, 0x555ed2b00f98709c)：riscvc Returned 0x10000000  ≠  llc Returned 0x1000000000000000
+codegen/rotl-rotr/rotl_64_mask_and_127_and_63 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_64_mask_and_127_and_63(0xffff, 0xb9f5a6f7f5881ec4)：riscvc Returned 0xffff0  ≠  llc Returned 0xffff000000000
+codegen/rotl-rotr/rotl_64_mask_or_128_or_64 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_64_mask_or_128_or_64(0xaafb1b474bd7590e, 0x1e)：riscvc Returned 0xd2f5d643aabec6d1  ≠  llc Returned 0x0
+codegen/rotl-rotr/rotl_64_zext 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_64_zext(0x24, 0xffffffff)：riscvc Returned 0x12  ≠  llc Returned 0x1200000000
+codegen/rotl-rotr/rotr_32_mask_or_64_or_32 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_32_mask_or_64_or_32(0x1c, 0x7fffffff)：riscvc Returned 0x38  ≠  llc Returned 0x0
+codegen/rotl-rotr/rotr_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64(0x3d, 0x0)：riscvc Returned 0x3d  ≠  llc Returned 0x3d0000003d
+codegen/rotl-rotr/rotr_64_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_mask(0xcf6a9134486033e, 0x2a12e5c70fa59782)：riscvc Returned 0x833daa44d12180cf  ≠  llc Returned 0x80000000033
+codegen/rotl-rotr/rotr_64_mask_or_128_or_64 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_mask_or_128_or_64(0x6ce4de9264e941, 0x7f)：riscvc Returned 0xd9c9bd24c9d282  ≠  llc Returned 0x0
+codegen/rotl-rotr/rotr_64_zext 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_zext(0xfffffffffffffffe, 0x1f4201d7)：riscvc Returned 0xfffffdffffffffff  ≠  llc Returned 0xfffffffffffffdff
+codegen/rv32-inline-asm-pairs 解析：`llvm.inline_asm`：test_Pr_wide_scalar_simple：不支持的 op `llvm.inline_asm`
+codegen/rv32p 解析：`llvm.intr.sshl.sat`：shlsat_i8：不支持的 op `llvm.intr.sshl.sat`
+codegen/rv32zbb-zbkb/not_shl_one_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】not_shl_one_i64(0x50308b26bf26cceb)：riscvc Returned 0xfffff7ffffffffff  ≠  llc Returned 0xfffffffffffff7ff
+codegen/rv32zbb/ctpop32_ne_one_nonzero 域外：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
+codegen/rv32zbb/ctpop_v2i32 编译：指令选择：ctpop_v2i32：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i32_eq_one 编译：指令选择：ctpop_v2i32_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i32_ne_one 编译：指令选择：ctpop_v2i32_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i32_ugt_one 编译：指令选择：ctpop_v2i32_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i32_ult_two 编译：指令选择：ctpop_v2i32_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i64 编译：指令选择：ctpop_v2i64：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i64_eq_one 编译：指令选择：ctpop_v2i64_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i64_ne_one 编译：指令选择：ctpop_v2i64_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i64_ugt_one 编译：指令选择：ctpop_v2i64_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/ctpop_v2i64_ult_two 编译：指令选择：ctpop_v2i64_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv32zbb/sub_if_uge_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv32zbs/bset_i64_zero 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bset_i64_zero(0x80000000)：riscvc Returned 0x1  ≠  llc Returned 0x100000000
+codegen/rv32zbs/bset_trailing_ones_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】bset_trailing_ones_i64_no_mask(0x7fffffffffffffff)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
+codegen/rv64-double-convert/fptosi_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-double-convert/fptosi_sat_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-double-convert/fptoui_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-double-convert/fptoui_sat_f64_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-double-convert/sitofp_i128_to_f64 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-double-convert/uitofp_i128_to_f64 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/fptosi_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/fptosi_sat_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/fptoui_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/fptoui_sat_f32_to_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/sitofp_i128_to_f32 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-float-convert/uitofp_i128_to_f32 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64-half-convert 解析：`llvm.call_intrinsic`：fptosi_sat_f16_to_i128：不支持的 op `llvm.call_intrinsic`
+codegen/rv64i-demanded-bits/and_allones 结果：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】and_allones(0xfffffffe)：riscvc Returned 0x2000000000000000  ≠  llc Returned 0x20000000
+codegen/rv64i-tricky-shifts/tricky_ashr 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_ashr(0xf6b305aa2ec7ff97, 0x67ff8481dcbfede7)：riscvc Returned 0x0  ≠  llc Returned 0x5d8fff
+codegen/rv64i-tricky-shifts/tricky_lshr 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_lshr(0xffffffffffffffff, 0xffffffffffffffff)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/rv64i-tricky-shifts/tricky_shl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_shl(0x38, 0x93d210071f60fc11)：riscvc Returned 0x700000  ≠  llc Returned 0x0
+codegen/rv64p/slx_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64p/slxi_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64p/srx_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64p/srxi_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64xtheadbb/cttz_zero_undef_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
+codegen/rv64zba/slliuw_2 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64zba/slliuw_ptrdiff 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64zbb-zbkb/not_shl_one_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】not_shl_one_i64(0xdf5622fda0ba197a)：riscvc Returned 0xfbffffffffffffff  ≠  llc Returned 0xfffffffffbffffff
+codegen/rv64zbb/ctpop32_ne_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
+codegen/rv64zbb/ctpop64_eq_one_nonzero 域外：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop64_eq_one_nonzero(0x0)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/rv64zbb/ctpop_v2i32 编译：指令选择：ctpop_v2i32：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i32_eq_one 编译：指令选择：ctpop_v2i32_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i32_ne_one 编译：指令选择：ctpop_v2i32_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i32_ugt_one 编译：指令选择：ctpop_v2i32_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i32_ult_two 编译：指令选择：ctpop_v2i32_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i64 编译：指令选择：ctpop_v2i64：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i64_eq_one 编译：指令选择：ctpop_v2i64_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i64_ne_one 编译：指令选择：ctpop_v2i64_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i64_ugt_one 编译：指令选择：ctpop_v2i64_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/ctpop_v2i64_ult_two 编译：指令选择：ctpop_v2i64_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
+codegen/rv64zbb/cttz_zero_undef_i32 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
+codegen/rv64zbb/sub_if_uge_i128 编译：指令选择：不支持的类型 Int(128)
+codegen/rv64zbs/bclr_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bclr_i64_no_mask(0xffff, 0x7830ae7e279793c0)：riscvc Returned 0xfffe  ≠  llc Returned 0xffff
+codegen/rv64zbs/bext_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bext_i64_no_mask(0xffff, 0x52e4c708d9892c25)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/rv64zbs/binv_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】binv_i64_no_mask(0x8f470954cf1323f6, 0x3cd89c392debca93)：riscvc Returned 0x8f470954cf1b23f6  ≠  llc Returned 0x8f4f09
+codegen/rv64zbs/bset_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bset_i64_no_mask(0x7f, 0x654ff3c02be42add)：riscvc Returned 0x2000007f  ≠  llc Returned 0x200000000000007f
+codegen/rv64zbs/bset_i64_zero 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bset_i64_zero(0xdc7d0b1d99290e20)：riscvc Returned 0x100000000  ≠  llc Returned 0x1
+codegen/rv64zbs/bset_trailing_ones_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】bset_trailing_ones_i64_no_mask(0xffffffffffffffff)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
+codegen/rv64zfh-half-intrinsics 解析：`llvm.intr.llrint`：llrint_f16：不支持的 op `llvm.intr.llrint`
+codegen/rv64zfhmin-half-intrinsics 解析：`llvm.intr.llrint`：llrint_f16：不支持的 op `llvm.intr.llrint`
+codegen/rvp-ext-rv32 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
+codegen/rvp-ext-rv64 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
+codegen/saverestore 解析：`llvm.inline_asm`：callee_saved_fp：不支持的 op `llvm.inline_asm`
+codegen/scmp/scmp.8.128 编译：指令选择：不支持的类型 Int(128)
+codegen/select-optimize-multiple/cmov128 编译：指令选择：不支持的类型 Int(128)
+codegen/select-optimize-multiple/cmovcc128 编译：指令选择：不支持的类型 Int(128)
+codegen/select/select_ashr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_ashr_3(0x0, 0xffff)：riscvc Returned 0x3f  ≠  llc Returned 0xffff
+codegen/select/select_lshr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_lshr_3(0x0, 0x40e8f2f4)：riscvc Returned 0x103a3c  ≠  llc Returned 0x40e8f2f4
+codegen/select/select_shl_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_shl_3(0x0, 0x3e)：riscvc Returned 0xf800  ≠  llc Returned 0x3e
+codegen/shift-amount-mod/ashr_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr_by_complemented_64(0xf17a11e07e3fe749)：riscvc Returned 0xffffffffffffffc5  ≠  llc Returned 0xffffffc5e84781f8
+codegen/shift-amount-mod/lshr_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr_by_complemented_64(0x7fffffffffffffff)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
+codegen/shift-amount-mod/shl_by_complemented_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl_by_complemented_64(0xffffffffffffffff)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff00000000
+codegen/shifts/ashr128 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/ashr128_shamt32 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0x29, 0xcc5810799f4fe2e0)：riscvc Returned 0x0  ≠  llc Returned 0x29
+codegen/shifts/ashr64_minsize 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64_minsize(0x12b7c37f19e22920, 0x935b050251480140)：riscvc Returned 0x12b7c37f19e22920  ≠  llc Returned 0x12b7c37f
+codegen/shifts/ashr64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64_shamt32(0x80000000, 0x5da4bf11)：riscvc Returned 0x4000  ≠  llc Returned 0x0
+codegen/shifts/fshr128_minsize 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/lshr128 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/lshr128_shamt32 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0x7fffffff, 0x65d5bde4b58276ae)：riscvc Returned 0x0  ≠  llc Returned 0x1ffff
+codegen/shifts/lshr64_minsize 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_minsize(0xb4898d17257d794, 0x80000000)：riscvc Returned 0xb4898d17257d794  ≠  llc Returned 0xb4898d17b5fdfd5
+codegen/shifts/lshr64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_shamt32(0x40efb830d6bb1d10, 0x80000000)：riscvc Returned 0x40efb830d6bb1d10  ≠  llc Returned 0x40efb830
+codegen/shifts/shl128 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/shl128_shamt32 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/shl128_shamt32_arith 编译：指令选择：不支持的类型 Int(128)
+codegen/shifts/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x8, 0xb8592bc868ce0195)：riscvc Returned 0x1000000  ≠  llc Returned 0x100000000000000
+codegen/shifts/shl64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64_shamt32(0x27, 0xdf5d93ae)：riscvc Returned 0x9c00000000000  ≠  llc Returned 0x9c000
+codegen/shl-cttz/shl_cttz_constant_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_constant_i32(0x0)：riscvc Returned 0x4  ≠  llc Returned 0x0
+codegen/shl-cttz/shl_cttz_constant_i64 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_constant_i64(0x0)：riscvc Returned 0x4  ≠  llc Returned 0x400000000
+codegen/shl-cttz/shl_cttz_i64 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_i64(0x31, 0x0)：riscvc Returned 0x31  ≠  llc Returned 0x3100000000
+codegen/short-forward-branch-opt/select_sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sll(0x4685c7ec68d9a1f9, 0x9143326e75bd5115, 0x0, 0x0)：riscvc Returned 0xfd8d1b343f200000  ≠  llc Returned 0x3f
+codegen/short-forward-branch-opt/select_sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sra(0x9ddc357a5210b102, 0x7fffffffffffffff, 0xcb2d42bfd788931c, 0x0)：riscvc Returned 0xffffffffffffffff  ≠  ll
+codegen/short-forward-branch-opt/select_srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_srl(0x6ddf493bea42edf2, 0x1b454d08391ca48f, 0x80, 0x0)：riscvc Returned 0xdbbe9277d485  ≠  llc Returned 0xdbbe
+codegen/sincos-expansion/test_sincos_f128 编译：指令选择：不支持的类型 Fp128
+codegen/sincos-expansion/test_sincos_f128_errno 编译：指令选择：不支持的类型 Fp128
+codegen/spill-fill-fold 解析：`llvm.inline_asm`：spill_i32_to_float：不支持的 op `llvm.inline_asm`
+codegen/spill-fpr-scalar 解析：`llvm.inline_asm`：spill_half：不支持的 op `llvm.inline_asm`
+codegen/split-udiv-by-constant/test_udiv_12 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_15 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_17 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_255 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_257 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_3 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_5 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_65535 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_65537 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_7 编译：指令选择：不支持的类型 Int(322)
+codegen/split-udiv-by-constant/test_udiv_9 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_12 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_15 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_17 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_255 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_257 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_3 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_5 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_65535 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_65537 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_7 编译：指令选择：不支持的类型 Int(322)
+codegen/split-urem-by-constant/test_urem_9 编译：指令选择：不支持的类型 Int(322)
+codegen/sra-xor-sra/sra_xor_sra_overflow 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra_xor_sra_overflow(0x39, 0x2b)：riscvc Returned 0x2b  ≠  llc Returned 0x0
+codegen/srem-seteq-illegal-types/test_srem_vec 编译：指令选择：test_srem_vec：整数运算不支持 Vector(3, Ty(17))（Bin(SRem, ValId(9), ValId(4))）
+codegen/srem-vector-lkk/combine_srem_sdiv 编译：指令选择：combine_srem_sdiv：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/dont_fold_srem_i64 编译：指令选择：dont_fold_srem_i64：整数运算不支持 Vector(4, Ty(5))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/dont_fold_srem_one 编译：指令选择：dont_fold_srem_one：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/dont_fold_srem_power_of_two 编译：指令选择：dont_fold_srem_power_of_two：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/dont_fold_urem_i16_smax 编译：指令选择：dont_fold_urem_i16_smax：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/fold_srem_vec_1 编译：指令选择：fold_srem_vec_1：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/srem-vector-lkk/fold_srem_vec_2 编译：指令选择：fold_srem_vec_2：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
+codegen/stack-folding 解析：`llvm.inline_asm`：test_sext_w：不支持的 op `llvm.inline_asm`
+codegen/stack-slot-size/caller129 编译：指令选择：caller129：不支持的类型 Int(129)（Call { fty: Ty(11), callee: Direct("callee129"), args: [(ValId(2), ArgAttrs { signext:
+codegen/stack-slot-size/caller160 编译：指令选择：caller160：不支持的类型 Int(160)（Call { fty: Ty(13), callee: Direct("callee160"), args: [(ValId(2), ArgAttrs { signext:
+codegen/stack-slot-size/caller161 编译：指令选择：caller161：不支持的类型 Int(161)（Call { fty: Ty(15), callee: Direct("callee161"), args: [(ValId(2), ArgAttrs { signext:
+codegen/stack-store-check/main 编译：指令选择：main：不能 load Fp128（Load { ptr: ValId(0), align: 16, volatile: false, atomic: None }）
+codegen/switch-width/native_i64 编译：指令选择：native_i64：值 %0 有 2 个部件，这里只收一个（Switch(ValId(0), Target { block: BlockId(3), args: [] }, [(1, Target { block: Blo
+codegen/tail-calls 解析：`llvm.func`：caller_irq：函数属性 `interrupt` 不支持
+codegen/thread-pointer 解析：`llvm.call_intrinsic`：thread_pointer：不支持的 op `llvm.call_intrinsic`
+codegen/tls-models 链接：codegen/tls-models：.text 里不支持的重定位类型 21
+codegen/tlsdesc-symbol 链接：codegen/tlsdesc-symbol：.text 里不支持的重定位类型 21
+codegen/trunc-nsw-nuw/trunc_nsw_add 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】trunc_nsw_add(0xdc9aed7f)：riscvc Returned 0xffffff80  ≠  llc Returned 0xdc9aed80
+codegen/ucmp/ucmp.8.128 编译：指令选择：不支持的类型 Int(128)
+codegen/umulo-128-legalisation-lowering/muloti_test 编译：指令选择：不支持的类型 Int(128)
+codegen/urem-seteq-illegal-types/test_urem_vec 编译：指令选择：test_urem_vec：整数运算不支持 Vector(3, Ty(19))（Bin(URem, ValId(9), ValId(4))）
+codegen/urem-vector-lkk/combine_urem_udiv 编译：指令选择：combine_urem_udiv：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/dont_fold_urem_i16_smax 编译：指令选择：dont_fold_urem_i16_smax：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/dont_fold_urem_i64 编译：指令选择：dont_fold_urem_i64：整数运算不支持 Vector(4, Ty(5))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/dont_fold_urem_one 编译：指令选择：dont_fold_urem_one：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/dont_fold_urem_power_of_two 编译：指令选择：dont_fold_urem_power_of_two：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/fold_urem_vec_1 编译：指令选择：fold_urem_vec_1：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/urem-vector-lkk/fold_urem_vec_2 编译：指令选择：fold_urem_vec_2：整数运算不支持 Vector(4, Ty(3))（Bin(URem, ValId(0), ValId(1))）
+codegen/usub_sat/fun12 编译：指令选择：fun12：值 %0 有 4 个部件，这里只收一个（Intr(USubSat, [ValId(0), ValId(1)])）
+codegen/usub_sat/fun13 编译：指令选择：fun13：值 %0 有 4 个部件，这里只收一个（Intr(USubSat, [ValId(0), ValId(1)])）
+codegen/usub_sat/fun14 编译：指令选择：fun14：值 %0 有 4 个部件，这里只收一个（Intr(USubSat, [ValId(0), ValId(2)])）
+codegen/vararg 解析：`llvm.va_arg`：va1_va_arg：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_16bytes 编译：指令选择：ashr_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_16bytes_wordOff 编译：指令选择：ashr_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes 编译：指令选择：ashr_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes_dwordOff 编译：指令选择：ashr_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_32bytes_wordOff 编译：指令选择：ashr_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/ashr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】ashr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_16bytes 编译：指令选择：lshr_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_16bytes_wordOff 编译：指令选择：lshr_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes 编译：指令选择：lshr_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes_dwordOff 编译：指令选择：lshr_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_32bytes_wordOff 编译：指令选择：lshr_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/lshr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】lshr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_16bytes 编译：指令选择：shl_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_16bytes_wordOff 编译：指令选择：shl_16bytes_wordOff：整数运算不支持 Int(128)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes 编译：指令选择：shl_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes_dwordOff 编译：指令选择：shl_32bytes_dwordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_32bytes_wordOff 编译：指令选择：shl_32bytes_wordOff：整数运算不支持 Int(256)（Bin(Shl, ValId(5), ValId(3))）
+codegen/wide-scalar-shift-by-byte-multiple-legalization/shl_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】shl_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/wide-scalar-shift-legalization/ashr_16bytes 编译：指令选择：ashr_16bytes：整数运算不支持 Int(128)（Bin(AShr, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/ashr_32bytes 编译：指令选择：ashr_32bytes：整数运算不支持 Int(256)（Bin(AShr, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/ashr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】ashr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/wide-scalar-shift-legalization/lshr_16bytes 编译：指令选择：lshr_16bytes：整数运算不支持 Int(128)（Bin(LShr, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/lshr_32bytes 编译：指令选择：lshr_32bytes：整数运算不支持 Int(256)（Bin(LShr, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/lshr_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】lshr_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/wide-scalar-shift-legalization/shl_16bytes 编译：指令选择：shl_16bytes：整数运算不支持 Int(128)（Bin(Shl, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/shl_32bytes 编译：指令选择：shl_32bytes：整数运算不支持 Int(256)（Bin(Shl, ValId(3), ValId(4))）
+codegen/wide-scalar-shift-legalization/shl_8bytes 结果：【poison：移位量从随机内存读出，多半 ≥ 64】shl_8bytes(ptr0, ptr1, ptr2)：指针实参指向的内存不同
+codegen/xcvmem 解析：`llvm.insertelement`：lb_ri_inc：不支持的 op `llvm.insertelement`
+codegen/xqccmp-callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
+codegen/xqccmp-push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属性 `interrupt` 不支持
+codegen/xqcia 解析：`llvm.intr.ushl.sat`：shlusat：不支持的 op `llvm.intr.ushl.sat`
+codegen/xqcibm-cto-clo-brev/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0xffffffff)：riscvc Returned 0x20  ≠  llc Returned 0x0
+codegen/xqcibm-cto-clo-brev/test_cttz_i64_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0xffffffffffffffff)：riscvc Returned 0x40  ≠  llc Returned 0x20
+codegen/xtheadmempair/ld128 编译：指令选择：不支持的类型 Int(128)
+codegen/xtheadmempair/sd128 编译：指令选择：不支持的类型 Int(128)
+codegen/zdinx-spill 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
+codegen/zfh-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
+codegen/zfhmin-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
+codegen/zicfilp-indirect-branch 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
+codegen/zilsd-spill 解析：`llvm.inline_asm`：cmpxchg_i64_monotonic_monotonic：不支持的 op `llvm.inline_asm`
+import/basic 解析：`llvm.va_arg`：variadic_function：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
+import/blockaddress 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
+import/control-flow/simple_switch 编译：指令选择：simple_switch：值 %0 有 2 个部件，这里只收一个（Switch(ValId(0), Target { block: BlockId(3), args: [] }, [(0, Target { block: 
+import/fastmath 解析：`llvm.intr.vector.reduce.fmin`：fastmath_intr：不支持的 op `llvm.intr.vector.reduce.fmin`
+import/incorrect-scalable-vector-check 解析：`llvm.shufflevector`：shufflevector_crash：不支持的 op `llvm.shufflevector`
+import/indirectbr 解析：`llvm.indirectbr`：basic：不支持的 op `llvm.indirectbr`
+import/invoke-argument-attributes 解析：`llvm.invoke`：test：不支持的 op `llvm.invoke`
+target/arm-sme.11 解析：`llvm.call_intrinsic`：arm_sme_streaming_vl：不支持的 op `llvm.call_intrinsic`
+target/attribute-alias-scopes.0/alias_scopes 编译：指令选择：alias_scopes：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(3), ValId(4))）
+target/attribute-alias-scopes.3/alias_scopes 编译：指令选择：alias_scopes：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(3), ValId(4))）
+target/attribute-tbaa.1/tbaa2 编译：指令选择：tbaa2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(7), ValId(8), ValId(6))）
+target/blockaddress.0 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
+target/blockaddress.1 解析：`llvm.blockaddress`：blockaddr0：不支持的 op `llvm.blockaddress`
+target/blockaddress.2 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
+target/ifunc.0 解析：`llvm.mlir.ifunc`：顶层不认识
+target/ifunc.1 解析：`llvm.mlir.ifunc`：顶层不认识
+target/ifunc.2 解析：`llvm.mlir.ifunc`：顶层不认识
+target/ifunc.3 解析：`llvm.mlir.ifunc`：顶层不认识
+target/ifunc.4 解析：`llvm.mlir.ifunc`：顶层不认识
+target/indirectbr 解析：`llvm.blockaddress`：test_indirectbr_phi：不支持的 op `llvm.blockaddress`
+target/invoke-argument-attributes 解析：`llvm.invoke`：test：不支持的 op `llvm.invoke`
+target/llvmir-types.0 解析：MLIR：99:72: unknown type `target`
+target/llvmir.1 解析：`llvm.invoke`：invoke_result：不支持的 op `llvm.invoke`
+target/llvmir.2 解析：`llvm.invoke`：invoke_phis：不支持的 op `llvm.invoke`
+target/llvmir.21 解析：`llvm.invoke`：invoke_branch_weights：不支持的 op `llvm.invoke`
+target/llvmir.34 解析：`llvm.intr.vector.reduce.fmax`：fastmathFlags：不支持的 op `llvm.intr.vector.reduce.fmax`
+target/llvmir.38 解析：`llvm.va_arg`：vararg_function：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
+target/llvmir.82 解析：`llvm.dso_local_equivalent`：不支持的 op `llvm.dso_local_equivalent`
+target/llvmir.83 解析：`llvm.dso_local_equivalent`：call_extern_func：不支持的 op `llvm.dso_local_equivalent`
+target/llvmir.84 解析：`llvm.dso_local_equivalent`：call_alias_func：不支持的 op `llvm.dso_local_equivalent`
+target/loop-metadata.14/loopOptions 编译：指令选择：loopOptions：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(4), ValId(8), ValId(9))）
+target/nvvmir.18 解析：`llvm.call_intrinsic`：nvvm_mapa：不支持的 op `llvm.call_intrinsic`
+target/nvvmir.22 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_4way：不支持的 op `llvm.call_intrinsic`
+target/nvvmir.23 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_2way：不支持的 op `llvm.call_intrinsic`
+target/openmp-llvm-invalid.0/omp_atomic_update_multiple_step_update 编译：指令选择：omp_atomic_update_multiple_step_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId
+target/openmp-llvm-invalid.3/omp_atomic_update_multiple_step_update 编译：指令选择：omp_atomic_update_multiple_step_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId
+target/openmp-llvm.49/omp_atomic_update 编译：指令选择：omp_atomic_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(7), ValId(9))）
+target/openmp-llvm.54/omp_atomic_update_ordering 编译：指令选择：omp_atomic_update_ordering：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(5), ValId(7
+target/openmp-llvm.55/omp_atomic_update_ordering 编译：指令选择：omp_atomic_update_ordering：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(5), ValId(7
+target/openmp-llvm.56/omp_atomic_update_intrinsic 编译：指令选择：omp_atomic_update_intrinsic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(6), ValId(
+target/openmp-llvm.57/atomic_update_cmpxchg 编译：指令选择：atomic_update_cmpxchg：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(6), ValId(10))）
+target/openmp-llvm.58/omp_atomic_capture_prefix_update 编译：指令选择：omp_atomic_capture_prefix_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(30), 
+target/openmp-llvm.59/omp_atomic_capture_postfix_update 编译：指令选择：omp_atomic_capture_postfix_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(30),
+target/openmp-llvm.60/omp_atomic_capture_misc 编译：指令选择：omp_atomic_capture_misc：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(3), ValId(11), ValId(13)
+target/openmp-reduction.0/simple_reduction..omp_par 编译：指令选择：simple_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(64), 0)）
+target/openmp-reduction.1/reuse_declaration..omp_par 编译：指令选择：reuse_declaration..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(26), ValId(70), 0)）
+target/openmp-reduction.2/missing_omp_reduction..omp_par 编译：指令选择：missing_omp_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(26), ValId(70), 0)）
+target/openmp-reduction.3/double_reference..omp_par 编译：指令选择：double_reference..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(64), 0)）
+target/openmp-reduction.5/simple_reduction_parallel..omp_par 编译：指令选择：simple_reduction_parallel..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(13), ValId(25), 0)）
+target/openmp-reduction.7/wsloop_simd_reduction..omp_par 编译：指令选择：wsloop_simd_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(69), 0)）
+target/openmp-teams.3/omp_teams_branching_shared 编译：指令选择：不支持的类型 Fp128
+target/openmp-teams.3/omp_teams_branching_shared..omp_par 编译：指令选择：omp_teams_branching_shared..omp_par：不能 load Fp128（Load { ptr: ValId(18), align: 16, volatile: false, atomic: Non
