@@ -72,7 +72,7 @@ impl Isel<'_> {
     }
 
     /// 读一个标量叶子 ⇒ 部件。
-    fn load_leaf(&mut self, t: Ty, base: Base, off: i64, align: u64) -> Result<Vec<R>, Error> {
+    pub(super) fn load_leaf(&mut self, t: Ty, base: Base, off: i64, align: u64) -> Result<Vec<R>, Error> {
         let size = self.types().store_size(t);
         let natural = size.min(4);
         if align < natural && size > 1 {
@@ -155,7 +155,7 @@ impl Isel<'_> {
         Ok(out)
     }
 
-    fn store_leaf(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
+    pub(super) fn store_leaf(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
         let size = self.types().store_size(t);
         let natural = size.min(4);
         let one = |s: &mut Self, op: Opcode, v: R, at: i64| {

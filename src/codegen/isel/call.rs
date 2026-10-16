@@ -1,6 +1,7 @@
 //! 调用与返回（ilp32f，见 `abi.rs`）：实参拆成部件逐个分配，寄存器上的作为调用指令的固定 use，
 //! 栈上的先存进出参区；返回值是固定 def；调用方保存的寄存器记成 clobber。库函数调用走同一条路。
 use super::{Error, FrameObj, Isel, R};
+use regalloc2::VReg;
 use crate::codegen::abi::{Abi, Assign, Loc, Part};
 use crate::codegen::mir::{Base, MInst, MOp, Rule};
 use crate::ir::{ArgAttrs, Callee, Kind, RmwOp, Ty, ValId};
@@ -210,7 +211,39 @@ impl Isel<'_> {
         Ok(())
     }
 
-    /// 没有 A 扩展：`atomicrmw` 走 `__atomic_*` 库函数。
+    /// 原子库函数收 / 回的是同宽的整数：float 的部件先换成位型（⛔ 放进 fa 寄存器，库函数从 a 寄存器读）。
+    fn atomic_bits(&mut self, parts: &[R]) -> Vec<R> {
+        parts
+            .iter()
+            .map(|&r| match r {
+                R::V(v) if v.class() == regalloc2::RegClass::Float => {
+                    let x = self.xr();
+                    self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[r]);
+                    x
+                }
+                r => r,
+            })
+            .collect()
+    }
+
+    /// [`Self::atomic_bits`] 的反向：位型 ⇒ 类型 `t` 的部件。
+    fn atomic_unbits(&mut self, t: Ty, bits: Vec<R>) -> Result<Vec<R>, Error> {
+        let parts = self.parts(t)?;
+        Ok(bits
+            .into_iter()
+            .zip(parts)
+            .map(|(r, p)| {
+                if p != Part::F {
+                    return r;
+                }
+                let f = self.fr();
+                self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[f], &[r]);
+                f
+            })
+            .collect())
+    }
+
+    /// 没有 A 扩展：`atomicrmw` 走 `__atomic_*` 库函数；库里没有的（大小、浮点）同 LLVM 的 AtomicExpand 展开成 CAS 循环。
     pub(super) fn atomic_rmw(&mut self, op: RmwOp, p: ValId, v: ValId, order: u8) -> Result<Vec<R>, Error> {
         let t = self.ty(v);
         let n = self.types().size(t);
@@ -222,12 +255,115 @@ impl Isel<'_> {
             RmwOp::Nand => "fetch_nand",
             RmwOp::Or => "fetch_or",
             RmwOp::Xor => "fetch_xor",
-            _ => return Self::bad(format!("atomicrmw {op:?} 还没做")),
+            _ => return self.atomic_loop(op, p, v, order),
         };
         let ptr = self.get1(p)?;
         let val = self.get(v)?;
-        let parts = self.parts(t)?;
+        let val = self.atomic_bits(&val);
+        let ints = vec![Part::X; val.len()];
         let order = self.li(i32::from(order));
-        self.libcall(&format!("__atomic_{name}_{n}"), &[(vec![ptr], vec![Part::X]), (val, parts.clone()), (vec![order], vec![Part::X])], &parts)
+        let r = self.libcall(&format!("__atomic_{name}_{n}"), &[(vec![ptr], vec![Part::X]), (val, ints.clone()), (vec![order], vec![Part::X])], &ints)?;
+        self.atomic_unbits(t, r)
+    }
+
+    /// 期望值的栈槽（`n` 字节、按 `n` 对齐）：帧对象号。
+    fn atomic_slot(&mut self, n: u64) -> u32 {
+        let obj = u32::try_from(self.frame.len()).expect("帧对象太多");
+        self.frame.push(FrameObj { size: n.max(1), align: n.clamp(1, 8) });
+        obj
+    }
+
+    /// `__atomic_compare_exchange_N(ptr, &槽, 新值, 成功序, 失败序)`：槽里放着期望值，失败时库函数把读到的写回槽。
+    /// 回成功 0 / 1。
+    fn cas(&mut self, ptr: R, obj: u32, new: &[R], n: u64, order: (u8, u8)) -> Result<R, Error> {
+        let slot = self.xr();
+        self.emit(MOp::Addr(Base::Frame(obj), 0), &[slot], &[]);
+        let new = self.atomic_bits(new);
+        let (s, f) = (self.li(i32::from(order.0)), self.li(i32::from(order.1)));
+        let args = [(vec![ptr], vec![Part::X]), (vec![slot], vec![Part::X]), (new.clone(), vec![Part::X; new.len()]), (vec![s], vec![Part::X]), (vec![f], vec![Part::X])];
+        let ok = self.libcall(&format!("__atomic_compare_exchange_{n}"), &args, &[Part::X])?;
+        // 回的是 bool（a0 的低 8 位）
+        Ok(self.ri(IOp::Andi, ok[0], 0xff))
+    }
+
+    /// `cmpxchg p, c, v` ⇒（读到的值的部件…, 成功 0 / 1）。⚠ IR 里没带内存序，按 seq_cst（5）传（同 LLVM 对 seq_cst 的）。
+    pub(super) fn cmpxchg(&mut self, p: ValId, c: ValId, v: ValId) -> Result<Vec<R>, Error> {
+        let t = self.ty(c);
+        let n = self.types().size(t);
+        let (ptr, cmp, new) = (self.get1(p)?, self.get(c)?, self.get(v)?);
+        let obj = self.atomic_slot(n);
+        self.store_leaf(t, &cmp, Base::Frame(obj), 0, n)?;
+        let ok = self.cas(ptr, obj, &new, n, (5, 5))?;
+        let ok = self.rr(IOp::Sltu, R::ZERO, ok);
+        let mut out = self.load_leaf(t, Base::Frame(obj), 0, n)?;
+        out.push(ok);
+        Ok(out)
+    }
+
+    /// CAS 循环（同 LLVM 的 AtomicExpand::expandAtomicRMWToCmpXchg）：
+    /// ```text
+    /// 本块：  old0 = load p                      ⇒ 循环(old0)
+    /// 循环(old)：new = op(old, v)；槽 = old；ok = CAS(p, 槽, new)；cur = 槽  ⇒ ok ? 出口(cur) : 循环(cur)
+    /// 出口(r)：结果 = r（成功时槽里还是 old）
+    /// ```
+    fn atomic_loop(&mut self, op: RmwOp, p: ValId, v: ValId, order: u8) -> Result<Vec<R>, Error> {
+        let t = self.ty(v);
+        let n = self.types().size(t);
+        let (ptr, val) = (self.get1(p)?, self.get(v)?);
+        let w = self.types().bits(t).unwrap_or(32);
+        let init = self.load_leaf(t, Base::Reg(ptr), 0, n)?;
+        let obj = self.atomic_slot(n);
+        let fresh = |s: &mut Self, like: &[R]| -> Vec<R> { like.iter().map(|r| R::V(s.vreg(if matches!(r, R::V(v) if v.class() == regalloc2::RegClass::Float) { regalloc2::RegClass::Float } else { regalloc2::RegClass::Int }))).collect() };
+        let (head, done) = (self.new_block(), self.new_block());
+        let old = fresh(self, &init);
+        let res = fresh(self, &init);
+        let vregs = |rs: &[R]| rs.iter().map(|r| if let R::V(v) = r { *v } else { unreachable!("块参数是虚拟寄存器") }).collect::<Vec<_>>();
+        self.blocks[head].params = vregs(&old);
+        self.blocks[done].params = vregs(&res);
+        let args = init.iter().map(|&r| self.virt(r)).collect();
+        self.jump(head, args);
+        // 循环体
+        self.cur = head;
+        let new = match op {
+            RmwOp::Max | RmwOp::Min | RmwOp::UMax | RmwOp::UMin => {
+                let signed = matches!(op, RmwOp::Max | RmwOp::Min);
+                let keep_old = if w > 32 {
+                    let (o, x) = ((old[0], old[1]), (val[0], val[1]));
+                    // max：v < old ⇒ 留 old；min：old < v ⇒ 留 old
+                    if matches!(op, RmwOp::Max | RmwOp::UMax) { self.lt64(signed, x, o) } else { self.lt64(signed, o, x) }
+                } else {
+                    let (o, x) = if signed { (self.sext(old[0], w), self.sext(val[0], w)) } else { (old[0], val[0]) };
+                    let cmp = if signed { IOp::Slt } else { IOp::Sltu };
+                    if matches!(op, RmwOp::Max | RmwOp::UMax) { self.rr(cmp, x, o) } else { self.rr(cmp, o, x) }
+                };
+                self.select_parts(IOp::Bne, keep_old, R::ZERO, &old, &val)
+            }
+            RmwOp::FAdd | RmwOp::FSub => self.farith(if op == RmwOp::FAdd { crate::ir::BinOp::FAdd } else { crate::ir::BinOp::FSub }, t, old.clone(), val.clone())?,
+            RmwOp::FMax | RmwOp::FMin if matches!(self.kind(t), Kind::Float) && Float::ENABLED => {
+                let d = self.fr();
+                let fop = if op == RmwOp::FMax { Float::FmaxS } else { Float::FminS };
+                self.emit(MOp::Reg(fop.into(), 7), &[d], &[old[0], val[0]]);
+                vec![d]
+            }
+            RmwOp::FMax | RmwOp::FMin => {
+                let ps = self.parts(t)?;
+                let name = format!("{}{}", if op == RmwOp::FMax { "fmax" } else { "fmin" }, if matches!(self.kind(t), Kind::Double) { "" } else { "f" });
+                self.libcall(&name, &[(old.clone(), ps.clone()), (val.clone(), ps.clone())], &ps)?
+            }
+            _ => return Self::bad(format!("atomicrmw {op:?} 还没做")),
+        };
+        self.store_leaf(t, &old, Base::Frame(obj), 0, n)?;
+        let ok = self.cas(ptr, obj, &new, n, (order, order))?;
+        let cur = self.load_leaf(t, Base::Frame(obj), 0, n)?;
+        // 出边带实参 ⇒ 各切一个中转块（⛔ 关键边）
+        let (to_done, to_loop) = (self.new_block(), self.new_block());
+        self.branch(IOp::Bne, ok, R::ZERO, to_done, to_loop);
+        let cur_args: Vec<VReg> = cur.iter().map(|&r| self.virt(r)).collect();
+        self.cur = to_done;
+        self.jump(done, cur_args.clone());
+        self.cur = to_loop;
+        self.jump(head, cur_args);
+        self.cur = done;
+        Ok(res)
     }
 }

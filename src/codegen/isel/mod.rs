@@ -508,7 +508,10 @@ impl<'m> Isel<'m> {
                 let parts = self.atomic_rmw(*op, *p, *v, *order)?;
                 self.set(r, parts);
             }
-            Op::CmpXchg(..) => return Self::bad("cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）"),
+            Op::CmpXchg(p, c, v) => {
+                let parts = self.cmpxchg(*p, *c, *v)?;
+                self.set(r, parts);
+            }
             Op::Fence => self.emit(MOp::Fence, &[], &[]),
         }
         Ok(())

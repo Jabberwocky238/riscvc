@@ -92,7 +92,7 @@ impl Isel<'_> {
     }
 
     /// 浮点四则（`t` 是 float / double；部件给定）。
-    fn farith(&mut self, op: BinOp, t: Ty, x: Vec<R>, y: Vec<R>) -> Result<Vec<R>, Error> {
+    pub(super) fn farith(&mut self, op: BinOp, t: Ty, x: Vec<R>, y: Vec<R>) -> Result<Vec<R>, Error> {
         if let Some(sfx) = self.soft(t) {
             let name = match op {
                 BinOp::FAdd => format!("__add{sfx}3"),

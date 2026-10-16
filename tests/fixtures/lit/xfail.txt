@@ -34,175 +34,6 @@ codegen/addcarry 解析：`llvm.call_intrinsic`：addcarry：不支持的 op `ll
 codegen/alu64/sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sll(0x20, 0x80000000)：riscvc Returned 0x20  ≠  llc Returned 0x2000000000
 codegen/alu64/sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra(0x7fffffffffffffff, 0x80000000)：riscvc Returned 0x7fffffffffffffff  ≠  llc Returned 0x7fffffff
 codegen/alu64/srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】srl(0x650804b5b9af21bf, 0x80)：riscvc Returned 0x650804b5b9af21bf  ≠  llc Returned 0x650804b5
-codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_branch1 编译：指令选择：cmpxchg_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2))）
-codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_branch2 编译：指令选择：cmpxchg_and_branch2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2))）
-codegen/atomic-cmpxchg-branch-on-result/cmpxchg_and_irrelevant_branch 编译：指令选择：cmpxchg_and_irrelevant_branch：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg-branch-on-result/cmpxchg_masked_and_branch1 编译：指令选择：cmpxchg_masked_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg-branch-on-result/cmpxchg_masked_and_branch2 编译：指令选择：cmpxchg_masked_and_branch2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg-flag/cmpxchg_i32_seq_cst_seq_cst 编译：指令选择：cmpxchg_i32_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i16_acq_rel_acquire 编译：指令选择：cmpxchg_i16_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i16_acq_rel_monotonic 编译：指令选择：cmpxchg_i16_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i16_acquire_acquire 编译：指令选择：cmpxchg_i16_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i16_acquire_monotonic 编译：指令选择：cmpxchg_i16_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i16_monotonic_monotonic 编译：指令选择：cmpxchg_i16_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
-codegen/atomic-cmpxchg/cmpxchg_i16_release_acquire 编译：指令选择：cmpxchg_i16_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i16_release_monotonic 编译：指令选择：cmpxchg_i16_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_acquire 编译：指令选择：cmpxchg_i16_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_monotonic 编译：指令选择：cmpxchg_i16_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i16_seq_cst_seq_cst 编译：指令选择：cmpxchg_i16_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i32_acq_rel_acquire 编译：指令选择：cmpxchg_i32_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i32_acq_rel_monotonic 编译：指令选择：cmpxchg_i32_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i32_acquire_acquire 编译：指令选择：cmpxchg_i32_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i32_acquire_monotonic 编译：指令选择：cmpxchg_i32_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i32_monotonic_monotonic 编译：指令选择：cmpxchg_i32_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
-codegen/atomic-cmpxchg/cmpxchg_i32_release_acquire 编译：指令选择：cmpxchg_i32_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i32_release_monotonic 编译：指令选择：cmpxchg_i32_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_acquire 编译：指令选择：cmpxchg_i32_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_monotonic 编译：指令选择：cmpxchg_i32_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i32_seq_cst_seq_cst 编译：指令选择：cmpxchg_i32_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i64_acq_rel_acquire 编译：指令选择：cmpxchg_i64_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i64_acq_rel_monotonic 编译：指令选择：cmpxchg_i64_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i64_acquire_acquire 编译：指令选择：cmpxchg_i64_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i64_acquire_monotonic 编译：指令选择：cmpxchg_i64_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i64_monotonic_monotonic 编译：指令选择：cmpxchg_i64_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Va
-codegen/atomic-cmpxchg/cmpxchg_i64_release_acquire 编译：指令选择：cmpxchg_i64_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i64_release_monotonic 编译：指令选择：cmpxchg_i64_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_acquire 编译：指令选择：cmpxchg_i64_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_monotonic 编译：指令选择：cmpxchg_i64_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-cmpxchg/cmpxchg_i64_seq_cst_seq_cst 编译：指令选择：cmpxchg_i64_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(
-codegen/atomic-cmpxchg/cmpxchg_i8_acq_rel_acquire 编译：指令选择：cmpxchg_i8_acq_rel_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg/cmpxchg_i8_acq_rel_monotonic 编译：指令选择：cmpxchg_i8_acq_rel_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
-codegen/atomic-cmpxchg/cmpxchg_i8_acquire_acquire 编译：指令选择：cmpxchg_i8_acquire_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg/cmpxchg_i8_acquire_monotonic 编译：指令选择：cmpxchg_i8_acquire_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
-codegen/atomic-cmpxchg/cmpxchg_i8_monotonic_monotonic 编译：指令选择：cmpxchg_i8_monotonic_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), Val
-codegen/atomic-cmpxchg/cmpxchg_i8_release_acquire 编译：指令选择：cmpxchg_i8_release_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg/cmpxchg_i8_release_monotonic 编译：指令选择：cmpxchg_i8_release_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
-codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_acquire 编译：指令选择：cmpxchg_i8_seq_cst_acquire：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_monotonic 编译：指令选择：cmpxchg_i8_seq_cst_monotonic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId
-codegen/atomic-cmpxchg/cmpxchg_i8_seq_cst_seq_cst 编译：指令选择：cmpxchg_i8_seq_cst_seq_cst：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
-codegen/atomic-rmw-discard/amomax_d_discard 编译：指令选择：amomax_d_discard：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amomax_w_discard 编译：指令选择：amomax_w_discard：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amomaxu_d_discard 编译：指令选择：amomaxu_d_discard：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amomaxu_w_discard 编译：指令选择：amomaxu_w_discard：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amomin_d_discard 编译：指令选择：amomin_d_discard：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amomin_w_discard 编译：指令选择：amomin_w_discard：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amominu_d_discard 编译：指令选择：amominu_d_discard：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-discard/amominu_w_discard 编译：指令选择：amominu_w_discard：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_max_i32_seq_cst 编译：指令选择：atomicrmw_max_i32_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_max_i64_seq_cst 编译：指令选择：atomicrmw_max_i64_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_min_i32_seq_cst 编译：指令选择：atomicrmw_min_i32_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_min_i64_seq_cst 编译：指令选择：atomicrmw_min_i64_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_umax_i32_seq_cst 编译：指令选择：atomicrmw_umax_i32_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_umax_i64_seq_cst 编译：指令选择：atomicrmw_umax_i64_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_umin_i32_seq_cst 编译：指令选择：atomicrmw_umin_i32_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw-minmax/atomicrmw_umin_i64_seq_cst 编译：指令选择：atomicrmw_umin_i64_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_max_i16_acq_rel 编译：指令选择：atomicrmw_max_i16_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_max_i16_acquire 编译：指令选择：atomicrmw_max_i16_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_max_i16_monotonic 编译：指令选择：atomicrmw_max_i16_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_max_i16_release 编译：指令选择：atomicrmw_max_i16_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_max_i16_seq_cst 编译：指令选择：atomicrmw_max_i16_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_max_i32_acq_rel 编译：指令选择：atomicrmw_max_i32_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_max_i32_acquire 编译：指令选择：atomicrmw_max_i32_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_max_i32_monotonic 编译：指令选择：atomicrmw_max_i32_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_max_i32_release 编译：指令选择：atomicrmw_max_i32_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_max_i32_seq_cst 编译：指令选择：atomicrmw_max_i32_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_max_i64_acq_rel 编译：指令选择：atomicrmw_max_i64_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_max_i64_acquire 编译：指令选择：atomicrmw_max_i64_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_max_i64_monotonic 编译：指令选择：atomicrmw_max_i64_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_max_i64_release 编译：指令选择：atomicrmw_max_i64_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_max_i64_seq_cst 编译：指令选择：atomicrmw_max_i64_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_max_i8_acq_rel 编译：指令选择：atomicrmw_max_i8_acq_rel：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_max_i8_acquire 编译：指令选择：atomicrmw_max_i8_acquire：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_max_i8_monotonic 编译：指令选择：atomicrmw_max_i8_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_max_i8_release 编译：指令选择：atomicrmw_max_i8_release：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_max_i8_seq_cst 编译：指令选择：atomicrmw_max_i8_seq_cst：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_min_i16_acq_rel 编译：指令选择：atomicrmw_min_i16_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_min_i16_acquire 编译：指令选择：atomicrmw_min_i16_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_min_i16_monotonic 编译：指令选择：atomicrmw_min_i16_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_min_i16_release 编译：指令选择：atomicrmw_min_i16_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_min_i16_seq_cst 编译：指令选择：atomicrmw_min_i16_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_min_i32_acq_rel 编译：指令选择：atomicrmw_min_i32_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_min_i32_acquire 编译：指令选择：atomicrmw_min_i32_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_min_i32_monotonic 编译：指令选择：atomicrmw_min_i32_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_min_i32_release 编译：指令选择：atomicrmw_min_i32_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_min_i32_seq_cst 编译：指令选择：atomicrmw_min_i32_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_min_i64_acq_rel 编译：指令选择：atomicrmw_min_i64_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_min_i64_acquire 编译：指令选择：atomicrmw_min_i64_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_min_i64_monotonic 编译：指令选择：atomicrmw_min_i64_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_min_i64_release 编译：指令选择：atomicrmw_min_i64_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_min_i64_seq_cst 编译：指令选择：atomicrmw_min_i64_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_min_i8_acq_rel 编译：指令选择：atomicrmw_min_i8_acq_rel：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_min_i8_acquire 编译：指令选择：atomicrmw_min_i8_acquire：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_min_i8_monotonic 编译：指令选择：atomicrmw_min_i8_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_min_i8_release 编译：指令选择：atomicrmw_min_i8_release：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_min_i8_seq_cst 编译：指令选择：atomicrmw_min_i8_seq_cst：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umax_i16_acq_rel 编译：指令选择：atomicrmw_umax_i16_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umax_i16_acquire 编译：指令选择：atomicrmw_umax_i16_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umax_i16_monotonic 编译：指令选择：atomicrmw_umax_i16_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umax_i16_release 编译：指令选择：atomicrmw_umax_i16_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umax_i16_seq_cst 编译：指令选择：atomicrmw_umax_i16_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umax_i32_acq_rel 编译：指令选择：atomicrmw_umax_i32_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umax_i32_acquire 编译：指令选择：atomicrmw_umax_i32_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umax_i32_monotonic 编译：指令选择：atomicrmw_umax_i32_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umax_i32_release 编译：指令选择：atomicrmw_umax_i32_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umax_i32_seq_cst 编译：指令选择：atomicrmw_umax_i32_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umax_i64_acq_rel 编译：指令选择：atomicrmw_umax_i64_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umax_i64_acquire 编译：指令选择：atomicrmw_umax_i64_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umax_i64_monotonic 编译：指令选择：atomicrmw_umax_i64_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umax_i64_release 编译：指令选择：atomicrmw_umax_i64_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umax_i64_seq_cst 编译：指令选择：atomicrmw_umax_i64_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umax_i8_acq_rel 编译：指令选择：atomicrmw_umax_i8_acq_rel：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umax_i8_acquire 编译：指令选择：atomicrmw_umax_i8_acquire：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umax_i8_monotonic 编译：指令选择：atomicrmw_umax_i8_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umax_i8_release 编译：指令选择：atomicrmw_umax_i8_release：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umax_i8_seq_cst 编译：指令选择：atomicrmw_umax_i8_seq_cst：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umin_i16_acq_rel 编译：指令选择：atomicrmw_umin_i16_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umin_i16_acquire 编译：指令选择：atomicrmw_umin_i16_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umin_i16_monotonic 编译：指令选择：atomicrmw_umin_i16_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umin_i16_release 编译：指令选择：atomicrmw_umin_i16_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umin_i16_seq_cst 编译：指令选择：atomicrmw_umin_i16_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umin_i32_acq_rel 编译：指令选择：atomicrmw_umin_i32_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umin_i32_acquire 编译：指令选择：atomicrmw_umin_i32_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umin_i32_monotonic 编译：指令选择：atomicrmw_umin_i32_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umin_i32_release 编译：指令选择：atomicrmw_umin_i32_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umin_i32_seq_cst 编译：指令选择：atomicrmw_umin_i32_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umin_i64_acq_rel 编译：指令选择：atomicrmw_umin_i64_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umin_i64_acquire 编译：指令选择：atomicrmw_umin_i64_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umin_i64_monotonic 编译：指令选择：atomicrmw_umin_i64_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umin_i64_release 编译：指令选择：atomicrmw_umin_i64_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umin_i64_seq_cst 编译：指令选择：atomicrmw_umin_i64_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-rmw/atomicrmw_umin_i8_acq_rel 编译：指令选择：atomicrmw_umin_i8_acq_rel：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 4)）
-codegen/atomic-rmw/atomicrmw_umin_i8_acquire 编译：指令选择：atomicrmw_umin_i8_acquire：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 2)）
-codegen/atomic-rmw/atomicrmw_umin_i8_monotonic 编译：指令选择：atomicrmw_umin_i8_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-rmw/atomicrmw_umin_i8_release 编译：指令选择：atomicrmw_umin_i8_release：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 3)）
-codegen/atomic-rmw/atomicrmw_umin_i8_seq_cst 编译：指令选择：atomicrmw_umin_i8_seq_cst：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 5)）
-codegen/atomic-signext/atomicrmw_max_i16_monotonic 编译：指令选择：atomicrmw_max_i16_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_max_i32_monotonic 编译：指令选择：atomicrmw_max_i32_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_max_i32_monotonic_crossbb 编译：指令选择：atomicrmw_max_i32_monotonic_crossbb：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(2), 0)）
-codegen/atomic-signext/atomicrmw_max_i64_monotonic 编译：指令选择：atomicrmw_max_i64_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_max_i8_monotonic 编译：指令选择：atomicrmw_max_i8_monotonic：atomicrmw Max 还没做（AtomicRmw(Max, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_min_i16_monotonic 编译：指令选择：atomicrmw_min_i16_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_min_i32_monotonic 编译：指令选择：atomicrmw_min_i32_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_min_i32_monotonic_crossbb 编译：指令选择：atomicrmw_min_i32_monotonic_crossbb：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(2), 0)）
-codegen/atomic-signext/atomicrmw_min_i64_monotonic 编译：指令选择：atomicrmw_min_i64_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_min_i8_monotonic 编译：指令选择：atomicrmw_min_i8_monotonic：atomicrmw Min 还没做（AtomicRmw(Min, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umax_i16_monotonic 编译：指令选择：atomicrmw_umax_i16_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umax_i32_monotonic 编译：指令选择：atomicrmw_umax_i32_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umax_i32_monotonic_crossbb 编译：指令选择：atomicrmw_umax_i32_monotonic_crossbb：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(2), 0)）
-codegen/atomic-signext/atomicrmw_umax_i64_monotonic 编译：指令选择：atomicrmw_umax_i64_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umax_i8_monotonic 编译：指令选择：atomicrmw_umax_i8_monotonic：atomicrmw UMax 还没做（AtomicRmw(UMax, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umin_i16_monotonic 编译：指令选择：atomicrmw_umin_i16_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umin_i32_monotonic 编译：指令选择：atomicrmw_umin_i32_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umin_i32_monotonic_crossbb 编译：指令选择：atomicrmw_umin_i32_monotonic_crossbb：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(2), 0)）
-codegen/atomic-signext/atomicrmw_umin_i64_monotonic 编译：指令选择：atomicrmw_umin_i64_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/atomicrmw_umin_i8_monotonic 编译：指令选择：atomicrmw_umin_i8_monotonic：atomicrmw UMin 还没做（AtomicRmw(UMin, ValId(0), ValId(1), 0)）
-codegen/atomic-signext/cmpxchg_i16_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i16_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
-codegen/atomic-signext/cmpxchg_i16_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i16_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
-codegen/atomic-signext/cmpxchg_i32_monotonic_crossbb 编译：指令选择：cmpxchg_i32_monotonic_crossbb：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValI
-codegen/atomic-signext/cmpxchg_i32_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i32_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
-codegen/atomic-signext/cmpxchg_i32_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i32_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1
-codegen/atomic-signext/cmpxchg_i8_monotonic_monotonic_val0 编译：指令选择：cmpxchg_i8_monotonic_monotonic_val0：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1)
-codegen/atomic-signext/cmpxchg_i8_monotonic_monotonic_val1 编译：指令选择：cmpxchg_i8_monotonic_monotonic_val1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1)
 codegen/atomicrmw-cond-sub-clamp 解析：`llvm.atomicrmw`：atomicrmw_usub_cond_i8：bin_op 17
 codegen/atomicrmw-uinc-udec-wrap 解析：`llvm.atomicrmw`：atomicrmw_uinc_wrap_i8：bin_op 15
 codegen/avgceils/test_ext_i64 编译：指令选择：test_ext_i64：整数运算不支持 Int(128)（Bin(Add, ValId(3), ValId(4))）
@@ -481,7 +312,6 @@ codegen/pr63816/test 编译：指令选择：test：不支持的转换 FpExt：V
 codegen/pr64503/f 结果：【poison：srem 1, 0（除以零）/ store poison】f(0xf57863d13d3a9fd7)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/pr64503/g 结果：【poison：srem 1, 0（除以零）/ store poison】g(ptr0, 0x2c)：riscvc Returned 0x0  ≠  llc Returned 0x2c00000001
 codegen/pr64645/v2f64 编译：指令选择：v2f64：整数运算不支持 Vector(2, Ty(7))（Bin(FAdd, ValId(0), ValId(1))）
-codegen/pr65025/cmpxchg_masked_and_branch1 编译：指令选择：cmpxchg_masked_and_branch1：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(1), ValId(2
 codegen/pr92193 解析：`llvm.insertelement`：foo：不支持的 op `llvm.insertelement`
 codegen/pr94265/PR94265 编译：指令选择：PR94265：整数运算不支持 Vector(8, Ty(4))（Bin(SDiv, ValId(0), ValId(1))）
 codegen/push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属性 `interrupt` 不支持
@@ -709,9 +539,6 @@ import/incorrect-scalable-vector-check 解析：`llvm.shufflevector`：shuffleve
 import/indirectbr 解析：`llvm.indirectbr`：basic：不支持的 op `llvm.indirectbr`
 import/invoke-argument-attributes 解析：`llvm.invoke`：test：不支持的 op `llvm.invoke`
 target/arm-sme.11 解析：`llvm.call_intrinsic`：arm_sme_streaming_vl：不支持的 op `llvm.call_intrinsic`
-target/attribute-alias-scopes.0/alias_scopes 编译：指令选择：alias_scopes：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(3), ValId(4))）
-target/attribute-alias-scopes.3/alias_scopes 编译：指令选择：alias_scopes：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(3), ValId(4))）
-target/attribute-tbaa.1/tbaa2 编译：指令选择：tbaa2：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(7), ValId(8), ValId(6))）
 target/blockaddress.0 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
 target/blockaddress.1 解析：`llvm.blockaddress`：blockaddr0：不支持的 op `llvm.blockaddress`
 target/blockaddress.2 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
@@ -731,25 +558,9 @@ target/llvmir.38 解析：`llvm.va_arg`：vararg_function：va_arg 指令还没�
 target/llvmir.82 解析：`llvm.dso_local_equivalent`：不支持的 op `llvm.dso_local_equivalent`
 target/llvmir.83 解析：`llvm.dso_local_equivalent`：call_extern_func：不支持的 op `llvm.dso_local_equivalent`
 target/llvmir.84 解析：`llvm.dso_local_equivalent`：call_alias_func：不支持的 op `llvm.dso_local_equivalent`
-target/loop-metadata.14/loopOptions 编译：指令选择：loopOptions：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(4), ValId(8), ValId(9))）
+target/loop-metadata.14/loopOptions 结果：loopOptions(0x0, 0x7fffffff)：riscvc 陷入 unimp   ≠  llc Returned
 target/nvvmir.18 解析：`llvm.call_intrinsic`：nvvm_mapa：不支持的 op `llvm.call_intrinsic`
 target/nvvmir.22 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_4way：不支持的 op `llvm.call_intrinsic`
 target/nvvmir.23 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_2way：不支持的 op `llvm.call_intrinsic`
-target/openmp-llvm-invalid.0/omp_atomic_update_multiple_step_update 编译：指令选择：omp_atomic_update_multiple_step_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId
-target/openmp-llvm-invalid.3/omp_atomic_update_multiple_step_update 编译：指令选择：omp_atomic_update_multiple_step_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId
-target/openmp-llvm.49/omp_atomic_update 编译：指令选择：omp_atomic_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(7), ValId(9))）
-target/openmp-llvm.54/omp_atomic_update_ordering 编译：指令选择：omp_atomic_update_ordering：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(5), ValId(7
-target/openmp-llvm.55/omp_atomic_update_ordering 编译：指令选择：omp_atomic_update_ordering：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(5), ValId(7
-target/openmp-llvm.56/omp_atomic_update_intrinsic 编译：指令选择：omp_atomic_update_intrinsic：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(6), ValId(
-target/openmp-llvm.57/atomic_update_cmpxchg 编译：指令选择：atomic_update_cmpxchg：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(6), ValId(10))）
-target/openmp-llvm.58/omp_atomic_capture_prefix_update 编译：指令选择：omp_atomic_capture_prefix_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(30), 
-target/openmp-llvm.59/omp_atomic_capture_postfix_update 编译：指令选择：omp_atomic_capture_postfix_update：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(0), ValId(30),
-target/openmp-llvm.60/omp_atomic_capture_misc 编译：指令选择：omp_atomic_capture_misc：cmpxchg 还没做（没有 A 扩展，要走 __atomic_compare_exchange）（CmpXchg(ValId(3), ValId(11), ValId(13)
-target/openmp-reduction.0/simple_reduction..omp_par 编译：指令选择：simple_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(64), 0)）
-target/openmp-reduction.1/reuse_declaration..omp_par 编译：指令选择：reuse_declaration..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(26), ValId(70), 0)）
-target/openmp-reduction.2/missing_omp_reduction..omp_par 编译：指令选择：missing_omp_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(26), ValId(70), 0)）
-target/openmp-reduction.3/double_reference..omp_par 编译：指令选择：double_reference..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(64), 0)）
-target/openmp-reduction.5/simple_reduction_parallel..omp_par 编译：指令选择：simple_reduction_parallel..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(13), ValId(25), 0)）
-target/openmp-reduction.7/wsloop_simd_reduction..omp_par 编译：指令选择：wsloop_simd_reduction..omp_par：atomicrmw FAdd 还没做（AtomicRmw(FAdd, ValId(25), ValId(69), 0)）
 target/openmp-teams.3/omp_teams_branching_shared 编译：指令选择：不支持的类型 Fp128
 target/openmp-teams.3/omp_teams_branching_shared..omp_par 编译：指令选择：omp_teams_branching_shared..omp_par：不能 load Fp128（Load { ptr: ValId(18), align: 16, volatile: false, atomic: Non

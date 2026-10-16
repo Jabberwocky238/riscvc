@@ -209,8 +209,13 @@ impl Isel<'_> {
     }
 
     /// `a <u b`（64 位）⇒ 0 / 1。
-    pub(super) fn ltu64(&mut self, (al, ah): (R, R), (bl, bh): (R, R)) -> R {
-        let hi_lt = self.rr(IOp::Sltu, ah, bh);
+    pub(super) fn ltu64(&mut self, a: (R, R), b: (R, R)) -> R {
+        self.lt64(false, a, b)
+    }
+
+    /// `a < b`（64 位，`signed` 只管高半）⇒ 0 / 1。
+    pub(super) fn lt64(&mut self, signed: bool, (al, ah): (R, R), (bl, bh): (R, R)) -> R {
+        let hi_lt = self.rr(if signed { IOp::Slt } else { IOp::Sltu }, ah, bh);
         let d = self.rr(IOp::Xor, ah, bh);
         let hi_eq = self.ri(IOp::Sltiu, d, 1);
         let lo_lt = self.rr(IOp::Sltu, al, bl);
