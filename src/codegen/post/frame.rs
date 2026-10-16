@@ -53,7 +53,8 @@ impl Frame {
         if sel.calls {
             save_regs.push(X::RA.preg());
         }
-        if fp && !used.contains(&X::S0.preg()) {
+        // 帧指针 s0 不参与分配（`Abi::machine_env`），⛔ 在 used 里
+        if fp {
             save_regs.push(X::S0.preg());
         }
         used.sort_by_key(|p| (p.class() as u8, p.hw_enc()));

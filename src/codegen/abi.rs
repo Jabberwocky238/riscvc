@@ -174,8 +174,9 @@ pub const fn callee_saved_f(r: u8) -> bool {
 }
 
 /// regalloc2 的机器环境：整数先用 t / a，再用 s（不分配 zero、ra、sp、gp、tp，t6 留给帧地址的大偏移）；浮点同理。
+/// `frame`：`s0` 当帧指针（动态改 `sp` 的函数）⇒ ⛔ 分配 `s0`。
 #[must_use]
-pub fn machine_env() -> regalloc2::MachineEnv {
+pub fn machine_env(frame: bool) -> regalloc2::MachineEnv {
     let set = |rs: &[u8], class: RegClass| {
         let mut s = PRegSet::empty();
         for &r in rs {
@@ -184,7 +185,7 @@ pub fn machine_env() -> regalloc2::MachineEnv {
         s
     };
     let xp: Vec<u8> = [5u8, 6, 7].into_iter().chain(10..=17).chain(28..=30).collect();
-    let xn: Vec<u8> = [8u8, 9].into_iter().chain(18..=27).collect();
+    let xn: Vec<u8> = [8u8, 9].into_iter().filter(|&r| !(frame && r == 8)).chain(18..=27).collect();
     let fp: Vec<u8> = (0u8..=7).chain(10..=17).chain(28..=31).collect();
     let fnp: Vec<u8> = [8u8, 9].into_iter().chain(18..=27).collect();
     regalloc2::MachineEnv {
