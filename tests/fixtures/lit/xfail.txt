@@ -266,7 +266,6 @@ codegen/calling-conv-vector-float/callee_v2f32 编译：指令选择：callee_v2
 codegen/calling-conv-vector-float/callee_v4f32 编译：指令选择：callee_v4f32：整数运算不支持 Vector(4, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
 codegen/clear-cache 解析：`llvm.call_intrinsic`：foo：不支持的 op `llvm.call_intrinsic`
 codegen/clmul 解析：`llvm.call_intrinsic`：clmul_i4：不支持的 op `llvm.call_intrinsic`
-codegen/combine-storetomstore/test_masked_store_zextload 编译：指令选择：test_masked_store_zextload：select 的 4 条 lane 对不上 8 / 4 个部件（Select(ValId(2), ValId(0), ValId(4))）
 codegen/compress-inline-asm 解析：`llvm.inline_asm`：compress_test：不支持的 op `llvm.inline_asm`
 codegen/condbinops/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0xad71a19a25626f15, 0xffffffffffffffff, 0x1)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff5ae
 codegen/condbinops/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0xffffffffffffffff, 0xa17b35a1dcb010ac, 0x1)：riscvc Returned 0xfffff  ≠  llc Returned 0xfffffffffffff

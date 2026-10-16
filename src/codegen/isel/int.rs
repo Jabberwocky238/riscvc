@@ -393,36 +393,46 @@ impl Isel<'_> {
         })
     }
 
-    /// 类型转换（浮点相关的交给 float.rs）。
-    pub(super) fn cast(&mut self, op: CastOp, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
-        let from = self.ty(a);
-        let bits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
-        Ok(match op {
-            CastOp::Trunc => {
-                let x = self.low(a)?;
-                let w = bits(self, to);
-                if w > 32 {
-                    let (l, h) = self.pair(a)?;
-                    vec![l, self.mask(h, w - 32)]
-                } else {
-                    vec![self.mask(x, w)]
-                }
-            }
-            CastOp::ZExt => {
-                let x = self.get(a)?;
-                if bits(self, to) > 32 && x.len() == 1 { vec![x[0], R::ZERO] } else { x }
-            }
-            CastOp::SExt => {
-                let wf = bits(self, from);
-                let x = self.low(a)?;
-                let s = self.sext(x, wf);
-                let wt = bits(self, to);
+    /// 整数的截断 / 零扩展 / 符号扩展（一个值的部件：≤ 32 位一个，33..=64 位两个）。
+    fn int_cast(&mut self, op: CastOp, x: &[R], wf: u32, wt: u32) -> Vec<R> {
+        match op {
+            CastOp::Trunc if wt > 32 => vec![x[0], self.mask(x[1], wt - 32)],
+            CastOp::Trunc => vec![self.mask(x[0], wt)],
+            // 窄整数恒零扩展 ⇒ 零扩展只差补一个高半
+            CastOp::ZExt if wt > 32 && x.len() == 1 => vec![x[0], R::ZERO],
+            CastOp::ZExt => x.to_vec(),
+            _ => {
+                let s = self.sext(x[0], wf);
                 if wt > 32 {
-                    let h = if wf > 32 { self.pair(a)?.1 } else { self.ri(IOp::Srai, s, 31) };
+                    let h = if wf > 32 { x[1] } else { self.ri(IOp::Srai, s, 31) };
                     vec![s, h]
                 } else {
                     vec![self.mask(s, wt)]
                 }
+            }
+        }
+    }
+
+    /// 类型转换（浮点相关的交给 float.rs）。
+    pub(super) fn cast(&mut self, op: CastOp, a: ValId, to: Ty) -> Result<Vec<R>, Error> {
+        let from = self.ty(a);
+        let bits = |s: &Self, t: Ty| s.types().bits(t).unwrap_or(32);
+        // 向量：逐 lane（每 lane 占 1/n 个部件，按元素的位宽）
+        if let (Kind::Vector(n, ef), Kind::Vector(_, et)) = (self.kind(from).clone(), self.kind(to).clone())
+            && matches!(op, CastOp::Trunc | CastOp::ZExt | CastOp::SExt)
+        {
+            let x = self.get(a)?;
+            let (n, wf, wt) = (n as usize, bits(self, ef), bits(self, et));
+            if n == 0 || x.len() % n != 0 {
+                return Self::bad(format!("{op:?}：{n} 条 lane 对不上 {} 个部件", x.len()));
+            }
+            let k = x.len() / n;
+            return Ok(x.chunks(k).flat_map(|lane| self.int_cast(op, lane, wf, wt)).collect());
+        }
+        Ok(match op {
+            CastOp::Trunc | CastOp::ZExt | CastOp::SExt => {
+                let x = self.get(a)?;
+                self.int_cast(op, &x, bits(self, from), bits(self, to))
             }
             CastOp::PtrToInt => {
                 let x = self.get1(a)?;

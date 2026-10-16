@@ -73,7 +73,7 @@ impl Isel<'_> {
 
     /// 读一个标量叶子 ⇒ 部件。
     fn load_leaf(&mut self, t: Ty, base: Base, off: i64, align: u64) -> Result<Vec<R>, Error> {
-        let size = self.store_size(t);
+        let size = self.types().store_size(t);
         let natural = size.min(4);
         if align < natural && size > 1 {
             // 对齐不够：逐字节读、拼
@@ -130,15 +130,6 @@ impl Isel<'_> {
         })
     }
 
-    /// 读写的字节数（同 LLVM 的 getTypeStoreSize：整数 ⌈w/8⌉，其余 = 分配大小）。
-    /// ⚠ riscvc-e3 的 `Types::store_size` 提交后换成它（语义相同）。
-    fn store_size(&self, t: Ty) -> u64 {
-        match self.kind(t) {
-            &Kind::Int(w) => u64::from(w).div_ceil(8),
-            _ => self.types().size(t),
-        }
-    }
-
     /// 一个 32 位部件里的 `n` 个字节（1..=4）拆成从低到高的块：（字节偏移, 块长 4 / 2 / 1）。
     fn chunks(n: u64) -> impl Iterator<Item = (u64, u64)> {
         let (mut at, mut left) = (0, n);
@@ -165,7 +156,7 @@ impl Isel<'_> {
     }
 
     fn store_leaf(&mut self, t: Ty, parts: &[R], base: Base, off: i64, align: u64) -> Result<(), Error> {
-        let size = self.store_size(t);
+        let size = self.types().store_size(t);
         let natural = size.min(4);
         let one = |s: &mut Self, op: Opcode, v: R, at: i64| {
             let (b, o) = s.fit(base, at);
