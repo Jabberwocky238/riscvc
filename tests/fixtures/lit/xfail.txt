@@ -238,8 +238,6 @@ codegen/calling-conv-ilp32e/caller_large_scalar_ret 编译：指令选择：call
 codegen/calling-conv-ilp32e/caller_large_scalars 编译：指令选择：caller_large_scalars：不支持的类型 Int(128)（Call { fty: Ty(24), callee: Direct("callee_large_scalars"), args: [(ValId(0
 codegen/calling-conv-ilp32e/caller_large_scalars_exhausted_regs 编译：指令选择：caller_large_scalars_exhausted_regs：不支持的类型 Int(128)（Call { fty: Ty(25), callee: Direct("callee_large_scalars_exh
 codegen/calling-conv-ilp32e/caller_mixed_scalar_libcalls 编译：指令选择：caller_mixed_scalar_libcalls：不支持的类型 Fp128（Cast(SiToFp, ValId(0))）
-codegen/calling-conv-ilp32f-ilp32d-common/callee_float_in_gpr_exhausted_fprs 编译：panic：Could not allocate minimal bundle, but the allocation problem should be possible to solve
-codegen/calling-conv-ilp32f-ilp32d-common/caller_float_in_gpr_exhausted_fprs 编译：panic：Could not allocate minimal bundle, but the allocation problem should be possible to solve
 codegen/calling-conv-lp64-lp64f-lp64d-common/callee_aligned_stack 编译：指令选择：不支持的类型 Int(128)
 codegen/calling-conv-lp64-lp64f-lp64d-common/callee_i128_in_regs 编译：指令选择：不支持的类型 Int(128)
 codegen/calling-conv-lp64-lp64f-lp64d-common/callee_large_scalar_ret 编译：指令选择：不支持的类型 Int(256)
@@ -386,56 +384,56 @@ codegen/mem/load_sext_zext_anyext_i1 结果：【未定义：load i1 读到的�
 codegen/mem/load_sext_zext_anyext_i1_i16 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1_i16(ptr0)：riscvc Returned 0x39  ≠  llc Returned 0xff91
 codegen/mem64/load_sext_zext_anyext_i1 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1(ptr0)：riscvc Returned 0xcc  ≠  llc Returned 0x92
 codegen/mem64/load_sext_zext_anyext_i1_i16 结果：【未定义：load i1 读到的字节不是 0 / 1（缓冲区是随机字节）】load_sext_zext_anyext_i1_i16(ptr0)：riscvc Returned 0xca  ≠  llc Returned 0xbe
-codegen/memcpy-inline/aligned_memcpy0 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy1 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy15 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy3 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy31 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy7 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/aligned_memcpy8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/memcpy11_align8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/memcpy16_align4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy0 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy1 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy15 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy3 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy31 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy7 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memcpy-inline/unaligned_memcpy8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_32 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_64 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_15 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_32 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_64 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_7 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/aligned_memset_zero_8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_1 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_32 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_64 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_8 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_1 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_16 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_2 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_32 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_4 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_64 编译：panic：index out of bounds: the len is 2 but the index is 2
-codegen/memset-inline/memset_zero_8 编译：panic：index out of bounds: the len is 2 but the index is 2
+codegen/memcpy-inline/aligned_memcpy0 编译：指令选择：aligned_memcpy0：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy1 编译：指令选择：aligned_memcpy1：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy15 编译：指令选择：aligned_memcpy15：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy16 编译：指令选择：aligned_memcpy16：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy2 编译：指令选择：aligned_memcpy2：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy3 编译：指令选择：aligned_memcpy3：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy31 编译：指令选择：aligned_memcpy31：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy4 编译：指令选择：aligned_memcpy4：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy7 编译：指令选择：aligned_memcpy7：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/aligned_memcpy8 编译：指令选择：aligned_memcpy8：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/memcpy11_align8 编译：指令选择：memcpy11_align8：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/memcpy16_align4 编译：指令选择：memcpy16_align4：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy0 编译：指令选择：unaligned_memcpy0：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy1 编译：指令选择：unaligned_memcpy1：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy15 编译：指令选择：unaligned_memcpy15：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy16 编译：指令选择：unaligned_memcpy16：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy2 编译：指令选择：unaligned_memcpy2：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy3 编译：指令选择：unaligned_memcpy3：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy31 编译：指令选择：unaligned_memcpy31：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy4 编译：指令选择：unaligned_memcpy4：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy7 编译：指令选择：unaligned_memcpy7：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memcpy-inline/unaligned_memcpy8 编译：指令选择：unaligned_memcpy8：Memcpy 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memcpy, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_16 编译：指令选择：aligned_memset_16：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_2 编译：指令选择：aligned_memset_2：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_32 编译：指令选择：aligned_memset_32：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_4 编译：指令选择：aligned_memset_4：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_64 编译：指令选择：aligned_memset_64：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_8 编译：指令选择：aligned_memset_8：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_15 编译：指令选择：aligned_memset_zero_15：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_16 编译：指令选择：aligned_memset_zero_16：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_2 编译：指令选择：aligned_memset_zero_2：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_32 编译：指令选择：aligned_memset_zero_32：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_4 编译：指令选择：aligned_memset_zero_4：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_64 编译：指令选择：aligned_memset_zero_64：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_7 编译：指令选择：aligned_memset_zero_7：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/aligned_memset_zero_8 编译：指令选择：aligned_memset_zero_8：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_1 编译：指令选择：memset_1：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_16 编译：指令选择：memset_16：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_2 编译：指令选择：memset_2：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_32 编译：指令选择：memset_32：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_4 编译：指令选择：memset_4：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_64 编译：指令选择：memset_64：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_8 编译：指令选择：memset_8：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_1 编译：指令选择：memset_zero_1：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_16 编译：指令选择：memset_zero_16：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_2 编译：指令选择：memset_zero_2：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_32 编译：指令选择：memset_zero_32：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_4 编译：指令选择：memset_zero_4：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_64 编译：指令选择：memset_zero_64：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
+codegen/memset-inline/memset_zero_8 编译：指令选择：memset_zero_8：Memset 要三个实参（目的、源 / 值、长度），只有 2（Intr(Memset, [ValId(0), ValId(1)])）
 codegen/memset-pattern 解析：`llvm.call_intrinsic`：memset_1：不支持的 op `llvm.call_intrinsic`
 codegen/mir-target-flags 链接：codegen/mir-target-flags：.text 里不支持的重定位类型 21
 codegen/miss-sp-restore-eh 解析：`llvm.invoke`：foo：不支持的 op `llvm.invoke`

@@ -32,6 +32,14 @@ impl Isel<'_> {
                 match loc {
                     Loc::Reg(p) => {
                         let v = self.virt(r);
+                        // fa 用完了的 float 放进 a 寄存器（ilp32f）：先搬成整数（⛔ 浮点虚拟寄存器固定到整数寄存器：分配器无解）
+                        let v = if v.class() != p.class() {
+                            let x = self.xr();
+                            self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[R::V(v)]);
+                            self.virt(x)
+                        } else {
+                            v
+                        };
                         inst.use_on(R::V(v), Rule::Fixed(p));
                     }
                     Loc::Stack(off) => {

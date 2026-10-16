@@ -619,7 +619,7 @@ impl<'m> Isel<'m> {
             self.sret = Some(d);
         }
         // ⚠ 先推 `Args`（定义寄存器上的参数）、再读栈上的、再做零扩展：⛔ 先用后定义
-        let mut params = Vec::new();
+        let (mut params, mut moves) = (Vec::new(), Vec::new());
         for &p in &blk.params {
             let parts = if self.boxed(self.ty(p)) { vec![Part::F] } else { self.parts(self.ty(p))? };
             let locs = assign.parts(&parts, false);
@@ -627,6 +627,12 @@ impl<'m> Isel<'m> {
             for (part, loc) in parts.iter().zip(locs) {
                 let d = R::V(self.vreg(part.class()));
                 match loc {
+                    // fa 用完了、落在 a 寄存器上的 float：先在整数寄存器上接住，再搬进浮点
+                    Loc::Reg(preg) if preg.class() != part.class() => {
+                        let x = self.xr();
+                        args.def_on(x, Rule::Fixed(preg));
+                        moves.push((d, x));
+                    }
                     Loc::Reg(preg) => args.def_on(d, Rule::Fixed(preg)),
                     Loc::Stack(off) => loads.push((d, *part, off)),
                 }
@@ -635,6 +641,9 @@ impl<'m> Isel<'m> {
             params.push(regs);
         }
         self.push(args);
+        for (d, x) in moves {
+            self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[x]);
+        }
         for (d, part, off) in loads {
             let op = if part == Part::F { Opcode::from(Float::Flw) } else { Opcode::from(IOp::Lw) };
             self.emit(MOp::Load(op, Base::Incoming, off), &[d], &[]);

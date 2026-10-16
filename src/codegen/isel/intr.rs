@@ -591,8 +591,10 @@ impl Isel<'_> {
                     Intr::Memmove => "memmove",
                     _ => "memset",
                 };
-                let dst = self.get1(args[0])?;
-                let src = self.get1(args[1])?;
+                // `.inline` 的长度是属性（前端补成第三个实参）；缺了报错，⛔ 越界
+                let &[d, v, n, ..] = args else { return Self::bad(format!("{i:?} 要三个实参（目的、源 / 值、长度），只有 {}", args.len())) };
+                let (dst, src) = (self.get1(d)?, self.get1(v)?);
+                let args = [d, v, n];
                 // 长度可能是 i64（`llvm.memcpy.p0.p0.i64`）：size_t 32 位，只看低半（同 llc）
                 let len = self.low(args[2])?;
                 self.libcall(name, &[(vec![dst], vec![Part::X]), (vec![src], vec![Part::X]), (vec![len], vec![Part::X])], &[Part::X])?;
