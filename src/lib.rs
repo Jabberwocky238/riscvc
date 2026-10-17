@@ -32,6 +32,9 @@ pub mod macros {
     pub use riscvc_macros::{Isa, Opcode};
 }
 #[cfg(feature = "toolchain")]
+/// 中端：内部 IR 上的分析与变换（⛔ 不是 `codegen::opt`，那层在机器 IR 上）。
+pub mod opt;
+
 pub mod plugin;
 #[cfg(feature = "toolchain")]
 pub mod sim;
