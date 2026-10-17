@@ -235,6 +235,31 @@ impl Assembler<'_> {
 
     /// ⭐ `section` 里 `[at, at + old)` 换成 `new`，后面的一切往后挪。`seq`：恰在 `at` 的标号里，序号比它小的在前面、不挪
     /// （对齐用；改写指令时 `at` 处的标号都在指令前面 ⇒ 给 `u64::MAX`）。
+    /// 拼完子节之后再定：**由多个子节拼起来的**代码节里，但凡有可松弛项，> 2 的对齐
+    /// 就一律按 `R_RISCV_ALIGN` 出 —— 同 llvm-mc，低编号子节里的对齐保守地当成可松弛的。
+    /// ⛔ 只有一个子节的节不在此列，那种照 [`Assembler::align`] 当场的判据走。
+    ///
+    /// ⭐ 必须等子节拼完才判得了：`.text 0` 的对齐前面可能一条指令都没有，可松弛的那条
+    /// 在 `.text 1` 里，而源码处理次序上 `.text 2` 的对齐还排在它前面。
+    /// 换填充会改长度，所以走 [`Assembler::splice`]，后面的一切跟着挪。
+    pub(super) fn relax_aligns(&mut self) {
+        for sec in 0..self.sections.len() {
+            if !self.sections[sec].spliced || !self.sections[sec].code() || self.sections[sec].relax_items.is_empty() {
+                continue;
+            }
+            while let Some(k) = self.sections[sec].pads.iter().position(|p| p.fill.is_none() && p.align > 2) {
+                let p = self.sections[sec].pads.remove(k);
+                let size = p.align - 2;
+                let bytes = Assembler::align_nops(size);
+                self.splice(sec, p.offset, p.size, &bytes, p.seq);
+                let s = &mut self.sections[sec];
+                s.relax_items.push((p.offset, p.offset + size));
+                // 这条对齐是哪一行出的，`Pad` 没记；`Fix::Align` 不会报错，给 0 即可。
+                s.fixups.push(super::fixup::Fixup { offset: p.offset, kind: Fix::Align(size), expr: Expr::Num(0), line: 0, relax: false });
+            }
+        }
+    }
+
     fn splice(&mut self, section: usize, at: u64, old: u64, new: &[u8], seq: u64) {
         let end = at + old;
         let delta = new.len() as i64 - old.cast_signed();

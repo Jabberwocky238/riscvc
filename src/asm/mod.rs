@@ -70,6 +70,9 @@ pub struct Section {
     pub name: String,
     /// `.text 1` 里那个 1。同名的各子节在 [`Assembler::merge_subsections`] 里按它升序拼起来。
     pub subsec: u32,
+    /// 这一节是由多个子节拼起来的。只有这种节里的对齐才按 `R_RISCV_ALIGN` 保守处理
+    /// （见 [`Assembler::relax_aligns`]）。
+    pub spliced: bool,
     pub ty: u32,
     pub flags: u64,
     pub align: u64,
@@ -95,6 +98,7 @@ impl Section {
 
     /// 把 `s` 接在自己后面，它记的各处偏移都加上 `delta`。
     fn absorb(&mut self, mut s: Self, delta: u64) {
+        self.spliced = true;
         self.align = self.align.max(s.align);
         self.data.append(&mut s.data);
         self.nobits += s.nobits;
@@ -415,7 +419,7 @@ impl<'e> Assembler<'e> {
         let ty = ty.unwrap_or(dty);
         let entsize = entsize.unwrap_or(0);
         let _ = (SHF_MERGE, SHF_STRINGS);
-        self.sections.push(Section { name: String::from(name), subsec, ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
+        self.sections.push(Section { name: String::from(name), subsec, spliced: false, ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
         self.cur = self.sections.len() - 1;
     }
 

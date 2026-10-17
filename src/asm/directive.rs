@@ -338,25 +338,18 @@ impl Assembler<'_> {
         if max.is_some_and(|m| pad > u64::try_from(m).unwrap_or(0)) {
             return Ok(());
         }
-        // 节里已有可松弛点之后、代码节的对齐（> 2 字节）：填对齐量 − 2 字节的 nop、出 R_RISCV_ALIGN（同 RISCVAsmBackend::relaxAlign；
-        // 这时 .option norelax 也照出）
+        // 节里已有可松弛点之后、代码节的对齐（> 2 字节）：填对齐量 − 2 字节的 nop、出 R_RISCV_ALIGN
+        // （同 RISCVAsmBackend::relaxAlign；这时 .option norelax 也照出）。
+        // ⚠ 这里只认「**此刻**本节已经有可松弛点」。子节会让可松弛的那条指令晚一步才出现
+        // （`.text 2` 的对齐先处理、`.text 1` 的 call 后处理），那种情况由
+        // [`Assembler::relax_aligns`] 在拼完子节之后补判。
         if s.code() && fill.is_none() && align > 2 && !s.relax_items.is_empty() {
             let size = align - 2;
             let at = here;
             s.relax_items.push((at, at + size));
             let line = self.line;
             s.fixups.push(super::fixup::Fixup { offset: at, kind: Fix::Align(size), expr: super::Expr::Num(0), line, relax: false });
-            let mut bytes = Vec::new();
-            if size % 2 == 1 {
-                bytes.push(0);
-            }
-            if size % 4 >= 2 {
-                bytes.extend_from_slice(&[0x01, 0x00]);
-            }
-            for _ in 0..size / 4 {
-                bytes.extend_from_slice(&0x13u32.to_le_bytes());
-            }
-            return self.bytes(&bytes);
+            return self.bytes(&Self::align_nops(size));
         }
         // 同 llvm-mc：代码节奇数先补一个 0，再差 2 字节补 `c.nop`（不开 C 也补），其余一条条 nop；别的按填充字节。
         // 记下来：前面的指令布局时放宽了要重补（[`super::layout`]）
@@ -365,6 +358,21 @@ impl Assembler<'_> {
         let max = max.and_then(|m| u64::try_from(m).ok());
         self.sections[self.cur].pads.push(super::layout::Pad { offset: here, align, size: pad, fill, max, seq });
         self.bytes(&Self::padding(pad, fill))
+    }
+
+    /// `R_RISCV_ALIGN` 那种对齐填的字节：奇数先补一个 0，差 2 字节补 `c.nop`，其余一条条 nop。
+    pub(super) fn align_nops(size: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        if size % 2 == 1 {
+            bytes.push(0);
+        }
+        if size % 4 >= 2 {
+            bytes.extend_from_slice(&[0x01, 0x00]);
+        }
+        for _ in 0..size / 4 {
+            bytes.extend_from_slice(&0x13u32.to_le_bytes());
+        }
+        bytes
     }
 
     /// 常数参数（现在就要能算出来）。
