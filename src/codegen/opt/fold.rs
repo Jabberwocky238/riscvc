@@ -18,7 +18,7 @@ use crate::codegen::mir::Regs;
 use smallvec::smallvec;
 use crate::feature::Zmmul;
 use crate::isa::{Opcode, Rv32i as IOp};
-use regalloc2::VReg;
+use crate::regalloc::VReg;
 use std::collections::HashMap;
 
 /// 化简的结果。

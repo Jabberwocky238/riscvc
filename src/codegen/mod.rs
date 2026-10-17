@@ -39,8 +39,8 @@ impl Module {
             if !mf.well_formed() {
                 return Err(Error::Select(format!("{}：机器块没有以终结指令收尾", f.name)));
             }
-            let opts = regalloc2::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
-            let out = regalloc2::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
+            let opts = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
+            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
             let body = post::PFunc::new(&sel, &mf, &out, id).to_string();
             let section = f.section.as_deref().map_or_else(|| String::from("\t.text"), |s| format!("\t.section\t{s},\"ax\",@progbits"));
             let _ = writeln!(text, "{section}");

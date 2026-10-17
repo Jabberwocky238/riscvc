@@ -1,7 +1,7 @@
 //! 机器 IR：一条 = 一条（或一小段固定的）RV32IMF 指令，寄存器是虚拟寄存器或固定的物理寄存器；
 //! 实现 regalloc2 的 `Function`。
 use crate::isa::{Opcode, Rv32i as IOp};
-use regalloc2::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
+use crate::regalloc::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
 use smallvec::SmallVec;
 
 /// 一条指令的寄存器（内联放 3 个：调用、`select` 这种多的才上堆）。

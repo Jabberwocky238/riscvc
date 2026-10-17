@@ -28,7 +28,7 @@ use super::Error;
 use crate::ir::{Block as IBlock, CastOp, Const, Function, IPred, Inst, Intr, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::feature::{Float, M, Zmmul};
 use crate::isa::{Opcode, Rm, Rv32i as IOp, Table};
-use regalloc2::{Block, RegClass, VReg};
+use crate::regalloc::{Block, RegClass, VReg};
 use std::collections::HashMap;
 
 /// 一个栈帧对象（alloca、按值传参的拷贝、sret 的返回区）。

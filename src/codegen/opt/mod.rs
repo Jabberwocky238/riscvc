@@ -21,7 +21,7 @@ use super::isel::Selected;
 use super::mir::{Base, MBlock, MInst, MOp, R};
 use dom::DomTree;
 use fold::Known;
-use regalloc2::VReg;
+use crate::regalloc::VReg;
 use std::collections::HashMap;
 
 /// 化简到不再变，最多走这么多遍（一遍通常就够：定义先于使用）。

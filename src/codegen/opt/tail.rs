@@ -5,7 +5,7 @@
 //! 没有栈上实参、不是可变参数函数、不动 `sp`。⛔ 间接调用不做（目标寄存器可能被尾声恢复的 `s*` 盖掉）。
 use super::{MInst, MOp, Selected};
 use crate::codegen::mir::Base;
-use regalloc2::PRegSet;
+use crate::regalloc::PRegSet;
 
 impl Selected {
     /// 帧里什么都没有（尾调用安全）。

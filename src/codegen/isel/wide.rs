@@ -14,7 +14,7 @@ use crate::codegen::mir::{Base, MOp};
 use crate::feature::Zmmul;
 use crate::ir::{BinOp, IPred, ValId};
 use crate::isa::{Rv32i as IOp, Table};
-use regalloc2::VReg;
+use crate::regalloc::VReg;
 
 impl Isel<'_> {
     /// `w` 位整数顶字里的位数（1..=32）。

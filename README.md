@@ -473,7 +473,10 @@ dominator-scoped CSE, branch-condition folding, tail calls), post-allocation bra
 selection-time rewrites (small constant-length `memcpy` / `memmove` / `memset` inline, `ctpop(x) == 1` as
 `(x - 1) <u (x ^ (x - 1))`, `floor` / `ceil` / `round` … inline and fused into `fcvt` with a rounding mode) are in;
 still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping, jump tables and
-copy coalescing (regalloc2 has no move hints), plus llc's lowering of `cttz` (de Bruijn table).
+copy coalescing, plus llc's lowering of `cttz` (de Bruijn table). The register allocator is a vendored copy of
+[regalloc2](https://github.com/bytecodealliance/regalloc2) v0.15.2 in `src/alloc` (see `src/alloc/VENDOR.md`): it has
+no move hints, no rematerialization and coalesces only two-address operands and block parameters, which is where the
+remaining code-size gap against llc mostly comes from.
 
 ## Building and testing
 
@@ -516,4 +519,6 @@ git diff tests/fixtures/lit/xfail.txt
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), except `src/alloc` — a vendored copy of
+[regalloc2](https://github.com/bytecodealliance/regalloc2), which is Apache-2.0 WITH LLVM-exception
+(see `src/alloc/LICENSE` and `src/alloc/VENDOR.md`).

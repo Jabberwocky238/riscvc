@@ -8,6 +8,12 @@ extern crate self as riscvc;
 /// ELF32 小端 RISC-V 的读写模型（⭐ 不依赖 `toolchain`）。
 pub mod elf;
 
+/// 寄存器分配器（内化的 regalloc2，见 `src/alloc/VENDOR.md`）。
+/// ⚠ 目录是 `src/alloc`，模块名是 `regalloc`：crate 根有 `extern crate alloc`，同名会撞。
+#[cfg(feature = "toolchain")]
+#[path = "alloc/mod.rs"]
+pub mod regalloc;
+
 #[cfg(feature = "toolchain")]
 pub mod asm;
 #[cfg(feature = "toolchain")]

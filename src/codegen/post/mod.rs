@@ -16,7 +16,7 @@ mod relax;
 use super::isel::Selected;
 use super::mir::MFunc;
 use crate::isa::{Inst, Rv32i as IOp};
-use regalloc2::Output;
+use crate::regalloc::Output;
 
 /// 一条指令（物理寄存器，立即数已定）。
 #[derive(Clone, Debug)]

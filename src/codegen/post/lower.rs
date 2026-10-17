@@ -5,7 +5,7 @@ use super::{PBlock, PFunc, PInst, Selected, Term};
 use crate::codegen::mir::{Base, MFunc, MInst, MOp, R};
 use crate::feature::Float;
 use crate::isa::{Inst, Opcode, Rv32i as IOp, X};
-use regalloc2::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
+use crate::regalloc::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
 use smallvec::SmallVec;
 
 /// `t6`：不参与分配，大偏移、成环的搬运、栈到栈的搬运借它。
@@ -250,7 +250,7 @@ impl<'a> Lower<'a> {
     fn inst(&mut self, i: usize) {
         let (mf, out) = (self.mf, self.out);
         let inst = &mf.insts[i];
-        let (d, u) = Self::regs(inst, out.inst_allocs(regalloc2::Inst::new(i)));
+        let (d, u) = Self::regs(inst, out.inst_allocs(crate::regalloc::Inst::new(i)));
         match &inst.op {
             MOp::Reg(op, rm) => {
                 let mut x = Inst::new(*op).x(d[0], u[0], u.get(1).copied().unwrap_or(0));

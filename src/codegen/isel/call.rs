@@ -1,7 +1,7 @@
 //! 调用与返回（ilp32f，见 `abi.rs`）：实参拆成部件逐个分配，寄存器上的作为调用指令的固定 use，
 //! 栈上的先存进出参区；返回值是固定 def；调用方保存的寄存器记成 clobber。库函数调用走同一条路。
 use super::{Error, Isel, R};
-use regalloc2::VReg;
+use crate::regalloc::VReg;
 use crate::codegen::abi::{Abi, Assign, Loc, Part};
 use crate::codegen::mir::{Base, MInst, MOp, Rule};
 use crate::ir::{ArgAttrs, Callee, Kind, RmwOp, Ty, ValId};
@@ -275,7 +275,7 @@ impl Isel<'_> {
         parts
             .iter()
             .map(|&r| match r {
-                R::V(v) if v.class() == regalloc2::RegClass::Float => {
+                R::V(v) if v.class() == crate::regalloc::RegClass::Float => {
                     let x = self.xr();
                     self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[r]);
                     x
@@ -370,7 +370,7 @@ impl Isel<'_> {
         let w = self.types().bits(t).unwrap_or(32);
         let init = self.load_leaf(t, Base::Reg(ptr), 0, n)?;
         let obj = self.atomic_slot(n);
-        let fresh = |s: &mut Self, like: &[R]| -> Vec<R> { like.iter().map(|r| R::V(s.vreg(if matches!(r, R::V(v) if v.class() == regalloc2::RegClass::Float) { regalloc2::RegClass::Float } else { regalloc2::RegClass::Int }))).collect() };
+        let fresh = |s: &mut Self, like: &[R]| -> Vec<R> { like.iter().map(|r| R::V(s.vreg(if matches!(r, R::V(v) if v.class() == crate::regalloc::RegClass::Float) { crate::regalloc::RegClass::Float } else { crate::regalloc::RegClass::Int }))).collect() };
         let (head, done) = (self.new_block(), self.new_block());
         let old = fresh(self, &init);
         let res = fresh(self, &init);

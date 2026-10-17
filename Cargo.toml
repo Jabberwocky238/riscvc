@@ -3,7 +3,7 @@ name = "riscvc"
 version = "0.1.3"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
-license = "MIT"
+license = "MIT AND Apache-2.0 WITH LLVM-exception"
 repository = "https://github.com/Jabberwocky238/riscvc"
 readme = "README.md"
 keywords = ["riscv", "compiler", "assembler", "linker", "mlir"]
@@ -17,7 +17,7 @@ exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 default = ["toolchain", "m", "f"]
 # ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
 # ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
-toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:regalloc2", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
+toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:object", "dep:allocator-api2", "dep:bumpalo", "dep:hashbrown", "dep:log", "dep:rustc-hash", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
 # C：16 位压缩指令（汇编器、反汇编、解释器认 `c.*` 与 16 位编码；`-march` 带 c2p0_zca1p0[_zcf1p0]），默认不开
 c = []
 # M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
@@ -42,6 +42,11 @@ xtheadsync = []
 # 玄铁的全部
 xthead = ["xtheadba", "xtheadbb", "xtheadbs", "xtheadcmo", "xtheadcondmov", "xtheadfmemidx", "xtheadmac", "xtheadmemidx", "xtheadmempair", "xtheadsync"]
 
+[lints.rust]
+# src/alloc（内化的 regalloc2）里这三个 feature 是上游的，riscvc 不开也不声明；
+# 在这里登记一下，省得它们刷出几百条 unexpected_cfgs。
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("enable-serde", "trace-log", "fuzzing"))'] }
+
 [workspace]
 members = [".", "macros"]
 
@@ -50,9 +55,14 @@ riscvc-macros = { path = "macros", version = "0.1.1", optional = true }
 clap = { version = "4.6.7", features = ["derive"], optional = true }
 mlirformat = { version = "0.2.1", default-features = false, optional = true }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
-regalloc2 = { version = "0.15.2", optional = true }
-# 机器指令的寄存器表内联存放（regalloc2 本来就依赖它）
-smallvec = { version = "1.6.1", optional = true }
+# ⭐ src/alloc（内化的 regalloc2）的依赖，版本照上游 Cargo.toml，⛔ 别擅自升
+allocator-api2 = { version = "0.2.18", default-features = false, features = ["alloc"], optional = true }
+bumpalo = { version = "3.16.0", features = ["allocator-api2"], optional = true }
+hashbrown = { version = "0.17", default-features = false, optional = true }
+log = { version = "0.4.8", default-features = false, optional = true }
+rustc-hash = { version = "2.0.0", default-features = false, optional = true }
+# 机器指令的寄存器表内联存放（src/alloc 也用它）
+smallvec = { version = "1.6.1", features = ["union"], optional = true }
 thiserror = { version = "2", default-features = false }
 # SHF_MERGE 去重的分片哈希（同 lld：llvm::xxh3_64bits）
 xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }

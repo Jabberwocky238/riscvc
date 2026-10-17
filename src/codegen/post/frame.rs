@@ -9,7 +9,7 @@ use super::super::abi::Abi;
 use super::Selected;
 use crate::codegen::mir::Base;
 use crate::isa::X;
-use regalloc2::{Allocation, Edit, Output, PReg, RegClass};
+use crate::regalloc::{Allocation, Edit, Output, PReg, RegClass};
 
 pub struct Frame {
     /// 帧总大小。
