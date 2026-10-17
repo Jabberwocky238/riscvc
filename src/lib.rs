@@ -41,6 +41,9 @@ pub mod macros {
 /// 中端：内部 IR 上的分析与变换（⛔ 不是 `codegen::opt`，那层在机器 IR 上）。
 pub mod opt;
 
+/// 插件接口（方言与 pass）。⛔ 必须跟着 `toolchain` 走：它依赖 `ir` / `opt` / mlirformat，
+/// 没门的话 `--no-default-features` 编不过，连带 libdope（path 依赖 + `default-features = false`）一起红。
+#[cfg(feature = "toolchain")]
 pub mod plugin;
 #[cfg(feature = "toolchain")]
 pub mod sim;
