@@ -36,7 +36,8 @@ pub enum Operand {
 /// 一条扩展指令的操作数：解析好的与原文（伪指令模板按原文替换）。
 pub struct Args<'a> {
     pub ops: &'a [Operand],
-    pub raw: &'a [String],
+    /// 操作数原文（借汇编行的切片，⛔ 不复制）。
+    pub raw: &'a [&'a str],
 }
 
 /// 立即数位段（修补点落在哪）：同标准格式的散布。
@@ -311,7 +312,7 @@ impl Template {
             if !ok {
                 return None;
             }
-            binds.push((name, raw.as_str()));
+            binds.push((name, *raw));
         }
         // 长名先换，免得 `$rs` 吃掉 `$rs1` 的前缀
         binds.sort_by_key(|(n, _)| core::cmp::Reverse(n.len()));

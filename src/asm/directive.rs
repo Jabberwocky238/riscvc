@@ -1,12 +1,12 @@
 //! 伪操作（`.section`、`.word`、`.p2align` …）。调试信息、CFI 一类不影响代码与数据的认了就跳过。
 use super::fixup::Fix;
-use super::lex::{Tok, Toks};
+use super::lex::{Cur, Tok, Toks};
 use super::{Assembler, Bind, Def, Error};
 use object::elf;
 
 impl Assembler<'_> {
     pub(super) fn directive(&mut self, word: &str, rest: &str) -> Result<(), Error> {
-        let args = || Toks::try_from(rest).map(Toks::split_commas);
+        let line = || Toks::try_from(rest);
         match word {
             ".text" | ".data" | ".bss" | ".rodata" | ".sdata" | ".sbss" | ".tdata" | ".tbss" => self.switch(word, None, None, None),
             ".section" | ".pushsection" => {
@@ -58,17 +58,19 @@ impl Assembler<'_> {
                 self.symbol(name.trim()).kind = kind;
             }
             ".size" => {
-                let mut a = args()?;
+                let l = line()?;
+                let mut a = l.commas();
                 if a.len() != 2 {
                     return Err(Error::Syntax(String::from(".size 名字, 表达式")));
                 }
                 let name = a[0].ident()?;
                 let e = a[1].expr(self)?;
-                self.symbol(&name).size = Some(e);
+                self.symbol(name).size = Some(e);
             }
             ".set" | ".equ" | ".equiv" => {
                 let (name, value) = rest.split_once(',').ok_or_else(|| Error::Syntax(format!("{word} 名字, 表达式")))?;
-                let e = Toks::try_from(value)?.expr(self)?;
+                let l = Toks::try_from(value)?;
+                let e = l.cur().expr(self)?;
                 self.symbol(name.trim()).def = Def::Equ(e);
             }
             ".byte" | ".half" | ".hword" | ".2byte" | ".short" | ".word" | ".4byte" | ".long" | ".int" | ".quad" | ".8byte" | ".dword" => {
@@ -78,7 +80,8 @@ impl Assembler<'_> {
                     ".word" | ".4byte" | ".long" | ".int" => 4,
                     _ => 8,
                 };
-                for mut a in args()? {
+                let l = line()?;
+                for mut a in l.commas() {
                     let e = a.expr(self)?;
                     // `.word %pltpcrel(f)` / `.word %gotpcrel(f)`：一定出重定位
                     let (kind, e) = match e.modifier() {
@@ -100,7 +103,8 @@ impl Assembler<'_> {
             }
             ".insn" => self.insn(rest)?,
             ".fill" => {
-                let a = args()?;
+                let l = line()?;
+                let a = l.commas();
                 let repeat = self.constant_arg(a.first(), "次数")?;
                 let size = if a.len() > 1 { self.constant_arg(a.get(1), "大小")? } else { 1 };
                 let value = if a.len() > 2 { self.constant_arg(a.get(2), "值")? } else { 0 };
@@ -109,7 +113,8 @@ impl Assembler<'_> {
                 self.bytes(&one.repeat(usize::try_from(repeat).map_err(|_| Error::Syntax(String::from(".fill 次数为负")))?))?;
             }
             ".org" => {
-                let a = args()?;
+                let l = line()?;
+                let a = l.commas();
                 let mut t = a.first().cloned().ok_or_else(|| Error::Syntax(String::from(".org 要位置")))?;
                 let e = t.expr(self)?;
                 let v = self.eval(&e, 0)?;
@@ -130,7 +135,8 @@ impl Assembler<'_> {
                 self.bytes(&vec![u8::try_from(fill & 0xff).unwrap_or_default(); usize::try_from(target - here).unwrap_or_default()])?;
             }
             ".uleb128" | ".sleb128" => {
-                for mut a in args()? {
+                let l = line()?;
+                for mut a in l.commas() {
                     let e = a.expr(self)?;
                     let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 只做常数（跨节的差要 SET_ULEB128 重定位，没做）")))?;
                     let bytes = if word == ".uleb128" { Self::uleb(k.cast_unsigned()) } else { Self::sleb(k) };
@@ -144,17 +150,19 @@ impl Assembler<'_> {
                 }
             }
             ".zero" | ".space" | ".skip" => {
-                let a = args()?;
+                let l = line()?;
+                let a = l.commas();
                 let n = self.constant_arg(a.first(), "长度")?;
                 let fill = if a.len() > 1 { self.constant_arg(a.get(1), "填充值")? } else { 0 };
                 self.bytes(&vec![u8::try_from(fill & 0xff).unwrap_or_default(); usize::try_from(n).map_err(|_| Error::Syntax(String::from("长度为负")))?])?;
             }
             ".ascii" | ".asciz" | ".string" => {
-                let mut toks = Toks::try_from(rest)?;
+                let l = Toks::try_from(rest)?;
+                let mut toks = l.cur();
                 while let Some(t) = toks.next() {
                     match t {
                         Tok::Str(s) => {
-                            self.bytes(&s)?;
+                            self.bytes(s)?;
                             if word != ".ascii" {
                                 self.bytes(&[0])?;
                             }
@@ -165,7 +173,8 @@ impl Assembler<'_> {
                 }
             }
             ".p2align" | ".align" | ".balign" => {
-                let a = args()?;
+                let l = line()?;
+                let a = l.commas();
                 let v = self.constant_arg(a.first(), "对齐")?;
                 let align = if word == ".balign" { u64::try_from(v).unwrap_or(1) } else { 1u64 << v };
                 let fill = if a.len() > 1 && !a[1].is_empty() { Some(self.constant_arg(a.get(1), "填充值")?) } else { None };
@@ -173,33 +182,35 @@ impl Assembler<'_> {
                 self.align(align, fill, max)?;
             }
             ".comm" | ".lcomm" => {
-                let a = args()?;
-                let mut name = a.first().ok_or_else(|| Error::Syntax(format!("{word} 名字, 大小")))?.clone_ident()?;
+                let l = line()?;
+                let a = l.commas();
+                let name = a.first().ok_or_else(|| Error::Syntax(format!("{word} 名字, 大小")))?.clone_ident()?;
                 let size = u64::try_from(self.constant_arg(a.get(1), "大小")?).unwrap_or_default();
                 let align = if a.len() > 2 { u64::try_from(self.constant_arg(a.get(2), "对齐")?).unwrap_or(1) } else { 1 };
-                let local = self.symbols.get(&name).is_some_and(|s| s.declared && s.bind == Bind::Local);
+                let local = self.symbols.get(name).is_some_and(|s| s.declared && s.bind == Bind::Local);
                 if word == ".lcomm" || local {
                     // 放进 .bss
                     let back = (self.cur, self.prev);
                     self.switch(".bss", None, None, None);
                     self.align(align, None, None)?;
-                    self.define(&name);
+                    self.define(name);
                     self.bytes(&vec![0; usize::try_from(size).unwrap_or_default()])?;
                     (self.cur, self.prev) = back;
                 } else {
-                    let sym = self.symbol(&core::mem::take(&mut name));
+                    let sym = self.symbol(name);
                     sym.def = Def::Common(size, align);
                     sym.bind = Bind::Global;
                     sym.kind = elf::STT_OBJECT;
                 }
             }
             ".incbin" => {
-                let mut toks = Toks::try_from(rest)?;
+                let l = Toks::try_from(rest)?;
+                let mut toks = l.cur();
                 let Some(Tok::Str(file)) = toks.next() else { return Err(Error::Syntax(String::from(".incbin 要文件名"))) };
-                let file = String::from_utf8_lossy(&file).into_owned();
+                let file = String::from_utf8_lossy(file).into_owned();
                 let path = self.opts.include.iter().map(|d| d.join(&file)).find(|p| p.is_file()).unwrap_or_else(|| file.clone().into());
                 let bytes = std::fs::read(&path).map_err(|e| Error::Syntax(format!(".incbin {}：{e}", path.display())))?;
-                let a = toks.split_commas();
+                let a = toks.commas();
                 let skip = if a.len() > 1 { usize::try_from(self.constant_arg(a.get(1), "跳过")?).unwrap_or_default() } else { 0 };
                 let count = if a.len() > 2 { usize::try_from(self.constant_arg(a.get(2), "长度")?).unwrap_or_default() } else { bytes.len().saturating_sub(skip) };
                 self.bytes(bytes.get(skip..skip + count).ok_or_else(|| Error::Syntax(String::from(".incbin 范围越界")))?)?;
@@ -254,13 +265,14 @@ impl Assembler<'_> {
                 self.symbol(name).vis |= 0x80;
             }
             ".reloc" => {
-                let mut a = args()?;
+                let l = line()?;
+                let mut a = l.commas();
                 if a.len() < 2 {
                     return Err(Error::Syntax(String::from(".reloc 位置, 类型[, 表达式]")));
                 }
                 let at = a[0].expr(self)?;
                 let name = a[1].ident()?;
-                let super::reloc::RType(r_type) = name.as_str().try_into().map_err(|()| Error::Syntax(format!("不认识的重定位 `{name}`")))?;
+                let super::reloc::RType(r_type) = name.try_into().map_err(|()| Error::Syntax(format!("不认识的重定位 `{name}`")))?;
                 let target = match a.get_mut(2) {
                     Some(t) => t.expr(self)?,
                     None => super::Expr::Num(0),
@@ -352,8 +364,8 @@ impl Assembler<'_> {
     }
 
     /// 常数参数（现在就要能算出来）。
-    pub(super) fn constant_arg(&mut self, toks: Option<&Toks>, what: &str) -> Result<i64, Error> {
-        let mut toks = toks.ok_or_else(|| Error::Syntax(format!("缺{what}")))?.clone();
+    pub(super) fn constant_arg(&mut self, toks: Option<&Cur<'_, '_>>, what: &str) -> Result<i64, Error> {
+        let mut toks = *toks.ok_or_else(|| Error::Syntax(format!("缺{what}")))?;
         let e = toks.expr(self)?;
         self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{what}要是常数")))
     }
@@ -387,8 +399,4 @@ impl Assembler<'_> {
     }
 }
 
-impl Toks {
-    fn clone_ident(&self) -> Result<String, Error> {
-        self.clone().ident()
-    }
-}
+

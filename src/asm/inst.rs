@@ -1,6 +1,6 @@
 //! 指令与伪指令：操作数解析、伪指令展开（同 llvm-mc 的写法与展开）。
 use super::fixup::Fix;
-use super::lex::{Tok, Toks};
+use super::lex::{Cur, Tok, Toks};
 use super::{Assembler, Error, Expr, Modifier};
 use crate::ext::{Args, Emit, Field, Operand};
 use crate::isa::{F, Base, Inst, Rv32i as Op, X};
@@ -18,7 +18,8 @@ pub enum Opnd {
 
 impl Assembler<'_> {
     pub(super) fn instruction(&mut self, mnem: &str, rest: &str) -> Result<(), Error> {
-        let toks = Toks::try_from(rest)?.split_commas();
+        let line = Toks::try_from(rest)?;
+        let toks = line.commas();
         // 要符号的位置上，寄存器名也是符号（同 llvm-mc：`call zero`、`j a0`、`jal a0, a0`）
         let symbolic = match (mnem, mnem.parse::<Op>().map(|o| o.form()), toks.len()) {
             ("jump", ..) => Some(0),
@@ -32,7 +33,7 @@ impl Assembler<'_> {
             .into_iter()
             .enumerate()
             .map(|(k, t)| match (symbolic == Some(k), t.tokens()) {
-                (true, [Tok::Ident(name)]) if register(name) => Ok(Opnd::E(Expr::Sym(name.clone()))),
+                (true, [Tok::Ident(name)]) if register(name) => Ok(Opnd::E(Expr::Sym(String::from(*name)))),
                 _ => self.operand(t),
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -76,9 +77,12 @@ impl Assembler<'_> {
             .collect();
         let raw = Self::raw_args(rest);
         let args = Args { ops: &plain, raw: &raw };
-        let exts = self.exts.clone();
-        let Some((name, out)) = exts.iter().find_map(|e| e.assemble(mnem, &args).map(|r| (e.name(), r))) else { return Ok(false) };
-        match out.map_err(|msg| Error::Syntax(format!("{name}：{msg}")))? {
+        // 借出扩展表再放回：⛔ 不克隆（每条指令一次）
+        let exts = core::mem::take(&mut self.exts);
+        let hit = exts.iter().enumerate().find_map(|(k, e)| e.assemble(mnem, &args).map(|r| (k, r)));
+        self.exts = exts;
+        let Some((k, out)) = hit else { return Ok(false) };
+        match out.map_err(|msg| Error::Syntax(format!("{}：{msg}", self.exts[k].name())))? {
             // 内置扩展的 4 字节标准指令（flw / fsw …）也压
             Emit::Bytes(b) if b.len() == 4 => self.instruction_word(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))?,
             Emit::Bytes(b) => self.bytes(&b)?,
@@ -128,29 +132,29 @@ impl Assembler<'_> {
         Ok((kind, inner.clone()))
     }
 
-    /// 操作数原文（按最外层的逗号分，括号与引号里的不分）。
-    fn raw_args(rest: &str) -> Vec<String> {
-        let (mut out, mut cur, mut depth, mut quote) = (Vec::new(), String::new(), 0i32, false);
-        for c in rest.chars() {
+    /// 操作数原文（按最外层的逗号分，括号与引号里的不分）—— 借 `rest` 的切片，⛔ 不复制。
+    fn raw_args(rest: &str) -> Vec<&str> {
+        let (mut out, mut depth, mut quote, mut start) = (Vec::new(), 0i32, false, 0);
+        for (i, c) in rest.char_indices() {
             match c {
                 '"' => quote = !quote,
                 '(' if !quote => depth += 1,
                 ')' if !quote => depth -= 1,
                 ',' if !quote && depth == 0 => {
-                    out.push(core::mem::take(&mut cur).trim().to_string());
-                    continue;
+                    out.push(rest[start..i].trim());
+                    start = i + c.len_utf8();
                 }
                 _ => {}
             }
-            cur.push(c);
         }
-        if !cur.trim().is_empty() || !out.is_empty() {
-            out.push(cur.trim().to_string());
+        let last = rest[start..].trim();
+        if !last.is_empty() || !out.is_empty() {
+            out.push(last);
         }
         out
     }
 
-    pub(super) fn operand(&mut self, t: Toks) -> Result<Opnd, Error> {
+    pub(super) fn operand(&mut self, t: Cur<'_, '_>) -> Result<Opnd, Error> {
         let toks = t.tokens();
         if let [Tok::Ident(s)] = toks {
             if let Ok(r) = s.parse::<X>() {
@@ -163,12 +167,12 @@ impl Assembler<'_> {
         if let [prefix @ .., Tok::Punct('('), Tok::Ident(r), Tok::Punct(')')] = toks
             && let Ok(base) = r.parse::<X>()
         {
-            let e = if prefix.is_empty() { Expr::Num(0) } else { Toks::from_vec(prefix.to_vec()).expr(self)? };
+            let e = if prefix.is_empty() { Expr::Num(0) } else { Cur::new(prefix).expr(self)? };
             return Ok(Opnd::M(e, base));
         }
         // `foo@plt`：同不带（llvm-mc 一样出 CALL_PLT）
         let t = match toks {
-            [head @ .., Tok::Punct('@'), Tok::Ident(p)] if p.eq_ignore_ascii_case("plt") => Toks::from_vec(head.to_vec()),
+            [head @ .., Tok::Punct('@'), Tok::Ident(p)] if p.eq_ignore_ascii_case("plt") => Cur::new(head),
             _ => t,
         };
         let mut t = t;
@@ -326,7 +330,8 @@ impl Assembler<'_> {
             return self.insn_c(kind, args);
         }
         if !matches!(kind, "r" | "r4" | "i" | "s" | "b" | "sb" | "u" | "j" | "uj") {
-            let a = Toks::try_from(rest)?.split_commas();
+            let line = Toks::try_from(rest)?;
+            let a = line.commas();
             let (len, value) = match a.as_slice() {
                 [v] => {
                     let v = self.constant_arg(Some(v), "值")?;
@@ -345,7 +350,8 @@ impl Assembler<'_> {
             let len = usize::try_from(len).ok().filter(|n| matches!(n, 2 | 4 | 6 | 8)).ok_or_else(|| Error::Syntax(format!(".insn 长度 {len}")))?;
             return self.bytes(&value.to_le_bytes()[..len]);
         }
-        let toks = Toks::try_from(args)?.split_commas();
+        let line = Toks::try_from(args)?;
+        let toks = line.commas();
         let mut it = toks.into_iter();
         let mut next = || it.next().ok_or_else(|| Error::Syntax(format!(".insn {kind} 的操作数不够")));
         let opcode = {
@@ -449,7 +455,8 @@ impl Assembler<'_> {
     /// `cs opcode, funct3, rs2', uimm5(rs1')` · `ca opcode, funct6, funct2, rd', rs2'` · `cb opcode, funct3, rs1', 目标` ·
     /// `cj opcode, funct3, 目标`。立即数按原样放进各自的位段（cb / cj 的是偏移，散布同 c.beqz / c.j）；`'` = x8..x15 / f8..f15。
     fn insn_c(&mut self, kind: &str, args: &str) -> Result<(), Error> {
-        let ops = Toks::try_from(args)?.split_commas();
+        let line = Toks::try_from(args)?;
+        let ops = line.commas();
         let (op, rest) = ops.split_first().ok_or_else(|| Error::Syntax(format!(".insn {kind} 的操作数不够")))?;
         let opcode = match op.tokens() {
             [Tok::Ident(n)] if let Some(k) = ["C0", "C1", "C2"].iter().position(|c| c == n) => k as u16,

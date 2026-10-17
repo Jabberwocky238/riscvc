@@ -19,6 +19,7 @@ mod reloc;
 mod source;
 
 pub use expr::{Expr, Modifier};
+use alloc::borrow::Cow;
 use lex::Toks;
 use source::Source;
 use std::collections::{HashMap, HashSet};
@@ -247,9 +248,10 @@ impl<'e> Assembler<'e> {
                 e => e,
             };
             let (word, rest) = line.text.split_once(char::is_whitespace).unwrap_or((&line.text, ""));
-            let word = word.to_ascii_lowercase();
+            // 绝大多数本来就是小写 ⇒ 有大写才复制
+            let word = lower(word);
             let live = conds.iter().all(|(on, _)| *on);
-            match word.as_str() {
+            match word.as_ref() {
                 ".if" | ".ifdef" | ".ifndef" | ".ifeq" | ".ifne" => {
                     let on = live && self.condition(&word, rest.trim()).map_err(at)?;
                     conds.push((on, on));
@@ -280,7 +282,8 @@ impl<'e> Assembler<'e> {
             let defined = self.symbols.get(rest).is_some_and(|s| !matches!(s.def, Def::Undef));
             return Ok(defined != neg);
         }
-        let e = Toks::try_from(rest)?.expr(self)?;
+        let l = Toks::try_from(rest)?;
+        let e = l.cur().expr(self)?;
         let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 要常数")))?;
         Ok(if word == ".ifeq" { k == 0 } else { k != 0 })
     }
@@ -327,13 +330,13 @@ impl<'e> Assembler<'e> {
         }
         // `名字 = 表达式`
         if let Some((name, value)) = text.split_once('=').filter(|(n, v)| !n.trim().contains(char::is_whitespace) && !v.starts_with('=') && !n.ends_with(['!', '<', '>', '='])) {
-            let mut toks = Toks::try_from(value)?;
-            let e = toks.expr(self)?;
+            let l = Toks::try_from(value)?;
+            let e = l.cur().expr(self)?;
             self.symbol(name.trim()).def = Def::Equ(e);
             return Ok(());
         }
         let (word, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
-        let word = word.to_ascii_lowercase();
+        let word = lower(word);
         if word.starts_with('.') {
             self.directive(&word, rest.trim())
         } else {
@@ -532,10 +535,16 @@ impl<'e> Assembler<'e> {
                 String::from("?")
             }
         }
-        let e = Toks::try_from(text)?.expr(&mut NoNames)?;
+        let l = Toks::try_from(text)?;
+        let e = l.cur().expr(&mut NoNames)?;
         let asm = Self::new(Options::default());
         asm.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("`{text}` 不是常数")))
     }
+}
+
+/// 小写化：助记符与伪操作绝大多数本来就是小写 ⇒ 有大写才复制一份。
+fn lower(word: &str) -> Cow<'_, str> {
+    if word.bytes().any(|b| b.is_ascii_uppercase()) { Cow::Owned(word.to_ascii_lowercase()) } else { Cow::Borrowed(word) }
 }
 
 use crate::isa as riscv;

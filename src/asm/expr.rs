@@ -1,6 +1,6 @@
 //! 表达式：语法树、优先级（同 GNU as / llvm-mc 的 ELF 方言）、重定位修饰符。
 use super::Error;
-use super::lex::{Tok, Toks};
+use super::lex::{Cur, Tok};
 
 /// `名字` ⇒ 修饰符枚举 + `TryFrom<&str>`。
 macro_rules! modifiers {
@@ -157,7 +157,7 @@ pub trait Names {
     fn dot(&mut self) -> String;
 }
 
-impl Toks {
+impl Cur<'_, '_> {
     /// 一整个表达式（到记号流结束或遇到不能续的记号为止）。
     pub fn expr(&mut self, names: &mut impl Names) -> Result<Expr, Error> {
         self.binary(1, names)
@@ -179,10 +179,10 @@ impl Toks {
 
     fn unary(&mut self, names: &mut impl Names) -> Result<Expr, Error> {
         match self.next() {
-            Some(Tok::Int(v)) => Ok(Expr::Num(v)),
-            Some(Tok::Ident(s)) if s == "." => Ok(Expr::Sym(names.dot())),
-            Some(Tok::Ident(s)) => Ok(Expr::Sym(s)),
-            Some(Tok::Local(n, fwd)) => Ok(Expr::Sym(names.local(n, fwd))),
+            Some(&Tok::Int(v)) => Ok(Expr::Num(v)),
+            Some(Tok::Ident(s)) if *s == "." => Ok(Expr::Sym(names.dot())),
+            Some(Tok::Ident(s)) => Ok(Expr::Sym(String::from(*s))),
+            Some(&Tok::Local(n, fwd)) => Ok(Expr::Sym(names.local(n, fwd))),
             Some(Tok::Punct('-')) => Ok(Expr::Neg(Box::new(self.unary(names)?))),
             Some(Tok::Punct('+')) => self.unary(names),
             Some(Tok::Punct('~')) => Ok(Expr::Not(Box::new(self.unary(names)?))),
@@ -193,7 +193,7 @@ impl Toks {
                 Ok(e)
             }
             Some(Tok::Punct('%')) => {
-                let m = Modifier::try_from(self.ident()?.as_str())?;
+                let m = Modifier::try_from(self.ident()?)?;
                 self.expect('(')?;
                 let e = self.expr(names)?;
                 self.expect(')')?;
