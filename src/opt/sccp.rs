@@ -6,11 +6,14 @@
 //! ⭐ 这个 IR 没有 phi，**块参数就是汇合点**：一个块参数的格值，是它所有**可达**前驱在
 //! 对应 `Target::args` 位置上给出的值的交。这是和教科书写法唯一的差别。
 //!
-//! ⛔ 这一遍不动 CFG：条件已知的分支照旧两条边都在，只把算得出常量的指令换成
-//! `Op::Const`，剩下的交给 `dce`。改分支要同步删掉对应前驱在块参数位置上的实参，
-//! 那是另一件事（见 `tests/mem2reg.rs` 守的那条不变式）。
+//! 传播完还做两件事：条件已知的分支收成无条件跳，走不到的块整个换成 `unreachable`。
+//! 收益全在这儿——纯折常量那点事，`gvn` 和上游的优化早做掉了。
+//!
+//! ⛔ 删边是把整个 [`Target`](crate::ir::Target) 连同它的实参一起删，**不是**从后继的
+//! 参数表里抠掉一位：后继的参数个数不变，其余前驱照旧供参，`tests/mem2reg.rs` 守的
+//! 那条「块参数数 = 每个前驱给的实参数」因此仍然成立。
 use super::{AnalysisManager, FunctionPass, PerFunction, Preserved};
-use crate::ir::{BinOp, Const, Error, Function, IPred, Kind, Op, Types, ValId};
+use crate::ir::{BinOp, Const, Error, Function, IPred, Inst, Kind, Op, Types, ValId};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -179,7 +182,7 @@ impl FunctionPass for SccpImpl {
     }
 
     fn summary(&self) -> &str {
-        "按可达性传播常量（条件已知的那一支不进表）"
+        "按可达性传播常量，收掉已知条件的分支与走不到的块"
     }
 
     fn run(&self, f: &mut Function, tys: &Types, _am: &mut AnalysisManager) -> Result<Preserved, Error> {
@@ -246,7 +249,41 @@ impl FunctionPass for SccpImpl {
                 }
             }
         }
-        // 算得出常量的指令换成常量；剩下的交给 dce。⛔ 不动块参数、不动 CFG。
+        // ⛔ `facts` 借着函数，改之前先把决定算完：哪些块只剩一个出口、哪些块走不到。
+        let keep: Vec<(usize, usize)> = (0..n)
+            // ⛔ 只收 `CondBr`。`Switch` 收起来会让后端拿到一个「用了却没定义」的虚拟
+            // 寄存器（machine-sink-load-immediate/sink_li 上必现），原因还没查清，
+            // 查清之前不做——跳转表那条路上的边本来就不传块参数，嫌疑在那儿。
+            .filter(|&b| reach[b] && facts.succs[b].len() > 1 && matches!(f.blocks[b].insts.last().map(|i| &i.op), Some(Op::CondBr(..))))
+            .filter_map(|b| {
+                let mut live = (0..facts.succs[b].len()).filter(|&i| facts.taken(b, i, &lat));
+                match (live.next(), live.next()) {
+                    (Some(i), None) => Some((b, i)),
+                    _ => None,
+                }
+            })
+            .collect();
+        let dead: Vec<usize> = (0..n).filter(|&b| !reach[b]).collect();
+        drop(facts);
+
+        // 条件已知的分支收成无条件跳：留下走得通的那个出口，其余的边连同实参一起没了。
+        let mut folded = 0usize;
+        for (b, i) in keep {
+            let Some(last) = f.blocks[b].insts.last_mut() else { continue };
+            let Some(t) = last.op.targets().nth(i).cloned() else { continue };
+            last.op = Op::Br(t);
+            folded += 1;
+        }
+        // 走不到的块：整个换成 unreachable。它的前驱必然也走不到，不会有谁还指着它。
+        let mut killed = 0usize;
+        for b in dead {
+            if f.blocks[b].insts.last().is_some_and(|i| i.op == Op::Unreachable) {
+                continue;
+            }
+            f.blocks[b].insts = alloc::vec![Inst { result: None, op: Op::Unreachable }];
+            killed += 1;
+        }
+        // 算得出常量的指令换成常量；剩下的交给 dce。⛔ 不动块参数。
         let mut done = 0usize;
         for b in &mut f.blocks {
             for inst in &mut b.insts {
@@ -259,6 +296,11 @@ impl FunctionPass for SccpImpl {
                 }
             }
         }
-        if done == 0 { Ok(Preserved::All) } else { Ok(Preserved::Cfg) }
+        Ok(match (folded + killed, done) {
+            // 边变了，支配类分析一概作废。
+            (0, 0) => Preserved::All,
+            (0, _) => Preserved::Cfg,
+            _ => Preserved::None,
+        })
     }
 }
