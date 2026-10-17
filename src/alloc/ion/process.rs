@@ -821,6 +821,7 @@ impl<'a, F: Function> Env<'a, F> {
     /// registers just at uses/defs and moves the "spilled" value
     /// into/out of them immediately.
     pub fn split_into_minimal_bundles(&mut self, bundle: LiveBundleIndex, hint: PReg) {
+        self.ctx.output.stats.split_minimal += 1;
         assert_eq!(self.ctx.scratch_removed_lrs_vregs.len(), 0);
         self.ctx.scratch_removed_lrs.clear();
 
@@ -1001,6 +1002,7 @@ impl<'a, F: Function> Env<'a, F> {
                     !self.minimal_bundle(bundle),
                     "Minimal bundle with conflict!"
                 );
+                self.ctx.output.stats.split_conflict += 1;
                 self.split_and_requeue_bundle(
                     bundle,
                     /* split_at_point = */ conflict.suggested_split_point(),
@@ -1325,6 +1327,7 @@ impl<'a, F: Function> Env<'a, F> {
                     }
                 }
 
+                self.ctx.output.stats.split_pressure += 1;
                 self.split_and_requeue_bundle(
                     bundle,
                     split_at_point,

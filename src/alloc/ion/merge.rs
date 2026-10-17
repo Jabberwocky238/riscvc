@@ -55,12 +55,18 @@ impl<'a, F: Function> Env<'a, F> {
         let to_rc = self.spillsets[self.bundles[to].spillset].class;
         if from_rc != to_rc {
             trace!(" -> mismatching reg classes");
+            if self.ctx.in_blockparam_merge {
+                self.ctx.output.stats.bparam_merge[1] += 1;
+            }
             return false;
         }
 
         // If either bundle is already assigned (due to a pinned vreg), don't merge.
         if self.bundles[from].allocation.is_some() || self.bundles[to].allocation.is_some() {
             trace!("one of the bundles is already assigned (pinned)");
+            if self.ctx.in_blockparam_merge {
+                self.ctx.output.stats.bparam_merge[2] += 1;
+            }
             return false;
         }
 
@@ -107,6 +113,9 @@ impl<'a, F: Function> Env<'a, F> {
                     range_count
                 );
                 // Limit merge complexity.
+                if self.ctx.in_blockparam_merge {
+                    self.ctx.output.stats.bparam_merge[3] += 1;
+                }
                 return false;
             }
 
@@ -123,6 +132,9 @@ impl<'a, F: Function> Env<'a, F> {
                     ranges_from[idx_from].index,
                     ranges_to[idx_to].index
                 );
+                if self.ctx.in_blockparam_merge {
+                    self.ctx.output.stats.bparam_merge[4] += 1;
+                }
                 return false;
             }
         }
@@ -137,6 +149,9 @@ impl<'a, F: Function> Env<'a, F> {
         {
             if self.merge_bundle_requirements(from, to).is_err() {
                 trace!(" -> conflicting requirements; aborting merge");
+                if self.ctx.in_blockparam_merge {
+                    self.ctx.output.stats.bparam_merge[5] += 1;
+                }
                 return false;
             }
         }
@@ -380,7 +395,11 @@ impl<'a, F: Function> Env<'a, F> {
                 from_bundle.index(),
                 to_bundle.index()
             );
-            self.merge_bundles(from_bundle, to_bundle);
+            self.ctx.in_blockparam_merge = true;
+            if self.merge_bundles(from_bundle, to_bundle) {
+                self.ctx.output.stats.bparam_merge[0] += 1;
+            }
+            self.ctx.in_blockparam_merge = false;
         }
 
         trace!("done merging bundles");

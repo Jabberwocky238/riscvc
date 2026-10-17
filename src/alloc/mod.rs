@@ -1299,6 +1299,17 @@ pub trait Function {
     /// Get the number of `VReg` in use in this function.
     fn num_vregs(&self) -> usize;
 
+    /// ⭐ riscvc 加的（见 VENDOR.md）：这个 vreg 的定义能不能原地重算（常数、符号地址
+    /// 这种不读别的寄存器、没有副作用的）。
+    ///
+    /// 上游设计过 rematerialization（issue #8）但 0.15.2 一行都没实现。这里先只用来
+    /// **统计**：活跃区间被拆开时，有多少道接缝的值本来可以重算而不是搬运。
+    /// ⛔ 还没有任何变换读它，缺省 `false`，不实现也不影响行为。
+    fn is_rematerializable(&self, vreg: VReg) -> bool {
+        let _ = vreg;
+        false
+    }
+
     /// Get the VRegs for which we should generate value-location
     /// metadata for debugging purposes. This can be used to generate
     /// e.g. DWARF with valid prgram-point ranges for each value

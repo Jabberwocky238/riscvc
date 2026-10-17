@@ -540,6 +540,8 @@ pub struct Ctx {
     // will insert a copy from wherever the VReg's primary allocation
     // was to the appropriate PReg.
     pub(crate) multi_fixed_reg_fixups: Vec<MultiFixedRegFixup>,
+    /// ⭐ riscvc 加的：正在跑「块参数与实参合并」那一轮（只为统计失败原因，见 ../VENDOR.md）。
+    pub(crate) in_blockparam_merge: bool,
 
     pub(crate) allocated_bundle_count: usize,
 
@@ -615,6 +617,7 @@ impl Default for Ctx {
             extra_spillslots_by_class: Default::default(),
             preferred_victim_by_class: Default::default(),
             multi_fixed_reg_fixups: Default::default(),
+            in_blockparam_merge: false,
             allocated_bundle_count: Default::default(),
             debug_annotations: Default::default(),
             annotations_enabled: Default::default(),
@@ -980,6 +983,21 @@ pub struct Stats {
     pub blockparam_outs_count: usize,
     pub halfmoves_count: usize,
     pub edits_count: usize,
+    /// ⭐ riscvc 加的：拆分按**起因**分类（上游那五个 `splits_*` 是死字段，一行都不写）。
+    /// `splits` 是总数，下面三个加起来等于它。
+    ///
+    /// * `split_conflict` —— `compute_requirement` 报约束冲突，必须当场切；
+    /// * `split_pressure` —— 找不到空闲寄存器，而拆比驱逐便宜；
+    /// * `split_minimal` —— 切到最小 bundle（兜底）。
+    /// ⭐ riscvc 加的：「块参数与实参合并」那一轮的成败。下标 0 = 合上了，
+    /// 1 = 寄存器类不同，2 = bundle 已被钉死，3 = 区间条数超上限（200），
+    /// 4 = **活跃区间重叠**，5 = 需求冲突（固定寄存器等）。
+    pub bparam_merge: [usize; 6],
+    /// 段间接缝里，值本来可以重算的那部分（见 `Function::is_rematerializable`）。
+    pub seam_rematerializable: usize,
+    pub split_conflict: usize,
+    pub split_pressure: usize,
+    pub split_minimal: usize,
     /// ⭐ riscvc 加的（不是上游的，见 ../VENDOR.md）：按 [`InsertMovePrio`] 分类的搬运条数。
     /// 下标就是 `InsertMovePrio as usize`。这是「这条 mv 为什么存在」的唯一出处。
     pub moves_by_prio: [usize; 6],

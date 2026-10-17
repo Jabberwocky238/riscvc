@@ -365,6 +365,9 @@ impl<'a, F: Function> Env<'a, F> {
                             vreg.index()
                         );
                         debug_assert_eq!(range.from.pos(), InstPosition::Before);
+                        if self.func.is_rematerializable(self.vreg(vreg)) {
+                            self.ctx.output.stats.seam_rematerializable += 1;
+                        }
                         inserted_moves.push(
                             range.from,
                             InsertMovePrio::Regular,

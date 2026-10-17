@@ -43,6 +43,15 @@
    ⚠ 顺带发现上游的死字段：`splits_clobbers` / `splits_hot` / `splits_conflicts` /
    `splits_defs` / `splits_all` 声明了但**一次都不写**，只有 `splits` 是活的。⛔ 别读。
 
+6. `Stats` 加拆分起因（`split_conflict` / `split_pressure` / `split_minimal`）与
+   `bparam_merge: [usize; 6]`（块参数合并的成败与失败原因），各在 `ion/process.rs`
+   的两个 `split_and_requeue_bundle` 调用点、`split_into_minimal_bundles` 入口、
+   以及 `ion/merge.rs` 的五个 `return false` 与块参数那一轮的调用点计数。
+   `Ctx` 随之多一个 `in_blockparam_merge: bool`（只为把失败原因限定在那一轮）。
+7. `Function` trait 加 `fn is_rematerializable(&self, vreg) -> bool`，缺省 `false`。
+   上游设计过 rematerialization（issue #8）但 0.15.2 一行都没实现；这里**只用于统计**
+   （`ion/moves.rs` 的段间接缝处记 `seam_rematerializable`），⛔ 没有任何变换读它。
+
 上游的三个 feature（`enable-serde` / `trace-log` / `fuzzing`）riscvc 不声明，
 在根 `Cargo.toml` 的 `[lints.rust] unexpected_cfgs` 里登记为已知值。
 

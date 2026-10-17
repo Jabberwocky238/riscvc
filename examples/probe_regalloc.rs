@@ -29,6 +29,11 @@ struct Tally {
     by_prio: [usize; 6],
     edits: usize,
     splits: usize,
+    sconf: usize,
+    spress: usize,
+    smin: usize,
+    remat: usize,
+    bpm: [usize; 6],
     bundles: usize,
     spill_bundles: usize,
     merged: usize,
@@ -59,6 +64,13 @@ impl Observer for Tally {
         }
         self.edits += s.edits_count;
         self.splits += s.splits;
+        self.sconf += s.split_conflict;
+        self.spress += s.split_pressure;
+        self.smin += s.split_minimal;
+        self.remat += s.seam_rematerializable;
+        for (a, b) in self.bpm.iter_mut().zip(s.bparam_merge) {
+            *a += b;
+        }
         self.bundles += s.final_bundle_count;
         self.spill_bundles += s.spill_bundle_count;
         self.merged += s.merged_bundle_count;
@@ -88,6 +100,12 @@ fn main() {
         let (dup, clob): (usize, usize) = t.multi.iter().fold((0, 0), |a, x| (a.0 + x.1, a.1 + x.2));
         println!("「多固定寄存器」合计 {}：同一个值传了两次 {dup}，实参在调用后还活着 {clob}；按指令种类：{}",
                  dup + clob, t.multi.iter().map(|(k, d, c)| format!("{k} {}+{}", d, c)).collect::<Vec<_>>().join("，"));
+        const WHY_M: [&str; 6] = ["合上了", "寄存器类不同", "bundle 已被钉死", "区间条数超上限", "活跃区间重叠", "需求冲突（固定寄存器等）"];
+        let tries: usize = t.bpm.iter().sum();
+        println!("块参数与实参合并：尝试 {tries} 次 —— {}",
+                 t.bpm.iter().zip(WHY_M).filter(|(n, _)| **n > 0).map(|(n, w)| format!("{w} {n}（{}%）", n * 100 / tries.max(1))).collect::<Vec<_>>().join("，"));
+        println!("段间接缝里「本可重算而非搬运」的：{}", t.remat);
+        println!("拆分起因：约束冲突 {}，寄存器压力 {}，切到最小 {}", t.sconf, t.spress, t.smin);
         println!("机器指令 {}；拆分 {} 次；最终 bundle {}，其中溢出 bundle {}；合并 {}，驱逐 {}；块参数进出 {}",
                  t.insts, t.splits, t.bundles, t.spill_bundles, t.merged, t.evicted, t.bparam);
         // ⚠ 上游的 splits_clobbers / splits_hot / splits_conflicts / splits_defs / splits_all

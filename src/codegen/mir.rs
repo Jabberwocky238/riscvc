@@ -348,6 +348,16 @@ impl Function for MFunc {
         self.vregs
     }
 
+    /// 定义这个 vreg 的那条指令能不能原地重算：只认**不读任何寄存器、没有副作用**的
+    /// 常数与地址（`li` / `lla` / 栈帧地址）。⛔ 目前只用于统计（见 `alloc` 里的同名方法）。
+    fn is_rematerializable(&self, vreg: VReg) -> bool {
+        self.insts.iter().any(|i| {
+            matches!(i.op, MOp::Li(_) | MOp::La(..) | MOp::Addr(Base::Frame(_) | Base::Incoming | Base::Outgoing, _))
+                && i.uses.is_empty()
+                && i.defs.as_slice() == [R::V(vreg)]
+        })
+    }
+
     fn spillslot_size(&self, _: RegClass) -> usize {
         1
     }
