@@ -17,6 +17,7 @@ pub const DEFAULT_PIPELINE: [&str; 4] = ["mem2reg", "gvn", "sccp", "dce"];
 
 mod dom;
 mod gvn;
+mod licm;
 mod mem2reg;
 mod pass;
 mod passes;
@@ -26,6 +27,7 @@ mod simplify;
 pub use dom::{Dom, Preds};
 pub use pass::{Analysis, AnalysisManager, FunctionPass, Pass, PerFunction, Preserved};
 pub use gvn::{GVN, Gvn, GvnImpl};
+pub use licm::{LICM, Licm, LicmImpl};
 pub use mem2reg::{MEM2REG, Mem2Reg, Mem2RegImpl};
 pub use passes::{DCE, Dce, DceImpl};
 pub use sccp::{SCCP, Sccp, SccpImpl};
