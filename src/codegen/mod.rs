@@ -25,9 +25,29 @@ pub enum Error {
 use crate::ir::{Const, Module};
 use core::fmt::Write;
 
+/// 代码生成的旁路观察者：每个函数分配完寄存器之后收到一次分配器的回执。
+///
+/// ⛔ 诊断一律走注入，不用环境变量、也不用 feature —— 要看就传一个进来，
+/// 不传就什么都不发生（[`Module::compile`] 就是传了 `&mut ()`）。
+pub trait Observer {
+    /// `name` 是函数名，`out` 是 [`crate::regalloc`] 的回执（含 `stats`；
+    /// 函数规模看 `out.inst_alloc_offsets.len()`）。
+    fn allocated(&mut self, name: &str, out: &crate::regalloc::Output);
+}
+
+/// 什么都不看。
+impl Observer for () {
+    fn allocated(&mut self, _: &str, _: &crate::regalloc::Output) {}
+}
+
 impl Module {
     /// ⭐ 整个模块 ⇒ 汇编文本（与 clang -S 同样带上架构属性）。
     pub fn compile(&self) -> Result<String, Error> {
+        self.compile_observed(&mut ())
+    }
+
+    /// 同 [`Self::compile`]，另外把每个函数的分配回执交给 `obs`（诊断用）。
+    pub fn compile_observed(&self, obs: &mut impl Observer) -> Result<String, Error> {
         let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::feature::Target::march());
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
@@ -41,6 +61,7 @@ impl Module {
             }
             let opts = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
             let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
+            obs.allocated(&f.name, &out);
             let body = post::PFunc::new(&sel, &mf, &out, id).to_string();
             let section = f.section.as_deref().map_or_else(|| String::from("\t.text"), |s| format!("\t.section\t{s},\"ax\",@progbits"));
             let _ = writeln!(text, "{section}");

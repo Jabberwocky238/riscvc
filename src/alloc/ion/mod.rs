@@ -101,6 +101,7 @@ impl<'a, F: Function> Env<'a, F> {
             self.dump_state();
         }
         let moves = self.apply_allocations_and_insert_moves();
+        self.ctx.output.stats.moves_by_prio = moves.by_prio;
         Ok(self.resolve_inserted_moves(moves))
     }
 }

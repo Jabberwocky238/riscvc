@@ -35,6 +35,14 @@
 4. 一条都没删：`fuzzing/`、`serialize.rs`、`fastalloc/` 原样留着（各自的 `cfg` 本来就关着）。
    `checker.rs` **特意保留**——内化之后上游的 fuzzing 不再兜底，它是唯一的自检。
 
+5. `Stats` 加 `moves_by_prio: [usize; 6]`，在 `InsertedMoves::push` 处按
+   `InsertMovePrio` 计数，`ion/mod.rs::run` 收尾时拷进 `Output.stats`。
+   **这是内化的第一个实际收益**：「这条 `mv` 为什么存在」上游不往外给，
+   而它正是 O2 体积缺口的拆解依据。riscvc 侧经 `codegen::Observer` 注入式取用。
+
+   ⚠ 顺带发现上游的死字段：`splits_clobbers` / `splits_hot` / `splits_conflicts` /
+   `splits_defs` / `splits_all` 声明了但**一次都不写**，只有 `splits` 是活的。⛔ 别读。
+
 上游的三个 feature（`enable-serde` / `trace-log` / `fuzzing`）riscvc 不声明，
 在根 `Cargo.toml` 的 `[lints.rust] unexpected_cfgs` 里登记为已知值。
 

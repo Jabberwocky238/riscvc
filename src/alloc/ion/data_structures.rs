@@ -842,6 +842,8 @@ pub enum InsertMovePrio {
 #[derive(Debug, Default)]
 pub struct InsertedMoves {
     pub moves: Vec<InsertedMove>,
+    /// ⭐ riscvc 加的：按原因计数，见 [`Stats::moves_by_prio`]。
+    pub by_prio: [usize; 6],
 }
 
 impl InsertedMoves {
@@ -871,6 +873,7 @@ impl InsertedMoves {
         if let Some(to) = to_alloc.as_reg() {
             debug_assert_eq!(to.class(), to_vreg.class());
         }
+        self.by_prio[prio as usize] += 1;
         self.moves.push(InsertedMove {
             pos_prio: PosWithPrio {
                 pos,
@@ -977,6 +980,9 @@ pub struct Stats {
     pub blockparam_outs_count: usize,
     pub halfmoves_count: usize,
     pub edits_count: usize,
+    /// ⭐ riscvc 加的（不是上游的，见 ../VENDOR.md）：按 [`InsertMovePrio`] 分类的搬运条数。
+    /// 下标就是 `InsertMovePrio as usize`。这是「这条 mv 为什么存在」的唯一出处。
+    pub moves_by_prio: [usize; 6],
 }
 
 // Helper function for generating sorting keys. The order of arguments is from
