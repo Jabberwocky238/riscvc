@@ -62,7 +62,7 @@ impl PFunc {
             &Term::Jump(t) => Tail { branch: None, long: false, jump: (next != Some(t)).then_some(t), exit: None },
             Term::Ret => exit(Some(Exit::Ret)),
             Term::Tail(sym) => exit(Some(Exit::Tail(sym))),
-            Term::Unreachable => exit(None),
+            Term::Unreachable | Term::Indirect(_) => exit(None),
             &Term::Branch { op, a, b, t, f, long } => {
                 let (op, t, f) = if next == Some(t) { (op.inverted().expect("条件分支"), f, t) } else { (op, t, f) };
                 Tail { branch: Some((op, a, b, t)), long, jump: (next != Some(f)).then_some(f), exit: None }
@@ -111,6 +111,17 @@ impl fmt::Display for PFunc {
                 Some(Exit::Tail(sym)) => writeln!(f, "\ttail\t{sym}")?,
                 None => {}
             }
+        }
+        // 跳转表放函数体之后的 .rodata（同 llc）
+        if !self.tables.is_empty() {
+            writeln!(f, "\t.section\t.rodata,\"a\",@progbits")?;
+            for (n, t) in self.tables.iter().enumerate() {
+                writeln!(f, "\t.p2align\t2, 0x0\n.LJTI{}_{n}:", self.id)?;
+                for &b in t {
+                    writeln!(f, "\t.word\t{}", self.label(b))?;
+                }
+            }
+            writeln!(f, "\t.text")?;
         }
         Ok(())
     }

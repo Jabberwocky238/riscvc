@@ -26,6 +26,12 @@ impl PFunc {
 
     pub(super) fn fold_branches(&mut self) {
         let to: Vec<usize> = (0..self.blocks.len()).map(|b| self.through(b)).collect();
+        // 表项和后继一起穿过去，⛔ 留下指向已删块的 `.word`
+        for t in &mut self.tables {
+            for b in t.iter_mut() {
+                *b = to[*b];
+            }
+        }
         for blk in &mut self.blocks {
             blk.term.retarget(|b| to[b]);
             if let Term::Branch { t, f, .. } = blk.term

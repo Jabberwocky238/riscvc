@@ -54,7 +54,7 @@ impl<'a> Lower<'a> {
                 }
             }
         }
-        PFunc { id: self.id, blocks: self.blocks, layout: self.layout }
+        PFunc { id: self.id, blocks: self.blocks, layout: self.layout, tables: self.sel.tables.clone() }
     }
 
     // ---- 出指令 -------------------------------------------------------------------------
@@ -260,7 +260,11 @@ impl<'a> Lower<'a> {
             }
             MOp::Imm(op, imm) => self.rri(*op, d[0], u[0], *imm),
             MOp::Li(v) => self.push(PInst::Li(d[0], *v)),
-            MOp::La(sym, off) => self.push(PInst::La(d[0], sym.clone(), *off)),
+            // isel 占位的跳转表符号（`\u{1}n`）到这里才知道函数序号
+            MOp::La(sym, off) => {
+                let sym = sym.strip_prefix('\u{1}').map_or_else(|| sym.clone(), |n| format!(".LJTI{}_{n}", self.id));
+                self.push(PInst::La(d[0], sym, *off));
+            }
             MOp::Addr(b, off) => {
                 let (base, adj) = self.base(*b, &u, 0);
                 self.addr(d[0], base, adj + off);
@@ -293,6 +297,11 @@ impl<'a> Lower<'a> {
             MOp::Jump(b) => self.blocks[self.cur].term = Term::Jump(b.index()),
             MOp::Branch(op, t, f) => self.blocks[self.cur].term = Term::Branch { op: *op, a: u[0], b: u[1], t: t.index(), f: f.index(), long: false },
             MOp::Select(op) => self.select(*op, inst, &d, &u),
+            MOp::JumpTable(ts) => {
+                // `jr rs` 当普通指令落在块尾，Term 只声明后继
+                self.rri(IOp::Jalr, 0, u[0], 0);
+                self.blocks[self.cur].term = Term::Indirect(ts.iter().map(|b| b.index()).collect());
+            }
             MOp::Unreachable => self.blocks[self.cur].term = Term::Unreachable,
             MOp::Trap => self.push(PInst::Trap),
             MOp::Break => self.real(Inst::new(IOp::Ebreak)),

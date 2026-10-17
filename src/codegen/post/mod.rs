@@ -45,6 +45,8 @@ pub enum Term {
     Tail(String),
     /// 不出代码。
     Unreachable,
+    /// 跳转表：`jr` 已经是块里的最后一条普通指令，这里只声明后继，⛔ 不出代码。
+    Indirect(Vec<usize>),
 }
 
 impl Term {
@@ -53,6 +55,7 @@ impl Term {
         match *self {
             Self::Jump(b) => vec![b],
             Self::Branch { t, f, .. } => vec![t, f],
+            Self::Indirect(ref t) => t.clone(),
             Self::Ret | Self::Tail(_) | Self::Unreachable => Vec::new(),
         }
     }
@@ -62,6 +65,7 @@ impl Term {
         match self {
             Self::Jump(b) => *b = to(*b),
             Self::Branch { t, f, .. } => (*t, *f) = (to(*t), to(*f)),
+            Self::Indirect(ts) => ts.iter_mut().for_each(|b| *b = to(*b)),
             Self::Ret | Self::Tail(_) | Self::Unreachable => {}
         }
     }
@@ -80,6 +84,8 @@ pub struct PFunc {
     pub blocks: Vec<PBlock>,
     /// 出代码的次序（第一个是入口）。
     pub layout: Vec<usize>,
+    /// 跳转表：第 n 张表是 `.LJTI{id}_{n}`，逐项一个块号（印在函数体之后的 `.rodata`）。
+    pub tables: Vec<Vec<usize>>,
 }
 
 impl PFunc {

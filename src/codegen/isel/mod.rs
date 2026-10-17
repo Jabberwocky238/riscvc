@@ -44,6 +44,8 @@ pub struct Selected {
     /// 出代码的块次序。
     pub layout: Vec<usize>,
     pub vregs: usize,
+    /// 跳转表：第 n 张是 `.LJTI{函数序号}_{n}`，逐项一个块号。
+    pub tables: Vec<Vec<usize>>,
     pub frame: Vec<FrameObj>,
     /// 出参区大小（各调用里最大的）。
     pub out_args: i32,
@@ -60,6 +62,8 @@ pub struct Isel<'m> {
     f: &'m Function,
     blocks: Vec<MBlock>,
     layout: Vec<usize>,
+    /// 跳转表（`switch_table` 填）。
+    tables: Vec<Vec<usize>>,
     cur: usize,
     classes: Vec<RegClass>,
     /// 各 IR 值的部件（常量与静态 alloca 不在这里）。
@@ -104,6 +108,7 @@ impl<'m> Isel<'m> {
             f,
             blocks: (0..n).map(|_| MBlock::default()).collect(),
             layout: Vec::new(),
+            tables: Vec::new(),
             cur: 0,
             classes: Vec::new(),
             vals: vec![None; f.vals.len()],
@@ -163,6 +168,7 @@ impl<'m> Isel<'m> {
             blocks: s.blocks,
             layout: s.layout,
             vregs: s.classes.len(),
+            tables: s.tables,
             frame: s.frame,
             out_args: s.out_args,
             calls: s.calls,
@@ -606,10 +612,15 @@ impl<'m> Isel<'m> {
 
     /// 条件跳转的一条出边：目标有块参数或多个前驱 ⇒ 切一个中转块（regalloc2 不许关键边）。
     fn edge(&mut self, t: &Target) -> Result<usize, Error> {
-        let to = self.bmap[t.block.0 as usize];
         if t.args.is_empty() && self.preds[t.block.0 as usize] <= 1 {
-            return Ok(to);
+            return Ok(self.bmap[t.block.0 as usize]);
         }
+        self.split(t)
+    }
+
+    /// 一定切中转块（跳转表用：每个去处要独占一个单前驱的块）。
+    fn split(&mut self, t: &Target) -> Result<usize, Error> {
+        let to = self.bmap[t.block.0 as usize];
         let from = self.cur;
         let e = self.new_block();
         self.cur = e;
@@ -647,8 +658,11 @@ impl<'m> Isel<'m> {
         Ok(())
     }
 
-    /// `switch`：逐个比较的链（`beq v, case`；宽整数比各字的异或之或），最后到缺省。
+    /// `switch`：够密 ⇒ 跳转表，否则逐个比较的链（`beq v, case`；宽整数比各字的异或之或），最后到缺省。
     fn switch(&mut self, v: ValId, d: &Target, cases: &[(u128, Target)]) -> Result<(), Error> {
+        if self.switch_table(v, d, cases)? {
+            return Ok(());
+        }
         let x = self.get(v)?;
         let w = self.types().bits(self.ty(v)).unwrap_or(32);
         for (k, t) in cases {
@@ -665,6 +679,65 @@ impl<'m> Isel<'m> {
         let to = self.edge(d)?;
         self.jump(to, Vec::new());
         Ok(())
+    }
+
+    /// 密集 `switch` ⇒ 跳转表，形状同 llc：越界跳默认，再 `slli` + `add` + `lw` + `jr`，表在 `.rodata`。
+    /// 不划算或形态不合（宽整数、太少、太稀、起点落不进 `addi` 的立即数）⇒ `false`，退回比较链。
+    fn switch_table(&mut self, v: ValId, d: &Target, cases: &[(u128, Target)]) -> Result<bool, Error> {
+        /// 少于这么多个 case 不值得（同 LLVM 的 MinimumJumpTableEntries）。
+        const MIN: usize = 4;
+        /// 表项上限：再多宁可比较链，⛔ 不为一个 switch 放半兆 `.rodata`。
+        const MAX: u128 = 4096;
+        let w = self.types().bits(self.ty(v)).unwrap_or(32);
+        let (Some(lo), Some(hi)) = (cases.iter().map(|(k, _)| *k).min(), cases.iter().map(|(k, _)| *k).max()) else { return Ok(false) };
+        let range = hi - lo + 1;
+        // 密度 < 40% ⇒ 表里全是默认项，不如比较链
+        if w > 32 || cases.len() < MIN || range > MAX || (cases.len() as u128) * 5 < range * 2 || lo > 2047 {
+            return Ok(false);
+        }
+        let x = self.get(v)?;
+        let [v0] = x[..] else { return Ok(false) };
+        // 索引归一到 0：`addi idx, v, -lo`
+        let idx = if lo == 0 { v0 } else { self.ri(IOp::Addi, v0, -i32::try_from(lo).unwrap_or(0)) };
+        let limit = self.xr();
+        self.emit(MOp::Li(i32::try_from(range - 1).unwrap_or(i32::MAX)), &[limit], &[]);
+        // 越界那条边也要独占一个中转块：⛔ 和表里的默认项共用（共用 ⇒ 默认块多前驱 ⇒ 这条 `bltu` 不许带操作数）
+        let dflt = self.split(d)?;
+        let body = self.new_block();
+        // `bltu 上界, idx` ⇒ idx 越界，跳默认（同 llc）
+        self.branch(IOp::Bltu, limit, idx, dflt, body);
+        self.cur = body;
+        // 第 j 项是 `lo + j` 的去处，空档落默认。每个去处独占一个中转块（同一个去处的表项共用一个）：
+        // regalloc2 不许关键边，后继有多个前驱时还会禁掉分支带寄存器操作数。
+        let mut keyed: Vec<(Option<usize>, usize)> = Vec::new();
+        let mut targets = Vec::new();
+        for j in 0..range {
+            let key = cases.iter().position(|(k, _)| *k == lo + j);
+            let b = match keyed.iter().find(|(k, _)| *k == key) {
+                Some(&(_, b)) => b,
+                None => {
+                    let b = self.split(match key { Some(i) => &cases[i].1, None => d })?;
+                    keyed.push((key, b));
+                    b
+                }
+            };
+            targets.push(b);
+        }
+        let n = self.tables.len();
+        self.tables.push(targets.clone());
+        let base = self.xr();
+        // 符号名要函数序号，isel 这里还不知道 ⇒ 占位，lower 时换成 `.LJTI{函数}_{n}`
+        self.emit(MOp::La(format!("\u{1}{n}"), 0), &[base], &[]);
+        let off = self.ri(IOp::Slli, idx, 2);
+        let addr = self.rr(IOp::Add, base, off);
+        let tgt = self.xr();
+        self.emit(MOp::Load(IOp::Lw.into(), Base::Reg(addr), 0), &[tgt], &[addr]);
+        let blocks: Vec<Block> = keyed.iter().map(|&(_, b)| Block::new(b)).collect();
+        self.emit(MOp::JumpTable(blocks.clone()), &[], &[tgt]);
+        let blk = &mut self.blocks[self.cur];
+        blk.args = vec![Vec::new(); blocks.len()];
+        blk.succs = blocks;
+        Ok(true)
     }
 
     /// 入口：取参数（寄存器上的一条 `Args` 定义、栈上的从入参区读），可变参数记下第一个没用的 a 寄存器。

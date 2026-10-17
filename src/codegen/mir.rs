@@ -65,6 +65,9 @@ pub enum MOp {
     Jump(Block),
     /// 条件跳转：`op rs1, rs2` 成立去 `t`，否则去 `f`。
     Branch(IOp, Block, Block),
+    /// 跳转表的间接跳转：`jr rs`（最后一个 use 是从表里取出的目标地址），后继是表里的各块。
+    /// ⛔ 这些边上不传块参数（见 `isel::switch` 的判据）。
+    JumpTable(Vec<Block>),
     /// 永不到达（`unreachable`）：不出代码。
     Unreachable,
     /// `unimp`（`llvm.trap`）。
@@ -183,7 +186,7 @@ impl MInst {
     }
 
     fn is_term(&self) -> bool {
-        matches!(self.op, MOp::Ret | MOp::Tail(_) | MOp::Jump(_) | MOp::Branch(..) | MOp::Unreachable)
+        matches!(self.op, MOp::Ret | MOp::Tail(_) | MOp::Jump(_) | MOp::Branch(..) | MOp::JumpTable(_) | MOp::Unreachable)
     }
 }
 
@@ -267,7 +270,7 @@ impl Function for MFunc {
     }
 
     fn is_branch(&self, insn: RInst) -> bool {
-        matches!(self.insts[insn.index()].op, MOp::Jump(_) | MOp::Branch(..))
+        matches!(self.insts[insn.index()].op, MOp::Jump(_) | MOp::Branch(..) | MOp::JumpTable(_))
     }
 
     fn branch_blockparams(&self, block: Block, _insn: RInst, succ_idx: usize) -> &[VReg] {
