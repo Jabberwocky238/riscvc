@@ -29,6 +29,8 @@ impl Assembler<'_> {
     pub(super) fn finish(mut self) -> Result<Vec<u8>, Error> {
         // ⛔ 必须在 layout 之前：对齐与跳转长度都按最终位置算。
         self.merge_subsections();
+        // ⛔ 排在 layout 之前：它会改字节数。
+        self.relax_aligns();
         self.layout()?;
         // 可松弛点 / LEB 按起点排好（布局放宽时重记过；crosses 二分要有序）
         for s in &mut self.sections {
