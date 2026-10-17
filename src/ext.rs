@@ -97,6 +97,15 @@ pub trait Extension {
         None
     }
 
+    /// 这个助记符**可能**归本扩展吗（⛔ 只看名字、不看操作数）。汇编器按助记符缓存结果，
+    /// 每条指令只问命中的那个扩展 ⇒ 挂了扩展的宿主不必每条都把各家的伪指令表扫一遍。
+    ///
+    /// 缺省保守地认（`true`），行为与没有这个方法时相同；自己实现能少挨一次 [`Self::assemble`]。
+    fn knows(&self, mnemonic: &str) -> bool {
+        let _ = mnemonic;
+        true
+    }
+
     /// 执行一条：`cx.cpu.pc` 指着它。要改流向就设 `cx.next`，否则顺序往下（pc + 长度）。
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
         let _ = (cx, bytes);
@@ -261,6 +270,11 @@ impl<T: Semantics> Extension for Std<T> {
 
     fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String {
         Self::inst(bytes).map_or_else(|| String::from("<unknown>"), |i| i.print(pc, style))
+    }
+
+    fn knows(&self, mnemonic: &str) -> bool {
+        T::ALL.first().is_some_and(Table::enabled)
+            && (mnemonic.parse::<T>().is_ok() || T::PSEUDOS.iter().any(|(pat, _)| pat.split([' ', '\t']).next() == Some(mnemonic)))
     }
 
     fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {

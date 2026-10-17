@@ -1,11 +1,12 @@
 //! 源文本 ⇒ 语句行：剥注释、简单的 C 预处理（`.S`）、`;` 分句、`.rept` / `.irp` / `.irpc` / `.macro` 展开。
 use super::Error;
+use alloc::borrow::Cow;
 use std::collections::HashMap;
 
-/// 一条语句：原文件行号 + 文本。
-pub struct Line {
+/// 一条语句：原文件行号 + 文本（没剥过东西的行直接借原文，⛔ 不上堆）。
+pub struct Line<'a> {
     pub no: usize,
-    pub text: String,
+    pub text: Cow<'a, str>,
 }
 
 /// 预处理状态：`#define` 的名字（只做整词替换）。
@@ -15,33 +16,37 @@ pub struct Source {
 }
 
 /// `.macro` 的定义：形参（带缺省值）与正文。
-struct Macro {
+struct Macro<'a> {
     params: Vec<(String, Option<String>)>,
-    body: Vec<Line>,
+    body: Vec<Line<'a>>,
 }
 
 impl Source {
     /// ⭐ 全文 ⇒ 展开好的语句。
-    pub fn lines(&self, text: &str) -> Result<Vec<Line>, Error> {
+    pub fn lines<'a>(&self, text: &'a str) -> Result<Vec<Line<'a>>, Error> {
         let raw = self.strip(text);
         let raw = if self.preprocess { self.cpp(raw)? } else { raw };
         let mut out = Vec::new();
         for (no, line) in raw {
-            for stmt in Self::split_statements(&line) {
-                let stmt = stmt.trim();
-                if !stmt.is_empty() {
-                    out.push(Line { no, text: String::from(stmt) });
-                }
+            // 借来的行 ⇒ 各语句也是借的；剥过的行才落一份
+            match line {
+                Cow::Borrowed(l) => out.extend(Self::split_statements(l).into_iter().map(str::trim).filter(|t| !t.is_empty()).map(|t| Line { no, text: Cow::Borrowed(t) })),
+                Cow::Owned(l) => out.extend(Self::split_statements(&l).into_iter().map(str::trim).filter(|t| !t.is_empty()).map(|t| Line { no, text: Cow::Owned(String::from(t)) }).collect::<Vec<_>>()),
             }
         }
         Self::expand(out, &mut HashMap::new(), 0)
     }
 
     /// 剥 `/* */`、`//`、`#`（行首的 `#` 在预处理模式下留给 cpp）。字符串里的不动。
-    fn strip(&self, text: &str) -> Vec<(usize, String)> {
+    fn strip<'a>(&self, text: &'a str) -> Vec<(usize, Cow<'a, str>)> {
         let mut out = Vec::new();
         let mut in_block = false;
         for (i, line) in text.lines().enumerate() {
+            // 绝大多数行没有注释起始符 ⇒ 一个字节都不用动
+            if !in_block && !line.contains('/') && !line.contains('#') {
+                out.push((i + 1, Cow::Borrowed(line)));
+                continue;
+            }
             let mut s = String::new();
             let b: Vec<char> = line.chars().collect();
             let mut j = 0;
@@ -85,13 +90,13 @@ impl Source {
                 }
                 j += 1;
             }
-            out.push((i + 1, s));
+            out.push((i + 1, Cow::Owned(s)));
         }
         out
     }
 
     /// `#define` / `#undef` / `#if(n)def` / `#if` / `#elif` / `#else` / `#endif`（`#if` 只认 `defined(X)`、`!`、数与 `&&` `||`）。
-    fn cpp(&self, lines: Vec<(usize, String)>) -> Result<Vec<(usize, String)>, Error> {
+    fn cpp<'a>(&self, lines: Vec<(usize, Cow<'a, str>)>) -> Result<Vec<(usize, Cow<'a, str>)>, Error> {
         let mut defines = self.defines.clone();
         // 栈：(本分支是否生效, 这一组是否已有分支生效过)
         let mut stack: Vec<(bool, bool)> = Vec::new();
@@ -138,7 +143,7 @@ impl Source {
                 continue;
             }
             if live {
-                out.push((no, Self::substitute(&line, &defines)));
+                out.push((no, Cow::Owned(Self::substitute(&line, &defines))));
             }
         }
         Ok(out)
@@ -193,13 +198,14 @@ impl Source {
     }
 
     /// `;` 分句（字符串里的不算）。
-    fn split_statements(line: &str) -> Vec<String> {
-        let mut out = vec![String::new()];
-        let mut in_str = false;
-        let mut escape = false;
-        for c in line.chars() {
+    fn split_statements(line: &str) -> Vec<&str> {
+        if !line.contains(';') {
+            return vec![line];
+        }
+        let mut out = Vec::new();
+        let (mut in_str, mut escape, mut start) = (false, false, 0);
+        for (i, c) in line.char_indices() {
             if in_str {
-                out.last_mut().expect("非空").push(c);
                 if escape {
                     escape = false;
                 } else if c == '\\' {
@@ -210,14 +216,15 @@ impl Source {
                 continue;
             }
             match c {
-                '"' => {
-                    in_str = true;
-                    out.last_mut().expect("非空").push(c);
+                '"' => in_str = true,
+                ';' => {
+                    out.push(&line[start..i]);
+                    start = i + c.len_utf8();
                 }
-                ';' => out.push(String::new()),
-                _ => out.last_mut().expect("非空").push(c),
+                _ => {}
             }
         }
+        out.push(&line[start..]);
         out
     }
 
@@ -229,7 +236,7 @@ impl Source {
     }
 
     /// 展开 `.rept` / `.irp` / `.irpc` / `.macro`。`depth` 防无限递归。
-    fn expand(lines: Vec<Line>, macros: &mut HashMap<String, Macro>, depth: usize) -> Result<Vec<Line>, Error> {
+    fn expand<'a>(lines: Vec<Line<'a>>, macros: &mut HashMap<String, Macro<'a>>, depth: usize) -> Result<Vec<Line<'a>>, Error> {
         if depth > 64 {
             return Err(Error::Syntax(String::from("宏 / .rept 嵌套太深")));
         }
@@ -257,7 +264,7 @@ impl Source {
                             };
                             values
                                 .iter()
-                                .flat_map(|v| body.iter().map(move |l| Line { no: l.no, text: l.text.replace(&format!("\\{name}"), v) }))
+                                .flat_map(|v| body.iter().map(move |l| Line { no: l.no, text: Cow::Owned(l.text.replace(&format!("\\{name}"), v)) }))
                                 .collect()
                         }
                         _ => {
@@ -281,7 +288,7 @@ impl Source {
                                 let mut text = l.text.clone();
                                 for (i, (p, default)) in m.params.iter().enumerate() {
                                     let v = args.get(i).filter(|a| !a.is_empty()).copied().or(default.as_deref()).unwrap_or("");
-                                    text = text.replace(&format!("\\{p}"), v);
+                                    text = Cow::Owned(text.replace(&format!("\\{p}"), v));
                                 }
                                 Line { no: line.no, text }
                             })
@@ -298,7 +305,7 @@ impl Source {
     }
 
     /// 收一个块直到配对的 `.endr` / `.endm`（可嵌套）。
-    fn block(it: &mut impl Iterator<Item = Line>, open: &str, no: usize) -> Result<Vec<Line>, Error> {
+    fn block<'a>(it: &mut impl Iterator<Item = Line<'a>>, open: &str, no: usize) -> Result<Vec<Line<'a>>, Error> {
         let close = if open == ".macro" { ".endm" } else { ".endr" };
         let mut depth = 1;
         let mut body = Vec::new();

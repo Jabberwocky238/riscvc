@@ -174,6 +174,9 @@ pub struct Assembler<'e> {
     options: Vec<Mode>,
     /// `.reloc 位置, 类型, 目标`（行号报错用）。
     directs: Vec<(Expr, u32, Expr, usize)>,
+    /// 助记符 ⇒ 哪几个扩展可能认它（位掩码，第 k 位对应 `exts[k]`）。⛔ 只看名字，所以缓存得住
+    /// （`Table::enabled` 是 feature 决定的常量）。
+    known: HashMap<String, u32>,
 }
 
 impl<'e> Assembler<'e> {
@@ -224,6 +227,7 @@ impl<'e> Assembler<'e> {
             label_seq: HashMap::new(),
             options: Vec::new(),
             directs: Vec::new(),
+            known: HashMap::new(),
         };
         // 同 llvm-mc：一开始只有 .text；.data / .bss 等源里真的切过去才建（空的也建），按第一次切换的次序
         asm.switch(".text", None, None, None);
@@ -291,7 +295,7 @@ impl<'e> Assembler<'e> {
     /// 先扫一遍：哪些名字会是全局 / 弱的，哪些名字在本文件里有标号（分支能不能就地解析要用）。
     fn prescan(&mut self, lines: &[source::Line]) {
         for line in lines {
-            let mut text = line.text.as_str();
+            let mut text = line.text.as_ref();
             while let Some((label, rest)) = Self::label_prefix(text) {
                 self.labels.insert(String::from(label));
                 text = rest;

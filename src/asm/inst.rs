@@ -79,7 +79,16 @@ impl Assembler<'_> {
         let args = Args { ops: &plain, raw: &raw };
         // 借出扩展表再放回：⛔ 不克隆（每条指令一次）
         let exts = core::mem::take(&mut self.exts);
-        let hit = exts.iter().enumerate().find_map(|(k, e)| e.assemble(mnem, &args).map(|r| (k, r)));
+        // 只问可能认这个助记符的那几个：头一次问一遍 `knows` 记成位掩码，之后查表
+        let mask = match self.known.get(mnem) {
+            Some(&m) => m,
+            None => {
+                let m = if exts.len() > 32 { u32::MAX } else { exts.iter().enumerate().filter(|(_, e)| e.knows(mnem)).fold(0, |a, (k, _)| a | 1 << k) };
+                self.known.insert(String::from(mnem), m);
+                m
+            }
+        };
+        let hit = exts.iter().enumerate().filter(|(k, _)| mask >> k & 1 != 0).find_map(|(k, e)| e.assemble(mnem, &args).map(|r| (k, r)));
         self.exts = exts;
         let Some((k, out)) = hit else { return Ok(false) };
         match out.map_err(|msg| Error::Syntax(format!("{}：{msg}", self.exts[k].name())))? {
