@@ -14,12 +14,19 @@ use riscvc::ir::{Block, Module, Ty};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// 这一轮对拍跑的中端流水线。和 `riscvc llc` 的缺省同一处定义；要试别的串就改这里，
+/// 改动会出现在 diff 里。
+const PIPELINE: [&str; 3] = riscvc::opt::DEFAULT_PIPELINE;
+
 /// 失败的一项：键（`份` 或 `份/函数`）⇒ 原因。
 type Fails = BTreeMap<String, String>;
 
 /// 一份 fixture 的对拍。
 struct Case<'l> {
     lib: &'l Lib,
+    /// 代码生成前跑哪串中端 pass。⛔ 由上面注进来，不从环境变量取：换流水线是改代码、
+    /// 要进 diff 的事，不该靠外部开关悄悄改变一次运行的含义。
+    passes: &'l [&'l str],
     key: String,
     mlir: String,
     theirs: Vec<u8>,
@@ -62,13 +69,9 @@ impl Case<'_> {
             Ok(Err(e)) => return Self::fail(fails, &self.key, &format!("解析：{e}")),
             Err(_) => return Self::fail(fails, &self.key, "解析：panic"),
         };
-        // 中端 pass：缺省跑 `opt::DEFAULT_PIPELINE`（和 `riscvc llc` 的缺省同一处定义），
-        // 拿这 600 多份真语料压它们——变换若改了语义，下面的对拍立刻会看见。
-        // `RISCVC_LIT_PASSES` 可以改这串，给空串就是一个都不跑。
-        let names = std::env::var("RISCVC_LIT_PASSES").unwrap_or_else(|_| riscvc::opt::DEFAULT_PIPELINE.join(","));
+        // 中端 pass：拿这 600 多份真语料压它们——变换若改了语义，下面的对拍立刻会看见。
         let reg = riscvc::plugin::Registry::default();
-        let pipeline: Vec<&str> = names.split(',').filter(|n| !n.is_empty()).collect();
-        if let Err(e) = reg.run(&mut m, &pipeline) {
+        if let Err(e) = reg.run(&mut m, self.passes) {
             return Self::fail(fails, &self.key, &format!("pass：{e}"));
         }
         // 逐个函数隔离着编：编不了的留成声明
@@ -150,7 +153,7 @@ fn llvm_tests() {
         for p in files {
             let Ok(theirs) = std::fs::read(p.with_extension("o")) else { continue };
             let key = format!("{dir}/{}", p.file_stem().unwrap().to_string_lossy());
-            cases.push(Case { lib: &lib, key, mlir: std::fs::read_to_string(&p).unwrap(), theirs });
+            cases.push(Case { lib: &lib, passes: &PIPELINE, key, mlir: std::fs::read_to_string(&p).unwrap(), theirs });
         }
     }
     if cases.is_empty() {
