@@ -79,11 +79,42 @@ impl Mem2RegImpl {
             .collect()
     }
 
-    /// 每个槽位该在哪些块上长出一个参数：有 store 的块，按支配边界反复扩张。
+    /// 一个槽位在每个块的入口是不是活的 —— ⭐ 只在活的汇合块上加参数（剪枝 SSA）。
+    /// 不剪的话，死掉的块参数会在**每个**前驱的跳转处换来一条寄存器拷贝，白花。
+    fn live_in(slot: ValId, f: &Function) -> Vec<bool> {
+        let n = f.blocks.len();
+        // `读在写前`：这个块自己就要用到传进来的值。`写过`：块里存过，传进来的到此为止。
+        let (mut reads, mut writes) = (vec![false; n], vec![false; n]);
+        for (b, block) in f.blocks.iter().enumerate() {
+            for i in &block.insts {
+                match &i.op {
+                    Op::Load { ptr, .. } if *ptr == slot && !writes[b] => reads[b] = true,
+                    Op::Store { ptr, .. } if *ptr == slot => writes[b] = true,
+                    _ => {}
+                }
+            }
+        }
+        let succs: Vec<Vec<usize>> = f.blocks.iter().map(|b| b.insts.last().map(|i| i.op.targets().map(|t| t.block.0 as usize).collect()).unwrap_or_default()).collect();
+        let mut live = reads.clone();
+        let mut work: Vec<usize> = (0..n).filter(|&b| live[b]).collect();
+        while let Some(b) = work.pop() {
+            for p in (0..n).filter(|&p| succs[p].contains(&b)) {
+                // 前驱自己写过，传进来的那份到那儿就没人要了。
+                if !writes[p] && !core::mem::replace(&mut live[p], true) {
+                    work.push(p);
+                }
+            }
+        }
+        live
+    }
+
+    /// 每个槽位该在哪些块上长出一个参数：有 store 的块，按支配边界反复扩张，
+    /// 再把槽位在那儿不活的块剔掉。
     fn joins(slots: &[Slot], f: &Function, frontier: &[Vec<usize>]) -> Vec<Vec<usize>> {
         slots
             .iter()
             .map(|s| {
+                let live = Self::live_in(s.ptr, f);
                 let mut work: Vec<usize> = (0..f.blocks.len())
                     .filter(|&b| f.blocks[b].insts.iter().any(|i| matches!(&i.op, Op::Store { ptr, .. } if *ptr == s.ptr)))
                     .collect();
@@ -95,7 +126,7 @@ impl Mem2RegImpl {
                         }
                     }
                 }
-                need.iter().enumerate().filter(|&(_, n)| *n).map(|(b, _)| b).collect()
+                need.iter().enumerate().filter(|&(b, n)| *n && live[b]).map(|(b, _)| b).collect()
             })
             .collect()
     }
