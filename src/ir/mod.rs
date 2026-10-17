@@ -95,9 +95,10 @@ pub enum Intr {
     MaxNum,
     /// `bit` 属性：要测的类别位。
     IsFpClass(u32),
-    Memcpy,
-    Memmove,
-    Memset,
+    /// 目的 / 源的对齐（实参属性 `llvm.align`，没有 ⇒ 1）。
+    Memcpy { dst: u64, src: u64 },
+    Memmove { dst: u64, src: u64 },
+    Memset { dst: u64 },
     Trap,
     DebugTrap,
     StackSave,
@@ -108,7 +109,8 @@ pub enum Intr {
     /// 不出代码：lifetime / assume / expect（expect 回第一个实参）…
     Nop,
     Expect,
-    /// 交给库函数（`floorf` / `fmodf` …）：名字。
+    /// 交给库函数：⚠ 基名（`floor`、`sin`、`powi` …），后缀由代码生成按类型补（float `f` / double 无 / fp128 `l`；
+    /// powi ⇒ `__powi{sf,df,tf}2`）。
     Libm(String),
 }
 
@@ -223,6 +225,61 @@ impl Op {
         };
         a.into_iter().chain(b).chain(cases.iter().map(|(_, t)| t))
     }
+
+    /// 各出口，可改 —— 给块参数补实参时要用（⛔ 这个 IR 没有 phi）。
+    pub fn targets_mut(&mut self) -> impl Iterator<Item = &mut Target> + '_ {
+        let (a, b, cases): (Option<&mut Target>, Option<&mut Target>, &mut [(u128, Target)]) = match self {
+            Self::Br(t) => (Some(t), None, &mut []),
+            Self::CondBr(_, t, f) => (Some(t), Some(f), &mut []),
+            Self::Switch(_, d, cases) => (Some(d), None, cases),
+            _ => (None, None, &mut []),
+        };
+        a.into_iter().chain(b).chain(cases.iter_mut().map(|(_, t)| t))
+    }
+
+    /// 把每个操作数按 `to` 换一遍（⛔ 不动结果）。和 [`Self::operands`] 覆盖同一批位置。
+    pub fn rename(&mut self, to: &impl Fn(ValId) -> ValId) {
+        for t in self.targets_mut() {
+            for a in &mut t.args {
+                *a = to(*a);
+            }
+        }
+        match self {
+            Self::CondBr(c, ..) | Self::Switch(c, ..) => *c = to(*c),
+            Self::Ret(v) => {
+                if let Some(v) = v {
+                    *v = to(*v);
+                }
+            }
+            Self::Bin(_, a, b) | Self::ICmp(_, a, b) | Self::FCmp(_, a, b) | Self::InsertValue(a, b, _) | Self::AtomicRmw(_, a, b, _) | Self::Store { val: a, ptr: b, .. } => {
+                (*a, *b) = (to(*a), to(*b));
+            }
+            Self::FNeg(a) | Self::Cast(_, a) | Self::Freeze(a) | Self::ExtractValue(a, _) | Self::Alloca { count: a, .. } | Self::Load { ptr: a, .. } => *a = to(*a),
+            Self::Gep { base, indices, .. } => {
+                *base = to(*base);
+                for i in indices {
+                    if let Index::Dyn(v) = i {
+                        *v = to(*v);
+                    }
+                }
+            }
+            Self::Select(a, b, c) | Self::CmpXchg(a, b, c, ..) => (*a, *b, *c) = (to(*a), to(*b), to(*c)),
+            Self::Call { callee, args, .. } => {
+                if let Callee::Indirect(v) = callee {
+                    *v = to(*v);
+                }
+                for (v, _) in args {
+                    *v = to(*v);
+                }
+            }
+            Self::Intr(_, list) => {
+                for v in list {
+                    *v = to(*v);
+                }
+            }
+            Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
+        }
+    }
 }
 
 /// 一条指令：结果（有的话）与操作。
@@ -280,6 +337,8 @@ pub struct Function {
     pub varargs: bool,
     pub section: Option<String>,
     pub align: Option<u64>,
+    /// `"probe-stack"="inline-asm"`：栈探测的步长（`"stack-probe-size"`，缺省 4096），序言与动态 alloca 逐步探测。
+    pub stack_probe: Option<u32>,
     /// 空 ⇒ 只是声明。入口块的参数就是函数参数。
     pub blocks: Vec<Block>,
     /// 每个 SSA 值的类型（`ValId` 下标）。

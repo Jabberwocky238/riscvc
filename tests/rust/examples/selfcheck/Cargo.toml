@@ -1,0 +1,21 @@
+# 端到端：Rust 程序（有入口、自检）⇒ tools/rust-build.sh ⇒ riscvc 编 + 链的 ELF ⇒ 解释器里跑到 ebreak，a0 = 0 即通过
+[package]
+name = "selfcheck"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+debug = false
+
+[profile.dev]
+panic = "abort"
+debug = false
+
+[workspace]

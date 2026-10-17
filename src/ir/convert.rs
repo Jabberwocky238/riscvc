@@ -121,18 +121,40 @@ impl<'a> Lowering<'_, 'a> {
         {
             return Ok(());
         }
-        // `memcpy.inline` / `memset.inline`：长度在属性 `len` 上 ⇒ 补成第三个实参（同 memcpy / memset）
-        if matches!(&*self.op.name, "llvm.intr.memcpy.inline" | "llvm.intr.memset.inline") {
-            let len = self.attr("len").and_then(Attr::i64).ok_or_else(|| Error::Parse(String::from("没有 len")))?;
+        // 模板为空、没有结果的 inline asm（Rust 的 core::hint::black_box：`asm sideeffect "", "r,~{memory}"`）：只告诉
+        // 优化器「这些值被用了、内存可能变了」，不出指令 ⇒ riscvc 没有跨它重排访存的优化，什么都不用出。
+        // ⚠ 有结果（`=r` 输出）或模板非空的照样拒收：那要真把汇编交给汇编器、按约束分寄存器。
+        // （结果类型是 `!llvm.void` 的也算没有结果：MLIR 照样给它编了一个名字）
+        if &*self.op.name == "llvm.inline_asm" && result.is_none_or(|r| self.type_of(r) == Types::VOID) && self.attr("asm_string").and_then(Attr::lit).is_some_and(|t| t.trim().is_empty()) {
+            return Ok(());
+        }
+        if let Some(i) = self.mem_intr()? {
             let mut args = self.operands()?;
-            args.push(self.constant(Types::I64, Const::Int(u128::from(len.cast_unsigned()))));
-            let i = if self.op.name.starts_with("llvm.intr.memcpy") { Intr::Memcpy } else { Intr::Memset };
+            // `memcpy.inline` / `memset.inline`：长度在属性 `len` 上 ⇒ 补成第三个实参（同 memcpy / memset）
+            if let Some(len) = self.attr("len") {
+                let len = len.i64().ok_or_else(|| Error::Parse(String::from("len 不是整数")))?;
+                args.push(self.constant(Types::I64, Const::Int(u128::from(len.cast_unsigned()))));
+            }
             self.emit(None, Op::Intr(i, args));
             return Ok(());
         }
         let o = self.module.op(self.op, self.body, result)?;
         self.emit(result, o);
         Ok(())
+    }
+
+    /// memcpy / memmove / memset（含 `.inline`、`call_intrinsic` 的写法）⇒ 带对齐的 intrinsic：对齐来自实参属性
+    /// `llvm.align`（`arg_attrs` 按实参位置），没有 ⇒ 1。别的 op ⇒ `None`。
+    fn mem_intr(&mut self) -> Result<Option<Intr>, Error> {
+        let Some(base) = intrinsic_base(self.op) else { return Ok(None) };
+        let list = prop(self.op, "arg_attrs");
+        let mut align = |i: usize| self.module.arg_attrs(list, i).map(|a| a.align.unwrap_or(1).max(1));
+        Ok(Some(match base {
+            "memcpy" | "memcpy.inline" => Intr::Memcpy { dst: align(0)?, src: align(1)? },
+            "memmove" => Intr::Memmove { dst: align(0)?, src: align(1)? },
+            "memset" | "memset.inline" => Intr::Memset { dst: align(0)? },
+            _ => return Ok(None),
+        }))
     }
 
     /// 常量（`ty` 的位型）。
@@ -194,6 +216,8 @@ impl<'a> Lowering<'_, 'a> {
                 let nan = self.value(Types::I1, Op::FCmp(FPred::Uno, x, x));
                 self.emit(Some(r), Op::Select(nan, zero, t));
             }
+            // 优化器才知道是不是常量；没有优化器 ⇒ 一律 false（同 llc 在 O0 下的结果，调用方总有不靠它的路径）
+            "is.constant" => self.emit(Some(r), Op::Const(Const::Int(0))),
             "canonicalize" if self.types().kind(rt) == &Kind::Float => {
                 let [x] = self.operands()?[..] else { return Err(Error::Parse(format!("{base} 要一个操作数"))) };
                 self.emit(Some(r), Op::Intr(Intr::MinNum, vec![x, x]));
@@ -335,8 +359,9 @@ fn castop(name: &str) -> Option<CastOp> {
 }
 
 /// 基名（[`intrinsic_base`]）⇒ 代码生成认得的 intrinsic。
-fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
-    let libm = |base: &str| Intr::Libm(if float { format!("{base}f") } else { String::from(base) });
+/// ⚠ memcpy / memmove / memset 不在这里（要读实参的对齐属性，见 [`Lowering::mem_intr`]）。
+fn intrinsic(name: &str, op: &Operation<'_>) -> Option<Intr> {
+    let libm = |base: &str| Intr::Libm(String::from(base));
     Some(match name {
         "ctlz" => Intr::Ctlz,
         "cttz" => Intr::Cttz,
@@ -366,12 +391,10 @@ fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
         "fma" => Intr::Fma,
         "fmuladd" => Intr::FMulAdd,
         "sqrt" => Intr::Sqrt,
-        "minnum" => Intr::MinNum,
-        "maxnum" => Intr::MaxNum,
+        // IEEE 754-2019 minimumNumber / maximumNumber = F 扩展的 fmin.s / fmax.s（同 llc）
+        "minnum" | "minimumnum" => Intr::MinNum,
+        "maxnum" | "maximumnum" => Intr::MaxNum,
         "is.fpclass" => Intr::IsFpClass(u32::try_from(prop(op, "bit")?.i64()?).ok()?),
-        "memcpy" | "memcpy.inline" => Intr::Memcpy,
-        "memmove" => Intr::Memmove,
-        "memset" | "memset.inline" => Intr::Memset,
         "trap" | "ubsantrap" => Intr::Trap,
         "debugtrap" => Intr::DebugTrap,
         "stacksave" => Intr::StackSave,
@@ -384,7 +407,7 @@ fn intrinsic(name: &str, op: &Operation<'_>, float: bool) -> Option<Intr> {
             libm(name)
         }
         // compiler-rt
-        "powi" => Intr::Libm(String::from(if float { "__powisf2" } else { "__powidf2" })),
+        "powi" => libm("powi"),
         n if n.starts_with("lifetime.") || n.starts_with("invariant.") || n.starts_with("dbg.") || n.starts_with("experimental.noalias.scope.decl") || n == "assume" || n == "prefetch" || n == "donothing" || n == "sideeffect" => Intr::Nop,
         _ => return None,
     })
@@ -540,17 +563,27 @@ impl Module {
     fn function(&mut self, op: &Operation<'_>, reg: &Registry<'_>) -> Result<(), Error> {
         let name = String::from(prop(op, "sym_name").and_then(Attr::lit).ok_or_else(|| Error::Parse(String::from("llvm.func 没有名字")))?);
         // 改函数怎么出代码的属性：⛔ 悄悄当普通函数（`interrupt` 要存全部寄存器、`mret` 返回；`naked` 没有序言 / 尾声）
+        // passthrough 的每项：`"名字"` 或 `["名字", "值"]`
+        let mut passthrough = Vec::new();
         if let Some(Attribute::Array(attrs)) = prop(op, "passthrough") {
             for a in attrs {
-                let key = match a {
-                    Attribute::Array(kv) => kv.first().and_then(Attr::lit),
-                    a => a.lit(),
+                let (key, value) = match a {
+                    Attribute::Array(kv) => (kv.first().and_then(Attr::lit), kv.get(1).and_then(Attr::lit)),
+                    a => (a.lit(), None),
                 };
                 if let Some(k @ ("interrupt" | "naked")) = key {
                     return Err(Error::Op { op: String::from("llvm.func"), why: format!("{name}：函数属性 `{k}` 不支持") });
                 }
+                passthrough.extend(key.map(|k| (k, value)));
             }
         }
+        let attr = |k: &str| passthrough.iter().find(|(n, _)| *n == k).and_then(|(_, v)| *v);
+        // 只认 inline-asm 式（RISC-V 唯一的）；别的探测方式（调探测函数）⛔ 悄悄不探 ⇒ 报错
+        let stack_probe = match attr("probe-stack") {
+            None => None,
+            Some("inline-asm") => Some(attr("stack-probe-size").map_or(Ok(4096), str::parse).map_err(|_| Error::Parse(format!("{name}：stack-probe-size 不是数")))?),
+            Some(p) => return Err(Error::Op { op: String::from("llvm.func"), why: format!("{name}：probe-stack = `{p}` 不支持（只认 inline-asm）") }),
+        };
         let fty = self.ty(prop(op, "function_type").and_then(Attr::ty).ok_or_else(|| Error::Parse(format!("{name}：没有 function_type")))?)?;
         let Kind::Func(ret, params, varargs) = self.types.kind(fty).clone() else { return Err(Error::Parse(format!("{name}：function_type 不是函数类型"))) };
         let params = params.iter().enumerate().map(|(i, &ty)| Ok(Param { ty, attrs: self.arg_attrs(prop(op, "arg_attrs"), i)? })).collect::<Result<Vec<_>, Error>>()?;
@@ -563,6 +596,7 @@ impl Module {
             varargs,
             section: prop(op, "section").and_then(Attr::lit).map(String::from),
             align: prop(op, "alignment").and_then(Attr::i64).and_then(|v| u64::try_from(v).ok()),
+            stack_probe,
             blocks: Vec::new(),
             vals: Vec::new(),
             name,
@@ -641,9 +675,8 @@ impl Module {
         if let Some(k) = castop(name) {
             return Ok(Op::Cast(k, arg(0)?));
         }
-        let float = op.ty.inputs.first().is_some_and(|t| matches!(t, Type::Float(FloatKind::F32)));
         // `llvm.call_intrinsic`（没有专门 op 的 intrinsic）按基名查同一张表
-        if let Some(i) = intrinsic_base(op).and_then(|base| intrinsic(base, op, float)) {
+        if let Some(i) = intrinsic_base(op).and_then(|base| intrinsic(base, op)) {
             return Ok(Op::Intr(i, b.all(&op.operands)?));
         }
         Ok(match name {
@@ -688,8 +721,8 @@ impl Module {
                 let ty = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
                 Op::Alloca { ty, count: arg(0)?, align: Self::uint(op, "alignment").max(1) }
             }
-            "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op, "ordering") },
-            "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: prop(op, "volatile_").is_some(), atomic: Self::order(op, "ordering") },
+            "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: flag(op, "volatile_"), atomic: Self::order(op, "ordering") },
+            "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: flag(op, "volatile_"), atomic: Self::order(op, "ordering") },
             "llvm.getelementptr" => {
                 let o: llvm::GEPOp<'_> = op.to_op().map_err(typed)?;
                 let src = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
@@ -771,6 +804,24 @@ impl Module {
         i64::try_from((v << s).cast_signed() >> s).unwrap_or(0)
     }
 
+    /// 整数字面量（十进制或 `0x`，可带符号）⇒ 128 位补码。⛔ mlirformat 的 `Attribute::int`：它先把数字部分读成 i128
+    /// 再取负，i128::MIN（`-170141183460469231731687303715884105728`，rustc 的 compiler_builtins 里就有）溢出报错。
+    /// 收：-2¹²⁷ ..= 2¹²⁸ − 1（负的到 i128::MIN，正的到 u128::MAX —— `0xffff…` 是 128 位的位型）。
+    /// ⛔ 更宽的（i256 的大常数）截断：`Const::Int` 只有 128 位，截了就是静默算错 ⇒ 报错。
+    fn int_lit(a: &Attribute<'_>) -> Result<i128, Error> {
+        let Attribute::Int { lit, .. } = a else { return Err(Error::Parse(format!("不是整数：{a}"))) };
+        let (neg, digits) = lit.strip_prefix('-').map_or((false, lit.trim_start_matches('+')), |d| (true, d));
+        let (radix, digits) = digits.strip_prefix("0x").map_or((10, digits), |h| (16, h));
+        let bad = || Error::Parse(format!("整数常量 `{lit}` 不是数字或超过 128 位"));
+        let v = digits.chars().try_fold(0u128, |acc, c| acc.checked_mul(radix)?.checked_add(u128::from(c.to_digit(radix as u32)?)));
+        let v = v.filter(|_| !digits.is_empty()).ok_or_else(bad)?;
+        match neg {
+            false => Ok(v.cast_signed()),
+            true if v <= i128::MIN.unsigned_abs() => Ok(v.wrapping_neg().cast_signed()),
+            true => Err(bad()),
+        }
+    }
+
     fn mask(v: i128, bits: u32) -> u128 {
         let v = v.cast_unsigned();
         if bits >= 128 { v } else { v & ((1u128 << bits) - 1) }
@@ -782,7 +833,7 @@ impl Module {
         Ok(match a {
             Attribute::Bool(v) => Const::Int(u128::from(*v)),
             Attribute::Int { .. } => {
-                let v = a.int().map_err(|e| Error::Parse(e.0))?;
+                let v = Self::int_lit(a)?;
                 // 浮点类型上的整数字面量是位型
                 match self.types.kind(ty) {
                     Kind::Half | Kind::BFloat => Const::Float(Self::mask(v, 16).try_into().unwrap_or(0)),
@@ -1085,5 +1136,29 @@ impl Module {
             && let Some(slot) = items.get_mut(first as usize) {
                 self.insert(slot, ety, rest, v);
             }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Module;
+    use mlirformat::{Attribute, Str};
+
+    fn lit(s: &str) -> Result<i128, String> {
+        Module::int_lit(&Attribute::Int { lit: Str::Borrowed(s), ty: None }).map_err(|e| e.to_string())
+    }
+
+    /// 128 位的边界（数值事实）：i128::MIN、u128::MAX 的位型收，再往外一个报错。
+    #[test]
+    fn int_lit_bounds() {
+        assert_eq!(lit("-170141183460469231731687303715884105728"), Ok(i128::MIN));
+        assert_eq!(lit("0xffffffffffffffffffffffffffffffff"), Ok(-1));
+        assert_eq!(lit("340282366920938463463374607431768211455"), Ok(-1));
+        assert_eq!(lit("-1"), Ok(-1));
+        assert_eq!(lit("0x7f"), Ok(127));
+        assert!(lit("-170141183460469231731687303715884105729").is_err());
+        assert!(lit("340282366920938463463374607431768211456").is_err());
+        assert!(lit("0x1ffffffffffffffffffffffffffffffff").is_err());
+        assert!(lit("").is_err() && lit("-").is_err() && lit("12a").is_err());
     }
 }

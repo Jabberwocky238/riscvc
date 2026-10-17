@@ -42,15 +42,20 @@ impl Case<'_> {
         r.unwrap_or_else(|p| Err(format!("panic：{}", p.downcast_ref::<String>().map(String::as_str).or_else(|| p.downcast_ref::<&str>().copied()).unwrap_or("?"))))
     }
 
-    /// 对拍这一份：（调用次数, 失败）。随机数的种子由份名定（并行也可复现）。
+    /// 对拍这一份：（调用次数, 失败）。
     fn run(&self) -> (usize, Fails) {
         let mut fails = Fails::new();
-        let mut rng = llvm::Rng(self.key.bytes().fold(0x5eed_1234_abcd_ef01, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)));
-        let runs = self.diff(&mut rng, &mut fails);
+        let runs = self.diff(&mut fails);
         (runs, fails)
     }
 
-    fn diff(&self, rng: &mut llvm::Rng, fails: &mut Fails) -> usize {
+    /// 随机数：种子由「份/函数」定 ⇒ 一个函数的实参与同一份里别的函数跑了几次无关（⛔ 整份一个种子：前面的函数
+    /// 多调一次，后面的实参就全变，登记了的 poison 项时有时无）。
+    fn rng(key: &str) -> llvm::Rng {
+        llvm::Rng(key.bytes().fold(0x5eed_1234_abcd_ef01, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)))
+    }
+
+    fn diff(&self, fails: &mut Fails) -> usize {
         let parsed = std::panic::catch_unwind(|| Module::try_from(self.mlir.as_str()).map_err(|e| e.to_string()));
         let mut m = match parsed {
             Ok(Ok(m)) => m,
@@ -88,6 +93,8 @@ impl Case<'_> {
         let mut runs = 0;
         for f in m.functions.iter().filter(|f| !f.blocks.is_empty()) {
             let Some(sig) = Sig::of(&m, f) else { continue };
+            let key = format!("{}/{}", self.key, f.name);
+            let rng = &mut Self::rng(&key);
             match pair.compare(&sig, rng, 32, Domain::Any) {
                 Ok(n) => runs += n,
                 // 定义域里（小整数、普通浮点）再比一遍：一致 ⇒ 差异只在域外（移位量 ≥ 位宽一类 poison 的嫌疑），记成「域外」

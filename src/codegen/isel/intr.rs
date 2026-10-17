@@ -79,9 +79,9 @@ impl Isel<'_> {
                 Intr::Sqrt => vec![self.fop(Float::FsqrtS, x)],
                 Intr::MinNum => vec![self.fop(Float::FminS, x)],
                 Intr::MaxNum => vec![self.fop(Float::FmaxS, x)],
-                Intr::Libm(name) => match Self::round_mode(&format!("{name}f")) {
+                Intr::Libm(name) => match Self::round_mode(name) {
                     Some(rm) => vec![self.fround(x[0], rm)],
-                    None => self.libcall(&format!("{name}f"), &args, &pf)?,
+                    None => self.libcall(&Self::libm_name(name, "sf"), &args, &pf)?,
                 },
                 _ => return Self::bad(format!("float 的 {i:?} 还没做")),
             });
@@ -95,7 +95,7 @@ impl Isel<'_> {
             Intr::Sqrt => self.libcall("sqrtf", &args, &pf)?,
             Intr::MinNum => self.libcall("fminf", &args, &pf)?,
             Intr::MaxNum => self.libcall("fmaxf", &args, &pf)?,
-            Intr::Libm(name) => self.libcall(&format!("{name}f"), &args, &pf)?,
+            Intr::Libm(name) => self.libcall(&Self::libm_name(name, "sf"), &args, &pf)?,
             _ => return Self::bad(format!("float 的 {i:?} 还没做")),
         })
     }
@@ -720,15 +720,16 @@ impl Isel<'_> {
                 vec![self.fop(if *i == Intr::MinNum { Float::FminS } else { Float::FmaxS }, vec![a, b])]
             }
             Intr::IsFpClass(mask) => vec![self.fpclass(args[0], *mask)?],
-            Intr::Memcpy | Intr::Memmove | Intr::Memset => {
+            // 对齐（`dst` / `src`）前端带来了，mem_inline 还没用（照帧对象推）
+            Intr::Memcpy { .. } | Intr::Memmove { .. } | Intr::Memset { .. } => {
                 let name = match i {
-                    Intr::Memcpy => "memcpy",
-                    Intr::Memmove => "memmove",
+                    Intr::Memcpy { .. } => "memcpy",
+                    Intr::Memmove { .. } => "memmove",
                     _ => "memset",
                 };
                 // `.inline` 的长度是属性（前端补成第三个实参）；缺了报错，⛔ 越界
                 let &[d, v, n, ..] = args else { return Self::bad(format!("{i:?} 要三个实参（目的、源 / 值、长度），只有 {}", args.len())) };
-                if self.mem_inline(*i == Intr::Memset, d, v, n)? {
+                if self.mem_inline(matches!(i, Intr::Memset { .. }), d, v, n)? {
                     return Ok(Vec::new());
                 }
                 let (dst, src) = (self.get1(d)?, self.get1(v)?);
@@ -797,7 +798,8 @@ impl Isel<'_> {
                     ps.push((self.get(*a)?, self.parts(t)?));
                 }
                 let ret = rt.map(|t| self.parts(t)).transpose()?.unwrap_or_default();
-                self.libcall(name, &ps, &ret)?
+                let name = Self::libm_name(name, self.fsuffix(self.ty(args[0])));
+                self.libcall(&name, &ps, &ret)?
             }
             Intr::Bitreverse => match self.bits_of(args[0]) {
                 w if w > 32 => {

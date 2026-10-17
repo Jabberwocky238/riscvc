@@ -50,8 +50,20 @@ impl Isel<'_> {
     }
 
     /// libm 的 float 取整函数 ⇒ 舍入模式：floor rdn、ceil rup、trunc rtz、round rmm、roundeven rne、rint / nearbyint 跟 frm。
+    /// libm 的基名 + compiler-rt 的类型后缀（`sf` / `df` / `tf`）⇒ 函数名：float `floorf`、double `floor`、fp128 `floorl`；
+    /// powi ⇒ `__powi{sf,df,tf}2`。
+    pub(super) fn libm_name(base: &str, suffix: &str) -> String {
+        match (base, suffix) {
+            ("powi", s) => format!("__powi{s}2"),
+            (b, "sf") => format!("{b}f"),
+            (b, "tf") => format!("{b}l"),
+            (b, _) => String::from(b),
+        }
+    }
+
+    /// 取整一类 libm（基名）⇒ 舍入模式。
     pub(super) fn round_mode(name: &str) -> Option<Rm> {
-        Some(match name.strip_suffix('f')? {
+        Some(match name {
             "floor" => Rm::Rdn,
             "ceil" => Rm::Rup,
             "trunc" => Rm::Rtz,
@@ -78,7 +90,7 @@ impl Isel<'_> {
     }
 
     /// compiler-rt 名字里的类型后缀（不管有没有硬件）：float `sf`、double `df`、fp128 `tf`。
-    fn fsuffix(&self, t: Ty) -> &'static str {
+    pub(super) fn fsuffix(&self, t: Ty) -> &'static str {
         match self.kind(t) {
             Kind::Double => "df",
             Kind::Fp128 => "tf",

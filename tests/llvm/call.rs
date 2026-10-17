@@ -17,6 +17,8 @@ const STACK: u32 = 0x7ff0_0000;
 const BUF: u32 = 0x6000_0000;
 const BUF_SIZE: u32 = 512;
 const STEPS: u64 = 200_000;
+/// 只有一边跑到步数上限时，那边放大多少倍重跑。
+const SLOW: u64 = 100;
 
 /// 参数 / 返回值的一类：整数（位宽、符号扩展、零扩展）、指针、float、double。
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +87,8 @@ impl Sig {
 /// 两边共用的库：按需挑（同静态库），⛔ 和已有定义重名的不要。
 pub struct Lib {
     objs: Vec<(String, Vec<u8>, BTreeSet<String>)>,
+    /// 全部链上（⛔ 按需挑）：一个 crate 一个目标文件的（Rust 的 core、compiler_builtins），整份都要。
+    whole: bool,
 }
 
 impl Lib {
@@ -101,7 +105,12 @@ impl Lib {
                 objs.push((p.file_name().unwrap().to_string_lossy().into_owned(), obj));
             }
         }
-        Self { objs: objs.into_iter().map(|(n, b)| { let defs = Self::symbols(&b).0; (n, b, defs) }).collect() }
+        Self::of(objs, false)
+    }
+
+    /// 给定的库对象；`whole` ⇒ 全部链上。
+    pub fn of(objs: Vec<(String, Vec<u8>)>, whole: bool) -> Self {
+        Self { objs: objs.into_iter().map(|(n, b)| { let defs = Self::symbols(&b).0; (n, b, defs) }).collect(), whole }
     }
 
     /// （定义的全局符号, 引用而没定义的）。
@@ -118,6 +127,10 @@ impl Lib {
     fn with<'s>(&'s self, name: &'s str, obj: &'s [u8]) -> Vec<(&'s str, &'s [u8])> {
         let (mut defs, mut need) = Self::symbols(obj);
         let mut out = vec![(name, obj)];
+        if self.whole {
+            out.extend(self.objs.iter().map(|(n, b, _)| (n.as_str(), b.as_slice())));
+            return out;
+        }
         let mut taken = vec![false; self.objs.len()];
         loop {
             let pick = self.objs.iter().enumerate().find(|(k, (_, _, d))| !taken[*k] && d.iter().any(|s| need.contains(s) && !defs.contains(s)) && d.is_disjoint(&defs));
@@ -136,8 +149,12 @@ pub struct Image {
     cpu: Cpu,
     /// 全局符号 ⇒ 地址。
     funcs: BTreeMap<String, u32>,
-    /// 有名字的数据对象（含局部的）：（地址, 大小, 名字）。
-    data: Vec<(u32, u32, String)>,
+    /// 全部函数符号（含局部的）：地址 ⇒ 名字（数据里的函数指针按名字比）。
+    code: BTreeMap<u32, String>,
+    /// 有名字的数据对象（含局部的、只读的）：（地址, 大小, 名字, 可写）。只读的不比（写不了），但地址翻译要它们。
+    data: Vec<(u32, u32, String, bool)>,
+    /// 只读节的范围：没有符号的只读常量（llc 的 `.Lalloc_…` 链接后不留符号）按内容认。
+    rodata: Vec<(u32, u32)>,
 }
 
 impl Outcome {
@@ -166,20 +183,49 @@ struct Outcome {
 
 impl Image {
     pub fn link(lib: &Lib, name: &str, obj: &[u8]) -> Result<Self, String> {
-        let inputs = lib.with(name, obj);
+        let mut inputs = lib.with(name, obj);
+        // 谁都没定义的函数（libm 一类：llc 可能把 floorf 之类内联掉，riscvc 照样调）⇒ 桩：调到就陷入 unimp。
+        // ⛔ 解析成 0：跳到 0 地址跑进镜像开头的代码，死循环到步数上限，和「慢」混在一起。
+        let stub = Self::stubs(&inputs);
+        inputs.push(("stubs.o", &stub));
         let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(SCRIPT)), allow_undefined: true, ..Default::default() }, &inputs).map_err(|e| format!("链接：{e}"))?;
         let mut cpu = Cpu::default();
         cpu.load(&elf).map_err(|e| format!("装载：{e}"))?;
         let file = object::File::parse(elf.as_slice()).unwrap();
         let funcs = file.symbols().filter(|s| s.is_global() && s.is_definition()).map(|s| (String::from(s.name().unwrap()), u32::try_from(s.address()).unwrap())).collect();
+        let code = file.symbols().filter(|s| s.kind() == SymbolKind::Text && s.is_definition()).map(|s| (u32::try_from(s.address()).unwrap(), String::from(s.name().unwrap()))).collect();
         // 只比本文件的数据对象（库里的 `seed` 之类两边一样，比也无妨）
-        let mut data: Vec<(u32, u32, String)> = file
+        let writable = |s: &object::Symbol<'_, '_>| s.section_index().and_then(|i| file.section_by_index(i).ok()).is_some_and(|sec| sec.name().is_ok_and(|n| n != ".rodata"));
+        let mut data: Vec<(u32, u32, String, bool)> = file
             .symbols()
-            .filter(|s| s.kind() == SymbolKind::Data && s.size() > 0 && s.section_index().and_then(|i| file.section_by_index(i).ok()).is_some_and(|sec| sec.name().is_ok_and(|n| n != ".rodata")))
-            .map(|s| (u32::try_from(s.address()).unwrap(), u32::try_from(s.size()).unwrap(), String::from(s.name().unwrap())))
+            .filter(|s| s.kind() == SymbolKind::Data && s.size() > 0)
+            // private 的全局：llc 叫 `.Lalloc_…`、riscvc 叫 `alloc_…` ⇒ 去掉 `.L` 再比
+            .map(|s| (u32::try_from(s.address()).unwrap(), u32::try_from(s.size()).unwrap(), String::from(s.name().unwrap().trim_start_matches(".L")), writable(&s)))
             .collect();
         data.sort();
-        Ok(Self { cpu, funcs, data })
+        let rodata = file.sections().filter(|s| s.name().is_ok_and(|n| n.starts_with(".rodata") || n.starts_with(".srodata"))).map(|s| (u32::try_from(s.address()).unwrap(), u32::try_from(s.size()).unwrap())).collect();
+        Ok(Self { cpu, funcs, code, data, rodata })
+    }
+
+    /// 直接按寄存器调（诊断用）：回 (停机方式, a0, a1)。
+    pub fn call_raw(&self, f: &str, xs: &[u32]) -> (String, u32, u32) {
+        let mut cpu = self.cpu.clone();
+        cpu.x[10..10 + xs.len()].copy_from_slice(xs);
+        cpu.x[2] = STACK;
+        let stop = cpu.run(self.funcs[f], RET, STEPS);
+        (format!("{stop:?}"), cpu.x[10], cpu.x[11])
+    }
+
+    /// 输入里引用了、谁都没定义的全局符号 ⇒ 每个一条 `unimp` 的目标文件。
+    fn stubs(inputs: &[(&str, &[u8])]) -> Vec<u8> {
+        let (mut defs, mut used) = (BTreeSet::new(), BTreeSet::new());
+        for (_, obj) in inputs {
+            let (d, u) = Lib::symbols(obj);
+            defs.extend(d);
+            used.extend(u);
+        }
+        let asm: String = used.difference(&defs).map(|n| format!("    .globl {n}\n{n}:\n    unimp\n")).collect();
+        riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&format!("    .text\n{asm}")).unwrap()
     }
 
     /// 地址 ⇒ 「符号+偏移」（落在实参缓冲区里 ⇒ `buf+偏移`）。
@@ -187,10 +233,21 @@ impl Image {
         if (BUF..BUF + 8 * BUF_SIZE).contains(&a) {
             return format!("buf+{:#x}", a - BUF);
         }
-        match self.data.iter().rev().find(|(at, size, _)| (*at..at + size.max(&1)).contains(&a)) {
-            Some((at, _, n)) => format!("{n}+{:#x}", a - at),
-            None => self.funcs.iter().find(|&(_, &v)| v == a).map_or_else(|| format!("{a:#x}"), |(n, _)| n.clone()),
+        // 只读的一律按内容认（⛔ 按名字：llc 的 private 常量链接后没有符号，riscvc 的有，两边认法会不一样）
+        if let Some(c) = self.constant(a) {
+            return c;
         }
+        match self.data.iter().rev().find(|(at, size, ..)| (*at..at + size.max(&1)).contains(&a)) {
+            Some((at, _, n, _)) => format!("{n}+{:#x}", a - at),
+            None => self.code.get(&a).cloned().unwrap_or_else(|| format!("{a:#x}")),
+        }
+    }
+
+    /// 只读节里的地址 ⇒ 「rodata」：只要求两边都指向只读常量。⚠ ⛔ 按名字（llc 的 private 常量 `.Lalloc_…` 链接后
+    /// 没有符号，riscvc 的有）、⛔ 按内容（没有符号就不知道对象多大，读多读少两边不一样）。常量本身的字节由
+    /// 数据段的对拍（lit / llc_vs_llc 的全局比较、ld_vs_lld）另外覆盖。
+    fn constant(&self, a: u32) -> Option<String> {
+        self.rodata.iter().any(|(at, size)| (*at..at + size).contains(&a)).then(|| String::from("rodata"))
     }
 
     /// 全局数据里的指针（对齐的字、落在某个符号上）换成「符号+偏移」的哈希：两边布局不同，地址不能直接比。
@@ -207,7 +264,8 @@ impl Image {
         bytes
     }
 
-    fn call(&self, entry: u32, sig: &Sig, xs: &[u32], fs: &[u32], bufs: &[(u32, Vec<u8>)], common: &BTreeSet<&str>) -> Option<Outcome> {
+    #[allow(clippy::too_many_arguments, reason = "一次调用的全部输入")]
+    fn call(&self, entry: u32, sig: &Sig, xs: &[u32], fs: &[u32], bufs: &[(u32, Vec<u8>)], common: &BTreeSet<&str>, steps: u64) -> Option<Outcome> {
         let mut cpu = self.cpu.clone();
         for (addr, data) in bufs {
             cpu.mem.write(*addr, data);
@@ -215,7 +273,7 @@ impl Image {
         cpu.x[10..10 + xs.len()].copy_from_slice(xs);
         cpu.f[10..10 + fs.len()].copy_from_slice(fs);
         cpu.x[2] = STACK;
-        let stop = cpu.run(entry, RET, STEPS);
+        let stop = cpu.run(entry, RET, steps);
         let ret = match (sig.ret, &stop) {
             (_, Stop::Limit) => return None,
             (_, Stop::Trap(_)) | (None, _) => String::new(),
@@ -233,7 +291,7 @@ impl Image {
             out
         };
         let bufs = bufs.iter().map(|(at, d)| read(*at, u32::try_from(d.len()).unwrap())).collect();
-        let globals = self.data.iter().filter(|(_, _, name)| common.contains(name.as_str())).map(|(at, n, name)| (name.clone(), read(*at, *n))).collect();
+        let globals = self.data.iter().filter(|(_, _, name, w)| *w && common.contains(name.as_str())).map(|(at, n, name, _)| (name.clone(), read(*at, *n))).collect();
         Some(Outcome { stop: Outcome::trap(&stop), ret, bufs, globals })
     }
 }
@@ -248,7 +306,7 @@ pub struct Pair<'i> {
 
 impl<'i> Pair<'i> {
     pub fn new(ours: &'i Image, theirs: &'i Image) -> Self {
-        let names = |i: &'i Image| i.data.iter().map(|(_, _, n)| n.as_str()).collect::<BTreeSet<_>>();
+        let names = |i: &'i Image| i.data.iter().map(|(_, _, n, _)| n.as_str()).collect::<BTreeSet<_>>();
         Self { ours, theirs, common: names(ours).intersection(&names(theirs)).copied().collect() }
     }
 
@@ -290,7 +348,23 @@ impl<'i> Pair<'i> {
                     }
                 }
             }
-            let (Some(a), Some(b)) = (self.ours.call(ea, sig, &xs, &fs, &bufs, &self.common), self.theirs.call(eb, sig, &xs, &fs, &bufs, &self.common)) else { break };
+            // 跑到步数上限：两边都到 ⇒ 这个函数后面不比了（慢不算错）；只有一边到 ⇒ 那边放大 SLOW 倍重跑（两边快慢
+            // 不同：riscvc 的 O0 排序比 llc 慢几倍），⚠ 还到 ⇒ 结果不同（死循环 —— 改坏的 gcd 就是这样，⛔ 当成「慢」放过）
+            let run = |img: &Image, e: u32, steps: u64| img.call(e, sig, &xs, &fs, &bufs, &self.common, steps);
+            let (a, b) = (run(self.ours, ea, STEPS), run(self.theirs, eb, STEPS));
+            let (a, b) = match (a, b) {
+                (None, Some(b)) => (run(self.ours, ea, STEPS * SLOW), Some(b)),
+                (Some(a), None) => (Some(a), run(self.theirs, eb, STEPS * SLOW)),
+                ab => ab,
+            };
+            let (a, b) = match (a, b) {
+                (Some(a), Some(b)) => (a, b),
+                (None, None) => break,
+                (a, b) => {
+                    let show = |o: &Option<Outcome>| o.as_ref().map_or_else(|| String::from("跑到步数上限"), |o| format!("{} {}", o.stop, o.ret));
+                    return Err(format!("{}({})：riscvc {}  ≠  llc {}", sig.name, shown.join(", "), show(&a), show(&b)));
+                }
+            };
             runs += 1;
             // 全局：原样相等，或把指针换成符号后相等
             let same = a.stop == b.stop
@@ -305,7 +379,7 @@ impl<'i> Pair<'i> {
                 } else {
                     let diff = a.globals.iter().zip(&b.globals).find(|(x, y)| x != y).map_or_else(String::new, |((name, x), (_, y))| {
                         let at = x.iter().zip(y).position(|(p, q)| p != q).unwrap_or(0);
-                        format!("{name}+{at:#x}：{:02x?} ≠ {:02x?}", &x[at..x.len().min(at + 8)], &y[at..y.len().min(at + 8)])
+                        format!("{name}+{at:#x}：{:02x?} ≠ {:02x?}", &x[at..x.len().min(at + 16)], &y[at..y.len().min(at + 16)])
                     });
                     format!("全局 {diff} 不同")
                 };

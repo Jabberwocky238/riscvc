@@ -1,0 +1,22 @@
+# 单核裸机的运行时（tools/rust-build.sh 链进每个程序）：没有 A 扩展时 core 的原子操作调的 __atomic_*。
+[package]
+name = "rvrt"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+# rlib：⛔ staticlib（那要自己的 panic_handler，和程序的 rust_begin_unwind 重名）
+crate-type = ["rlib"]
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+debug = false
+
+[profile.dev]
+panic = "abort"
+debug = false
+
+[workspace]

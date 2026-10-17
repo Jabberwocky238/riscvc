@@ -95,6 +95,27 @@ Coming from LLVM IR instead of MLIR:
 mlir-translate --import-llvm x.ll | mlir-opt --mlir-print-op-generic > x.mlir
 ```
 
+### Rust as the front end
+
+`rustc` (stable **1.98.1**, whose LLVM is 22.1.8) emits LLVM IR; `riscvc` does the rest. `tools/rust-build.sh` builds
+a `no_std`, `panic = "abort"` Cargo project for `riscv32imafc-unknown-none-elf` minus `a` / `c` (= riscvc's default
+rv32imf + zicsr, `ilp32f`) with `-Zbuild-std=core`, converts every crate's IR to generic-form MLIR, compiles them with
+`riscvc llc -j`, and links them with a start-up stub (set `sp`, call the entry, `ebreak`) into an ELF:
+
+```bash
+tools/rust-build.sh path/to/Cargo.toml <entry function> app.elf [O0|O2]
+```
+
+- `core` and the runtime `tests/rust/rt` are compiled by riscvc too. The runtime provides the single-core
+  `__atomic_*` functions that `core` calls when there is no A extension (plain loads and stores; not for multi-core
+  or interrupt handlers).
+- `compiler_builtins` (soft-float, `f128`, `memcpy` …) is compiled by riscvc as well; `RISCVC_BUILTINS=llc`
+  compiles that one crate with `llc` instead (for bisecting).
+- Not supported from Rust: inline assembly other than the empty `asm!("")` that `core::hint::black_box` uses,
+  `global_asm!`, unwinding (`panic = "unwind"`), `std`.
+- The upstream sources are pinned as the super-repository submodule `jw238/rust` (tag `1.98.1`); the scripts check
+  that rustup's `rust-src` is identical to it.
+
 ## Quick start (command line)
 
 A function in MLIR (`add.mlir`):
@@ -422,6 +443,7 @@ it replaces:
 | Code generator | `llc` compiles the `.ll`, `riscvc llc` compiles the `.mlir` converted from it; both are linked and run in `riscvc::sim` with the same arguments; return values and memory behind pointer arguments must match |
 | End to end | compiler-rt builtins unit tests (which have `main` and self-check) are built both ways and run to completion; exit codes must match |
 | LLVM's own tests | `llvm/test/CodeGen/RISCV/*.ll`, `mlir/test/Target/LLVMIR/Import/*.ll` and `mlir/test/Target/LLVMIR/*.mlir` (1,080 files) converted to generic-form `.mlir`, with llc's object file checked in: every function is compiled in isolation and, if it has a scalar signature, called with the same random arguments on both sides (return value, memory behind pointer arguments, global data objects). Expected failures are listed with a reason in `tests/fixtures/lit/xfail.txt`; an unlisted failure *and* a listed function that now passes both fail the test. Needs no LLVM at test time |
+| Rust front end | `tests/rust_vs_llc.rs`: rustc's IR for `tests/rust/src/lib.rs` (36 `extern "C"` entry points: iterators, sorting, `u128`, checked / saturating arithmetic, `dyn` traits, `core::fmt`, structs passed and returned by value, panics) , `core` and `compiler_builtins` is compiled both by riscvc and by llc (objects checked in by `tools/rust.sh`), each side linked with its own three crates; every entry point is called with the same random arguments, O0 and O2, and must match with **no** expected failures. `tests/rust_e2e.rs`: `tools/rust-build.sh` builds a self-checking program (`tests/rust/examples/selfcheck`) and runs it to completion in the simulator |
 | Command line | `tests/cli.rs` runs the `riscvc` binary: the Quick start above end to end (result checked in the simulator), parallel = serial byte for byte, bad input exits with status 1 and a message (never a panic) |
 
 ## Status
@@ -440,7 +462,7 @@ As of 2026-10-15:
 | Division by constants | shifts / magic-number multiply (same as LLVM's BuildUDIV / BuildSDIV): 496 functions (udiv / urem / sdiv / srem × i32 / i16 / i8 × 40-odd divisors), 209,806 calls checked against exact arithmetic |
 | Code size (`.text`, both `-mattr=-relax`, `tools/size_vs_llc.py`) | compiler-rt O2 1.18× llc, O0 0.98×; `tests/programs` O2 1.09×, O0 0.95× |
 | MC fixtures | 277 of 279 identical to llvm-mc (with and without relaxation; branch lengths are settled at layout time, like MC relaxation); remaining: alignment after a relaxable instruction (`Relocations-align-after-relax`), cross-section `.uleb128` |
-| LLVM's own tests | 1,080 files from `CodeGen/RISCV` and MLIR `Target/LLVMIR` (9,897 `llvm.func`), 164,208 calls compared with llc; 315 expected failures listed in `tests/fixtures/lit/xfail.txt`: 45 functions not compiled (all vector operations), 129 files not converted (inline asm, `invoke`, `call_intrinsic`, …), 136 result differences, each checked by hand against the IR (and against a Rust reference where the poison boundary was not obvious): all are poison / undefined inputs or information lost by the MLIR importer; the 14 wrong-code bugs this comparison found are fixed, 5 link failures |
+| LLVM's own tests | 1,080 files from `CodeGen/RISCV` and MLIR `Target/LLVMIR` (9,897 `llvm.func`), 200,347 calls compared with llc; 362 expected failures listed in `tests/fixtures/lit/xfail.txt`: 45 functions not compiled (all vector operations), 121 files not converted (inline asm with a body, `invoke`, vectors, …), 191 result differences, each checked by hand against the IR: poison / undefined inputs, information lost by the MLIR importer, and llc folding a libm call (`floorf` & co.) into a single `fcvt` with a rounding mode where riscvc calls libm (which the comparison image does not have); 1 wrong-code bug in codegen marked `【codegen bug】`; 5 link failures. The count rose from 295 because the comparison got stricter: a function that never returns on one side only (or calls a missing symbol) is a difference now instead of being skipped, and every function gets its own random seed |
 
 Wide integers (`i128`, `i256`, any width): word-by-word like LLVM's integer expansion (variable shifts through the
 stack, division as an inline shift-subtract loop); scalars wider than 2×XLEN (wide integers, `fp128`) are passed by
@@ -471,6 +493,7 @@ tools/corpus.sh          # compiler-rt builtins -> target/corpus/{s,ll,mlir}
 tools/programs.sh        # regenerate tests/fixtures/{unit,builtins,programs,support} (checked in; ONLY=programs: just programs/)
 tools/fixtures.py        # regenerate tests/fixtures/mc (checked in)
 tools/lit.sh             # regenerate tests/fixtures/lit (checked in; LLVM IR kept in target/lit for debugging)
+tools/rust.sh            # regenerate tests/fixtures/rust (checked in; needs rustc 1.98.1)
 cargo test --release
 ```
 

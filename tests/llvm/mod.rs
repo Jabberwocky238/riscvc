@@ -22,6 +22,11 @@ impl Llvm {
         }
     }
 
+    /// 工具所在的目录。
+    pub fn bin(&self) -> &std::path::Path {
+        &self.bin
+    }
+
     /// 跑一个 LLVM 工具，stdin 喂 `input`，回 (stdout, stderr)。
     pub fn run(&self, tool: &str, args: &[&str], input: &str) -> (String, String) {
         let mut child = Command::new(self.bin.join(tool)).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect(tool);

@@ -12,18 +12,19 @@ codegen/blockaddress 解析：`llvm.blockaddress`：test_blockaddress：不支�
 codegen/branch-relaxation-rv32 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
 codegen/branch-relaxation-rv32e 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
 codegen/branch-relaxation-rv64 解析：`llvm.inline_asm`：relax_bcc：不支持的 op `llvm.inline_asm`
+codegen/branch_zero/bar 结果：【poison：分支条件是 icmp eq ptr poison, null；一边走到 unreachable（陷入），一边进无限循环（跑到步数上限），都合语义】bar(0x2c6e)：riscvc 跑到步数上限  ≠  llc 陷入 unimp
+codegen/branch_zero/foo 结果：【poison：分支条件是 icmp eq ptr poison, null；一边走到 unreachable（陷入），一边进无限循环（跑到步数上限），都合语义】foo(0x46f)：riscvc 跑到步数上限  ≠  llc 陷入 unimp
 codegen/callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
 codegen/calling-conv-preserve-most 解析：`llvm.inline_asm`：preserve_mostcc3：不支持的 op `llvm.inline_asm`
 codegen/calling-conv-vector-float/callee_v2f32 编译：指令选择：callee_v2f32：整数运算不支持 Vector(2, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
 codegen/calling-conv-vector-float/callee_v4f32 编译：指令选择：callee_v4f32：整数运算不支持 Vector(4, Ty(6))（Bin(FAdd, ValId(0), ValId(1))）
+codegen/callsite-emit-calleetypeid-tailcall/check_tailcall 域外：【不可比：间接调用随机缓冲区里的字节（两边一个陷入的指令字不同）】check_tailcall(ptr0, 0x39)：riscvc 陷入 0x7a73ffe8   ≠  llc 陷入 unimp
 codegen/clear-cache 解析：`llvm.call_intrinsic`：foo：不支持的 op `llvm.call_intrinsic`
 codegen/clmul 解析：`llvm.call_intrinsic`：clmul_i4：不支持的 op `llvm.call_intrinsic`
 codegen/compress-inline-asm 解析：`llvm.inline_asm`：compress_test：不支持的 op `llvm.inline_asm`
 codegen/condbinops/ashr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】ashr64(0xad71a19a25626f15, 0xffffffffffffffff, 0x1)：riscvc Returned 0xffffffffffffffff  ≠  llc Returned 0xffffffff5ae
 codegen/condbinops/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64(0xffffffffffffffff, 0xa17b35a1dcb010ac, 0x1)：riscvc Returned 0xfffff  ≠  llc Returned 0xfffffffffffff
 codegen/condbinops/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x7fffffff, 0x1fcb8c8914f90914, 0x1)：riscvc Returned 0x7fffffff00000  ≠  llc Returned 0xfff0000000000000
-codegen/ctlz-cttz-ctpop/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
-codegen/ctlz-cttz-ctpop/test_cttz_i64_zero_undef 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0x0)：riscvc Returned 0x40  ≠  llc Returned 0x20
 codegen/double-convert/fcvt_w_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i16(-1123368718087100800000000000000000000000000000000000000000000000)：riscvc Returned 0x0  ≠  llc Returned
 codegen/double-convert/fcvt_w_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_w_s_i8(376.0000000021074)：riscvc Returned 0x78  ≠  llc Returned 0x178
 codegen/double-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i16(2163380399120945800000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -42,11 +43,9 @@ codegen/fastcc-half 解析：`llvm.extractelement`：callee：不支持的 op `l
 codegen/fastcc-int 解析：`llvm.extractelement`：callee：不支持的 op `llvm.extractelement`
 codegen/fastcc-without-f-reg 解析：`llvm.extractelement`：callee_half_32：不支持的 op `llvm.extractelement`
 codegen/fixups-diff 解析：`llvm.inline_asm`：main：不支持的 op `llvm.inline_asm`
-codegen/float-arith/fmadd_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fmadd_s_contract(-308.03195, 596.08826, -645.0741)：riscvc Returned 0xc833f0d4  ≠  llc Returned 0xc833f0d3
-codegen/float-arith/fmsub_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fmsub_s_contract(-28.003525, 552.0523, 509.03436)：riscvc Returned 0xc67981c7  ≠  llc Returned 0xc67981c8
 codegen/float-arith/fnmadd_nsz 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】fnmadd_nsz(583023200000000000000000000000000000, 589.0227, NaN)：riscvc Returned 0xffc00000  ≠  llc Returned 0x7fc0000
 codegen/float-arith/fnmadd_s_contract 域外：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】fnmadd_s_contract(-258.05145, 674.03986, 768.0515)：riscvc Returned 0x48291c3b  ≠  llc Returned 0x48291c3a
-codegen/float-bit-preserving-dagcombines/bitcast_double_or 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_double_or(NaN, -0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+codegen/float-arith/fnmsub_s_contract 域外：【允许的差异：contract 融合乘加，舍入不同】fnmsub_s_contract(0.0000000000000000000000000000000000000001, 975.0764, 0.0000000000000000000000000000000000000117549
 codegen/float-bit-preserving-dagcombines/bitcast_double_xor 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_double_xor(NaN, 42.00000000033805)：riscvc Returned 0x7ff8000000000000  ≠  llc Returned 0xfff8000000000000
 codegen/float-bit-preserving-dagcombines/bitcast_or 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_or(NaN, 775667140000000000000000)：riscvc Returned 0x7fc00000  ≠  llc Returned 0xffc00000
 codegen/float-bit-preserving-dagcombines/bitcast_xor 域外：【允许的差异：NaN 的符号 / payload 不确定（LLVM 不规定）】bitcast_xor(NaN, 0.5)：riscvc Returned 0x7fc00000  ≠  llc Returned 0xffc00000
@@ -56,30 +55,33 @@ codegen/float-convert/fcvt_wu_s_i16 域外：【poison：fptosi / fptoui 结果�
 codegen/float-convert/fcvt_wu_s_i8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】fcvt_wu_s_i8(257.04236)：riscvc Returned 0x1  ≠  llc Returned 0x101
 codegen/float-intrinsics 解析：`llvm.intr.exp10`：exp10_f32：不支持的 op `llvm.intr.exp10`
 codegen/float-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f32：不支持的 op `llvm.intr.minimum`
-codegen/float-round-conv/test_ceil_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_si16(7207245400000000000)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
-codegen/float-round-conv/test_ceil_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_si8(861.0217)：riscvc Returned 0x5e  ≠  llc Returned 0x35e
-codegen/float-round-conv/test_ceil_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_ui16(117452990000000000000000000000000000000)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_ceil_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_ceil_ui8(2323.0955)：riscvc Returned 0x14  ≠  llc Returned 0x914
-codegen/float-round-conv/test_floor_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_si16(-2147484000)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
-codegen/float-round-conv/test_floor_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_si8(-inf)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
-codegen/float-round-conv/test_floor_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_ui16(4294967300)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_floor_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_floor_ui8(2147483600)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
-codegen/float-round-conv/test_round_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_si16(inf)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
-codegen/float-round-conv/test_round_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_si8(inf)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
-codegen/float-round-conv/test_round_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_ui16(inf)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_round_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_round_ui8(1109072340000000000000000000)：riscvc Returned 0xff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_roundeven_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_si16(-inf)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
-codegen/float-round-conv/test_roundeven_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_si8(917.1242)：riscvc Returned 0xffffff95  ≠  llc Returned 0x395
-codegen/float-round-conv/test_roundeven_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_ui16(NaN)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_roundeven_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_roundeven_ui8(895.0257)：riscvc Returned 0x7f  ≠  llc Returned 0x37f
-codegen/float-round-conv/test_trunc_si16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_si16(4294967300)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
-codegen/float-round-conv/test_trunc_si8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_si8(502.0581)：riscvc Returned 0xfffffff6  ≠  llc Returned 0x1f6
-codegen/float-round-conv/test_trunc_ui16 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_ui16(inf)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
-codegen/float-round-conv/test_trunc_ui8 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】test_trunc_ui8(565.0196)：riscvc Returned 0x35  ≠  llc Returned 0x235
+codegen/float-round-conv/test_ceil_si16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_ceil_si16(-209941980000000000000000000000)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_ceil_si8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_ceil_si8(-585.11615)：riscvc Returned 0xffffffb7  ≠  llc Returned 0xfffffdb7
+codegen/float-round-conv/test_ceil_ui16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_ceil_ui16(340282350000000000000000000000000000000)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_ceil_ui8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_ceil_ui8(11061822000000)：riscvc Returned 0xff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_floor_si16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_floor_si16(2147483600)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_floor_si8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_floor_si8(-409.03485)：riscvc Returned 0x66  ≠  llc Returned 0xfffffe66
+codegen/float-round-conv/test_floor_ui16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_floor_ui16(4294967300)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_floor_ui8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_floor_ui8(552.09625)：riscvc Returned 0x28  ≠  llc Returned 0x228
+codegen/float-round-conv/test_round_si16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_round_si16(1538870600000000000000000000)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_round_si8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_round_si8(-418.0353)：riscvc Returned 0x5e  ≠  llc Returned 0xfffffe5e
+codegen/float-round-conv/test_round_ui16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_round_ui16(1423210700000000000000000000)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_round_ui8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_round_ui8(NaN)：riscvc Returned 0xff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_roundeven_si16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_roundeven_si16(NaN)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_roundeven_si8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_roundeven_si8(-908.1186)：riscvc Returned 0x74  ≠  llc Returned 0xfffffc74
+codegen/float-round-conv/test_roundeven_ui16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_roundeven_ui16(16777216)：riscvc Returned 0x0  ≠  llc Returned 0x1000000
+codegen/float-round-conv/test_roundeven_ui8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_roundeven_ui8(2147483600)：riscvc Returned 0x0  ≠  llc Returned 0x80000000
+codegen/float-round-conv/test_trunc_si16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_trunc_si16(1745219800000000000)：riscvc Returned 0xffffffff  ≠  llc Returned 0x7fffffff
+codegen/float-round-conv/test_trunc_si8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_trunc_si8(16777216)：riscvc Returned 0x0  ≠  llc Returned 0x1000000
+codegen/float-round-conv/test_trunc_ui16 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_trunc_ui16(381362160000000000000000000)：riscvc Returned 0xffff  ≠  llc Returned 0xffffffff
+codegen/float-round-conv/test_trunc_ui8 域外：【poison：取整后 fptosi / fptoui 到 i8 / i16 放不下（越界、NaN），逐项核过实参都在定义域外】test_trunc_ui8(639.00684)：riscvc Returned 0x7f  ≠  llc Returned 0x27f
 codegen/flt-rounds 解析：`llvm.call_intrinsic`：test_flt_rounds：不支持的 op `llvm.call_intrinsic`
+codegen/fmax-fmin/maxnum_f64_nnan 结果：【允许的差异：double 的 maxnum / minnum，llc 内联成软浮点比较，riscvc 调 libm fmax / fmin，对拍库里没有 ⇒ 桩陷入】maxnum_f64_nnan(4294967296, NaN)：riscvc 陷入 unimp   ≠  llc Returned 0x7ff8000000000000
+codegen/fmax-fmin/minnum_f64_fast 结果：【允许的差异：double 的 maxnum / minnum，llc 内联成软浮点比较，riscvc 调 libm fmax / fmin，对拍库里没有 ⇒ 桩陷入】minnum_f64_fast(-222581412775343800000000000000000000000, 0.000000000000000000000000000000000000000000000000000000000
 codegen/fold-addi-loadstore 解析：`llvm.blockaddress`：load_ba_1：不支持的 op `llvm.blockaddress`
 codegen/fp-fcanonicalize 解析：`llvm.call_intrinsic`：fcanonicalize_f16：不支持的 op `llvm.call_intrinsic`
 codegen/fp128 解析：`llvm.intr.maximum`：fmaximum：不支持的 op `llvm.intr.maximum`
+codegen/fpclamptosat/stest_f32i32 域外：【poison：fptosi 结果放不下（NaN）】stest_f32i32(NaN)：riscvc Returned 0xffffffff  ≠  llc Returned 0x0
 codegen/fpclamptosat/stest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】stest_f32i32_mm(-inf)：riscvc Returned 0x1  ≠  llc Returned 0x80000000
 codegen/fpclamptosat/ustest_f32i32 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32(-186055700000000000000)：riscvc Returned 0x1  ≠  llc Returned 0x0
 codegen/fpclamptosat/ustest_f32i32_mm 域外：【poison：fptosi / fptoui 结果放不下（越界、NaN、fptoui 负数）】ustest_f32i32_mm(inf)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
@@ -92,9 +94,12 @@ codegen/half-convert 解析：`llvm.call_intrinsic`：fcvt_si_h_sat：不支持�
 codegen/half-intrinsics 解析：`llvm.intr.exp10`：exp10_f16：不支持的 op `llvm.intr.exp10`
 codegen/half-maximum-minimum 解析：`llvm.intr.minimum`：fminimum_f16：不支持的 op `llvm.intr.minimum`
 codegen/half-round-conv-sat 解析：`llvm.call_intrinsic`：test_floor_si32：不支持的 op `llvm.call_intrinsic`
+codegen/hoist-global-addr-base/big_offset_neg_lui_tail 结果：【poison：inbounds GEP 对外部 @bar（[0 x i8]）取负偏移，越界；@bar 两边都解析到桩，返回的是「桩地址 − 常数」，两边桩布局不同】big_offset_neg_lui_tail()：riscvc Returned 0xe508  ≠  llc Returned 0xe530
+codegen/hoist-global-addr-base/neg_offset 结果：【poison：inbounds GEP 对外部 @bar（[0 x i8]）取负偏移，越界；@bar 两边都解析到桩，返回的是「桩地址 − 常数」，两边桩布局不同】neg_offset()：riscvc Returned 0xe509  ≠  llc Returned 0xe531
+codegen/hoist-global-addr-base/neg_offset_not_simm32 结果：【poison：inbounds GEP 对外部 @bar（[0 x i8]）取负偏移，越界；@bar 两边都解析到桩，返回的是「桩地址 − 常数」，两边桩布局不同】neg_offset_not_simm32()：riscvc Returned 0x8000ffb3  ≠  llc Returned 0x8000ffdb
+codegen/hoist-global-addr-base/offset_addi_addi_neg 结果：【poison：inbounds GEP 对外部 @bar（[0 x i8]）取负偏移，越界；@bar 两边都解析到桩，返回的是「桩地址 − 常数」，两边桩布局不同】offset_addi_addi_neg()：riscvc Returned 0xf568  ≠  llc Returned 0xf590
 codegen/indirectbr 解析：`llvm.indirectbr`：indirectbr：不支持的 op `llvm.indirectbr`
 codegen/inline-asm-abi-names 解析：`llvm.inline_asm`：explicit_register_x0：不支持的 op `llvm.inline_asm`
-codegen/inline-asm-clobbers 解析：`llvm.inline_asm`：testcase：不支持的 op `llvm.inline_asm`
 codegen/inline-asm-f-abi-names 解析：`llvm.inline_asm`：explicit_register_f0：不支持的 op `llvm.inline_asm`
 codegen/inline-asm-f-constraint-f 解析：`llvm.inline_asm`：constraint_f_float：不支持的 op `llvm.inline_asm`
 codegen/inline-asm-f-modifier-N 解析：`llvm.inline_asm`：constraint_f_modifier_N_float：不支持的 op `llvm.inline_asm`
@@ -118,8 +123,6 @@ codegen/large-stack 解析：`llvm.inline_asm`：test_emergency_spill_slot：不
 codegen/libcall-tail-calls 解析：`llvm.intr.llround`：llround_f32：不支持的 op `llvm.intr.llround`
 codegen/llvm.exp10 解析：`llvm.intr.exp10`：exp10_v1f16：不支持的 op `llvm.intr.exp10`
 codegen/llvm.frexp 解析：`llvm.intr.frexp`：test_frexp_f16_i32：不支持的 op `llvm.intr.frexp`
-codegen/load-store-pair 解析：`llvm.inline_asm`：testi：不支持的 op `llvm.inline_asm`
-codegen/loop-strength-reduce-add-cheaper-than-mul/test 域外：【UB：i 为负时下标 zext 成巨大的数，store 写出 @flags2（8193 字节）的边界；⛔ 移位问题】test(0xfffffffe)：riscvc Trap(4244692480)   ≠  llc Trap(32768)
 codegen/lpad 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
 codegen/machinelicm-address-pseudos 链接：codegen/machinelicm-address-pseudos：.text 里不支持的重定位类型 21
 codegen/mask-variable-shift/mask_pair_64 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】mask_pair_64(0xffffffffffffffff, 0x7746434ecbf2c43b)：riscvc Returned 0xf800000000000000  ≠  llc Returned 0xfffffffff8
@@ -158,7 +161,6 @@ codegen/readcyclecounter 解析：`llvm.call_intrinsic`：test_builtin_readcycle
 codegen/readsteadycounter 解析：`llvm.call_intrinsic`：test_builtin_readsteadycounter：不支持的 op `llvm.call_intrinsic`
 codegen/reduction-formation 解析：`llvm.extractelement`：reduce_sum_4xi32：不支持的 op `llvm.extractelement`
 codegen/relative-reloc 解析：MLIR：初值里的 Sub 不支持
-codegen/remat 解析：`llvm.inline_asm`：remat_load：不支持的 op `llvm.inline_asm`
 codegen/repeated-fp-divisors/two_fdivs 结果：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】two_fdivs(-2240998814143733100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 codegen/reserved-reg-errors 解析：`llvm.inline_asm`：clobber：不支持的 op `llvm.inline_asm`
 codegen/rotl-rotr/rotl_32_mask_or_64_or_32 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotl_32_mask_or_64_or_32(0x5, 0x37)：riscvc Returned 0x2800000  ≠  llc Returned 0x0
@@ -170,12 +172,14 @@ codegen/rotl-rotr/rotl_64_zext 域外：【poison：移位量 ≥ 位宽（含 6
 codegen/rotl-rotr/rotr_32_mask_or_64_or_32 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_32_mask_or_64_or_32(0x1c, 0x7fffffff)：riscvc Returned 0x38  ≠  llc Returned 0x0
 codegen/rotl-rotr/rotr_64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64(0x3d, 0x0)：riscvc Returned 0x3d  ≠  llc Returned 0x3d0000003d
 codegen/rotl-rotr/rotr_64_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_mask(0xcf6a9134486033e, 0x2a12e5c70fa59782)：riscvc Returned 0x833daa44d12180cf  ≠  llc Returned 0x80000000033
+codegen/rotl-rotr/rotr_64_mask_and_127_and_63 域外：【poison：移位量 ≥ 位宽（y & 127 可达 64..127）；i64 移位量 0..63 已对 Rust 参考实现核过】rotr_64_mask_and_127_and_63(0x3c, 0x29474e70838460c1)：riscvc Returned 0x1e  ≠  llc Returned 0x0
 codegen/rotl-rotr/rotr_64_mask_or_128_or_64 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_mask_or_128_or_64(0x6ce4de9264e941, 0x7f)：riscvc Returned 0xd9c9bd24c9d282  ≠  llc Returned 0x0
 codegen/rotl-rotr/rotr_64_zext 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】rotr_64_zext(0xfffffffffffffffe, 0x1f4201d7)：riscvc Returned 0xfffffdffffffffff  ≠  llc Returned 0xfffffffffffffdff
 codegen/rv32-inline-asm-pairs 解析：`llvm.inline_asm`：test_Pr_wide_scalar_simple：不支持的 op `llvm.inline_asm`
 codegen/rv32p 解析：`llvm.intr.sshl.sat`：shlsat_i8：不支持的 op `llvm.intr.sshl.sat`
 codegen/rv32zbb-zbkb/not_shl_one_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】not_shl_one_i64(0x50308b26bf26cceb)：riscvc Returned 0xfffff7ffffffffff  ≠  llc Returned 0xfffffffffffff7ff
-codegen/rv32zbb/ctpop32_ne_one_nonzero 域外：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
+codegen/rv32zbb/ctpop32_eq_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_eq_one_nonzero(0x0)：riscvc Returned 0x0  ≠  llc Returned 0x1
+codegen/rv32zbb/ctpop32_ne_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
 codegen/rv32zbb/ctpop_v2i32 编译：指令选择：ctpop_v2i32：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv32zbb/ctpop_v2i32_eq_one 编译：指令选择：ctpop_v2i32_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv32zbb/ctpop_v2i32_ne_one 编译：指令选择：ctpop_v2i32_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
@@ -195,8 +199,8 @@ codegen/rv64i-tricky-shifts/tricky_lshr 域外：【poison：移位量 ≥ 位�
 codegen/rv64i-tricky-shifts/tricky_shl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】tricky_shl(0x38, 0x93d210071f60fc11)：riscvc Returned 0x700000  ≠  llc Returned 0x0
 codegen/rv64xtheadbb/cttz_zero_undef_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
 codegen/rv64zbb-zbkb/not_shl_one_i64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】not_shl_one_i64(0xdf5622fda0ba197a)：riscvc Returned 0xfbffffffffffffff  ≠  llc Returned 0xfffffffffbffffff
+codegen/rv64zbb/ctpop32_eq_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_eq_one_nonzero(0x0)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/rv64zbb/ctpop32_ne_one_nonzero 结果：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop32_ne_one_nonzero(0x0)：riscvc Returned 0x1  ≠  llc Returned 0x0
-codegen/rv64zbb/ctpop64_eq_one_nonzero 域外：【poison：违反返回值的 range 属性（ctpop(0) 不在 [1, 33)）】ctpop64_eq_one_nonzero(0x0)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/rv64zbb/ctpop_v2i32 编译：指令选择：ctpop_v2i32：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/ctpop_v2i32_eq_one 编译：指令选择：ctpop_v2i32_eq_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/ctpop_v2i32_ne_one 编译：指令选择：ctpop_v2i32_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
@@ -207,7 +211,7 @@ codegen/rv64zbb/ctpop_v2i64_eq_one 编译：指令选择：ctpop_v2i64_eq_one：
 codegen/rv64zbb/ctpop_v2i64_ne_one 编译：指令选择：ctpop_v2i64_ne_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/ctpop_v2i64_ugt_one 编译：指令选择：ctpop_v2i64_ugt_one：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
 codegen/rv64zbb/ctpop_v2i64_ult_two 编译：指令选择：ctpop_v2i64_ult_two：向量的 Ctpop 还没做（Intr(Ctpop, [ValId(0)])）
-codegen/rv64zbb/cttz_zero_undef_i32 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
+codegen/rv64zbb/cttz_zero_undef_i32 结果：【poison：cttz(0, zero_poison)】cttz_zero_undef_i32(0x0)：riscvc Returned 0x20  ≠  llc Returned 0x0
 codegen/rv64zbs/bclr_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bclr_i64_no_mask(0xffff, 0x7830ae7e279793c0)：riscvc Returned 0xfffe  ≠  llc Returned 0xffff
 codegen/rv64zbs/bext_i64_no_mask 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】bext_i64_no_mask(0xffff, 0x52e4c708d9892c25)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/rv64zbs/binv_i64_no_mask 域外：【poison：nsw / nuw 溢出，或移位量 ≥ 位宽】binv_i64_no_mask(0x8f470954cf1323f6, 0x3cd89c392debca93)：riscvc Returned 0x8f470954cf1b23f6  ≠  llc Returned 0x8f4f09
@@ -218,7 +222,7 @@ codegen/rv64zfh-half-intrinsics 解析：`llvm.intr.llrint`：llrint_f16：不�
 codegen/rv64zfhmin-half-intrinsics 解析：`llvm.intr.llrint`：llrint_f16：不支持的 op `llvm.intr.llrint`
 codegen/rvp-ext-rv32 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
 codegen/rvp-ext-rv64 解析：`llvm.extractelement`：test_extract_vector_16：不支持的 op `llvm.extractelement`
-codegen/saverestore 解析：`llvm.inline_asm`：callee_saved_fp：不支持的 op `llvm.inline_asm`
+codegen/saverestore 解析：`llvm.func`：interrupt：函数属性 `interrupt` 不支持
 codegen/select/select_ashr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_ashr_3(0x0, 0xffff)：riscvc Returned 0x3f  ≠  llc Returned 0xffff
 codegen/select/select_lshr_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_lshr_3(0x0, 0x40e8f2f4)：riscvc Returned 0x103a3c  ≠  llc Returned 0x40e8f2f4
 codegen/select/select_shl_3 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_shl_3(0x0, 0x3e)：riscvc Returned 0xf800  ≠  llc Returned 0x3e
@@ -232,15 +236,12 @@ codegen/shifts/lshr64 域外：【poison：移位量 ≥ 位宽（含 64−y 在
 codegen/shifts/lshr64_minsize 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_minsize(0xb4898d17257d794, 0x80000000)：riscvc Returned 0xb4898d17257d794  ≠  llc Returned 0xb4898d17b5fdfd5
 codegen/shifts/lshr64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】lshr64_shamt32(0x40efb830d6bb1d10, 0x80000000)：riscvc Returned 0x40efb830d6bb1d10  ≠  llc Returned 0x40efb830
 codegen/shifts/shl64 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64(0x8, 0xb8592bc868ce0195)：riscvc Returned 0x1000000  ≠  llc Returned 0x100000000000000
+codegen/shifts/shl64_minsize 域外：【poison：移位量 ≥ 位宽（0x80000000）；i64 移位量 0..63 已对 Rust 参考实现核过】shl64_minsize(0x1, 0x80000000)：riscvc Returned 0x1  ≠  llc Returned 0x100000001
 codegen/shifts/shl64_shamt32 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】shl64_shamt32(0x27, 0xdf5d93ae)：riscvc Returned 0x9c00000000000  ≠  llc Returned 0x9c000
-codegen/shl-cttz/shl_cttz_constant_i32 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_constant_i32(0x0)：riscvc Returned 0x4  ≠  llc Returned 0x0
 codegen/shl-cttz/shl_cttz_constant_i64 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_constant_i64(0x0)：riscvc Returned 0x4  ≠  llc Returned 0x400000000
-codegen/shl-cttz/shl_cttz_i64 结果：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】shl_cttz_i64(0x31, 0x0)：riscvc Returned 0x31  ≠  llc Returned 0x3100000000
 codegen/short-forward-branch-opt/select_sll 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sll(0x4685c7ec68d9a1f9, 0x9143326e75bd5115, 0x0, 0x0)：riscvc Returned 0xfd8d1b343f200000  ≠  llc Returned 0x3f
 codegen/short-forward-branch-opt/select_sra 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_sra(0x9ddc357a5210b102, 0x7fffffffffffffff, 0xcb2d42bfd788931c, 0x0)：riscvc Returned 0xffffffffffffffff  ≠  ll
 codegen/short-forward-branch-opt/select_srl 域外：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】select_srl(0x6ddf493bea42edf2, 0x1b454d08391ca48f, 0x80, 0x0)：riscvc Returned 0xdbbe9277d485  ≠  llc Returned 0xdbbe
-codegen/spill-fill-fold 解析：`llvm.inline_asm`：spill_i32_to_float：不支持的 op `llvm.inline_asm`
-codegen/spill-fpr-scalar 解析：`llvm.inline_asm`：spill_half：不支持的 op `llvm.inline_asm`
 codegen/sra-xor-sra/sra_xor_sra_overflow 结果：【poison：移位量 ≥ 位宽（含 64−y 在 y=0、y|64 恒越界、常数 42）；i64 移位量 0..63、rotl / rotr y∈1..63 已对 Rust 参考实现核过，全对】sra_xor_sra_overflow(0x39, 0x2b)：riscvc Returned 0x2b  ≠  llc Returned 0x0
 codegen/srem-seteq-illegal-types/test_srem_vec 编译：指令选择：test_srem_vec：整数运算不支持 Vector(3, Ty(17))（Bin(SRem, ValId(9), ValId(4))）
 codegen/srem-vector-lkk/combine_srem_sdiv 编译：指令选择：combine_srem_sdiv：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
@@ -250,7 +251,6 @@ codegen/srem-vector-lkk/dont_fold_srem_power_of_two 编译：指令选择：dont
 codegen/srem-vector-lkk/dont_fold_urem_i16_smax 编译：指令选择：dont_fold_urem_i16_smax：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
 codegen/srem-vector-lkk/fold_srem_vec_1 编译：指令选择：fold_srem_vec_1：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
 codegen/srem-vector-lkk/fold_srem_vec_2 编译：指令选择：fold_srem_vec_2：整数运算不支持 Vector(4, Ty(3))（Bin(SRem, ValId(0), ValId(1))）
-codegen/stack-folding 解析：`llvm.inline_asm`：test_sext_w：不支持的 op `llvm.inline_asm`
 codegen/tail-calls 解析：`llvm.func`：caller_irq：函数属性 `interrupt` 不支持
 codegen/thread-pointer 解析：`llvm.call_intrinsic`：thread_pointer：不支持的 op `llvm.call_intrinsic`
 codegen/tls-models 链接：codegen/tls-models：.text 里不支持的重定位类型 21
@@ -278,13 +278,10 @@ codegen/xcvmem 解析：`llvm.insertelement`：lb_ri_inc：不支持的 op `llvm
 codegen/xqccmp-callee-saved-gprs 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
 codegen/xqccmp-push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属性 `interrupt` 不支持
 codegen/xqcia 解析：`llvm.intr.ushl.sat`：shlusat：不支持的 op `llvm.intr.ushl.sat`
-codegen/xqcibm-cto-clo-brev/test_cttz_i32_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i32_zero_undef(0xffffffff)：riscvc Returned 0x20  ≠  llc Returned 0x0
 codegen/xqcibm-cto-clo-brev/test_cttz_i64_zero_undef 域外：【poison：cttz(0, zero_poison)；非零输入的移位已对参考实现核过】test_cttz_i64_zero_undef(0xffffffffffffffff)：riscvc Returned 0x40  ≠  llc Returned 0x20
-codegen/zdinx-spill 解析：`llvm.inline_asm`：foo：不支持的 op `llvm.inline_asm`
 codegen/zfh-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
 codegen/zfhmin-half-intrinsics 解析：`llvm.intr.lrint`：lrint_f16：不支持的 op `llvm.intr.lrint`
 codegen/zicfilp-indirect-branch 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
-codegen/zilsd-spill 解析：`llvm.inline_asm`：cmpxchg_i64_monotonic_monotonic：不支持的 op `llvm.inline_asm`
 import/basic 解析：`llvm.va_arg`：variadic_function：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
 import/blockaddress 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
 import/fastmath 解析：`llvm.intr.vector.reduce.fmin`：fastmath_intr：不支持的 op `llvm.intr.vector.reduce.fmin`

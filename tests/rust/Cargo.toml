@@ -1,0 +1,22 @@
+# Rust 作前端的对拍程序（tools/rust.sh 用 rustc 1.98.1 + build-std 编成 LLVM IR；⛔ 不是 riscvc 工作区的成员）
+[package]
+name = "rvprobe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+debug = false
+
+[profile.dev]
+panic = "abort"
+opt-level = 0
+debug = false
+
+[workspace]
