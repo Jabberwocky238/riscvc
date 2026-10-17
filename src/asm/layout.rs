@@ -233,8 +233,6 @@ impl Assembler<'_> {
         self.sections[section].pads[k].size = n;
     }
 
-    /// ⭐ `section` 里 `[at, at + old)` 换成 `new`，后面的一切往后挪。`seq`：恰在 `at` 的标号里，序号比它小的在前面、不挪
-    /// （对齐用；改写指令时 `at` 处的标号都在指令前面 ⇒ 给 `u64::MAX`）。
     /// 拼完子节之后再定：**由多个子节拼起来的**代码节里，但凡有可松弛项，> 2 的对齐
     /// 就一律按 `R_RISCV_ALIGN` 出 —— 同 llvm-mc，低编号子节里的对齐保守地当成可松弛的。
     /// ⛔ 只有一个子节的节不在此列，那种照 [`Assembler::align`] 当场的判据走。
@@ -260,6 +258,8 @@ impl Assembler<'_> {
         }
     }
 
+    /// ⭐ `section` 里 `[at, at + old)` 换成 `new`，后面的一切往后挪。`seq`：恰在 `at` 的标号里，序号比它小的在前面、不挪
+    /// （对齐用；改写指令时 `at` 处的标号都在指令前面 ⇒ 给 `u64::MAX`）。
     fn splice(&mut self, section: usize, at: u64, old: u64, new: &[u8], seq: u64) {
         let end = at + old;
         let delta = new.len() as i64 - old.cast_signed();
