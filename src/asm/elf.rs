@@ -27,6 +27,8 @@ struct OutSym {
 impl Assembler<'_> {
     /// 解析修补点、写 ELF。
     pub(super) fn finish(mut self) -> Result<Vec<u8>, Error> {
+        // ⛔ 必须在 layout 之前：对齐与跳转长度都按最终位置算。
+        self.merge_subsections();
         self.layout()?;
         // 可松弛点 / LEB 按起点排好（布局放宽时重记过；crosses 二分要有序）
         for s in &mut self.sections {

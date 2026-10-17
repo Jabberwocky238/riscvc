@@ -68,6 +68,8 @@ impl Default for Options {
 /// 节：名字、类型、标志、对齐、字节、修补点。
 pub struct Section {
     pub name: String,
+    /// `.text 1` 里那个 1。同名的各子节在 [`Assembler::merge_subsections`] 里按它升序拼起来。
+    pub subsec: u32,
     pub ty: u32,
     pub flags: u64,
     pub align: u64,
@@ -89,6 +91,27 @@ pub struct Section {
 impl Section {
     fn size(&self) -> u64 {
         if self.ty == object::elf::SHT_NOBITS { self.nobits } else { self.data.len() as u64 }
+    }
+
+    /// 把 `s` 接在自己后面，它记的各处偏移都加上 `delta`。
+    fn absorb(&mut self, mut s: Self, delta: u64) {
+        self.align = self.align.max(s.align);
+        self.data.append(&mut s.data);
+        self.nobits += s.nobits;
+        for f in &mut s.fixups {
+            f.offset += delta;
+        }
+        self.fixups.append(&mut s.fixups);
+        self.relax_items.extend(s.relax_items.iter().map(|&(a, b)| (a + delta, b + delta)));
+        self.leb_items.extend(s.leb_items.iter().map(|&(a, b)| (a + delta, b + delta)));
+        for g in &mut s.grows {
+            g.offset += delta;
+        }
+        self.grows.append(&mut s.grows);
+        for p in &mut s.pads {
+            p.offset += delta;
+        }
+        self.pads.append(&mut s.pads);
     }
 
     fn code(&self) -> bool {
@@ -230,7 +253,7 @@ impl<'e> Assembler<'e> {
             known: HashMap::new(),
         };
         // 同 llvm-mc：一开始只有 .text；.data / .bss 等源里真的切过去才建（空的也建），按第一次切换的次序
-        asm.switch(".text", None, None, None);
+        asm.switch(".text", 0, None, None, None);
         asm.cur = 0;
         asm.prev = 0;
         asm
@@ -365,10 +388,10 @@ impl<'e> Assembler<'e> {
     }
 
     /// 切到名为 `name` 的节（没有就建）。类型、标志按名字推（同 llvm-mc 的缺省），给了就用给的。
-    fn switch(&mut self, name: &str, flags: Option<u64>, ty: Option<u32>, entsize: Option<u64>) {
+    fn switch(&mut self, name: &str, subsec: u32, flags: Option<u64>, ty: Option<u32>, entsize: Option<u64>) {
         use object::elf::{SHF_ALLOC, SHF_EXECINSTR, SHF_MERGE, SHF_STRINGS, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS};
         self.prev = self.cur;
-        if let Some(i) = self.sections.iter().position(|s| s.name == name) {
+        if let Some(i) = self.sections.iter().position(|s| s.name == name && s.subsec == subsec) {
             self.cur = i;
             return;
         }
@@ -392,8 +415,58 @@ impl<'e> Assembler<'e> {
         let ty = ty.unwrap_or(dty);
         let entsize = entsize.unwrap_or(0);
         let _ = (SHF_MERGE, SHF_STRINGS);
-        self.sections.push(Section { name: String::from(name), ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
+        self.sections.push(Section { name: String::from(name), subsec, ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
         self.cur = self.sections.len() - 1;
+    }
+
+    /// 子节合进基节：同名的按子节号升序拼起来，各项偏移随之重基。
+    ///
+    /// ⭐ 必须排在 [`Assembler::layout`] 之前——对齐与跳转长度都要按**最终**位置算，
+    /// 而子节在源码里是穿插着写的（`.text 2` 可以出现在 `.text 0` 前面）。
+    pub(super) fn merge_subsections(&mut self) {
+        let old = core::mem::take(&mut self.sections);
+        // 基名第一次出现的次序决定节的次序，同名的内部按子节号升序。
+        let mut order: Vec<String> = Vec::new();
+        for s in &old {
+            if !order.contains(&s.name) {
+                order.push(s.name.clone());
+            }
+        }
+        let mut left: Vec<Option<Section>> = old.into_iter().map(Some).collect();
+        // 旧下标 ⇒ （新下标, 偏移增量）
+        let mut map: Vec<(usize, u64)> = alloc::vec![(0, 0); left.len()];
+        let mut merged: Vec<Section> = Vec::new();
+        for name in &order {
+            let mut group: Vec<usize> = (0..left.len()).filter(|&k| left[k].as_ref().is_some_and(|s| s.name == *name)).collect();
+            group.sort_by_key(|&k| left[k].as_ref().map_or(0, |s| s.subsec));
+            let at = merged.len();
+            let mut acc: Option<Section> = None;
+            for k in group {
+                let Some(s) = left[k].take() else { continue };
+                match &mut acc {
+                    None => {
+                        map[k] = (at, 0);
+                        acc = Some(s);
+                    }
+                    Some(a) => {
+                        let delta = a.size();
+                        map[k] = (at, delta);
+                        a.absorb(s, delta);
+                    }
+                }
+            }
+            if let Some(a) = acc {
+                merged.push(a);
+            }
+        }
+        // 标号跟着它所在的那一段挪。
+        for sym in self.symbols.values_mut() {
+            if let Def::Label(sec, off) = &mut sym.def {
+                let (to, delta) = map[*sec];
+                (*sec, *off) = (to, *off + delta);
+            }
+        }
+        self.sections = merged;
     }
 
     fn here(&self) -> u64 {

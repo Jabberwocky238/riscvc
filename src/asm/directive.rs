@@ -8,7 +8,11 @@ impl Assembler<'_> {
     pub(super) fn directive(&mut self, word: &str, rest: &str) -> Result<(), Error> {
         let line = || Toks::try_from(rest);
         match word {
-            ".text" | ".data" | ".bss" | ".rodata" | ".sdata" | ".sbss" | ".tdata" | ".tbss" => self.switch(word, None, None, None),
+            // `.text 1`：后面那个数是子节号，同名的各子节出 ELF 前按它升序拼起来。
+            ".text" | ".data" | ".bss" | ".rodata" | ".sdata" | ".sbss" | ".tdata" | ".tbss" => {
+                let subsec = rest.trim().parse().unwrap_or(0);
+                self.switch(word, subsec, None, None, None);
+            }
             ".section" | ".pushsection" => {
                 if word == ".pushsection" {
                     self.stack.push((self.cur, self.prev));
@@ -191,7 +195,7 @@ impl Assembler<'_> {
                 if word == ".lcomm" || local {
                     // 放进 .bss
                     let back = (self.cur, self.prev);
-                    self.switch(".bss", None, None, None);
+                    self.switch(".bss", 0, None, None, None);
                     self.align(align, None, None)?;
                     self.define(name);
                     self.bytes(&vec![0; usize::try_from(size).unwrap_or_default()])?;
@@ -321,7 +325,7 @@ impl Assembler<'_> {
             None => None,
         };
         let entsize = parts.get(3).map(|e| Self::const_text(e)).transpose()?.and_then(|e| u64::try_from(e).ok());
-        self.switch(name, flags, ty, entsize);
+        self.switch(name, 0, flags, ty, entsize);
         Ok(())
     }
 
