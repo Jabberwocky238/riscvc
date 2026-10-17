@@ -1,6 +1,6 @@
 //! 内置的中端变换。
 use super::{AnalysisManager, FunctionPass, PerFunction, Preserved};
-use crate::ir::{Error, Function};
+use crate::ir::{Error, Function, Types};
 
 /// `dce`：删结果没人用、又没有副作用的指令（反复做到不再变）。
 pub struct DceImpl;
@@ -20,7 +20,7 @@ impl FunctionPass for DceImpl {
         "删结果没人用、没有副作用的指令"
     }
 
-    fn run(&self, f: &mut Function, _am: &mut AnalysisManager) -> Result<Preserved, Error> {
+    fn run(&self, f: &mut Function, _tys: &Types, _am: &mut AnalysisManager) -> Result<Preserved, Error> {
         loop {
             let mut used = vec![false; f.vals.len()];
             for v in f.blocks.iter().flat_map(|b| &b.insts).flat_map(|i| i.op.operands()) {

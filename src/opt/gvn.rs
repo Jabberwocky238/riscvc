@@ -6,7 +6,7 @@
 //! ⛔ 只碰 [`Op::pure`] 的指令：有副作用的（load / store / call / 原子操作）一概不动，
 //! 所以这一遍不需要别名分析，也不会把两次 load 合成一次。
 use super::{AnalysisManager, Dom, FunctionPass, PerFunction, Preserved};
-use crate::ir::{Error, Function, Op, Ty, ValId};
+use crate::ir::{Error, Function, Op, Ty, Types, ValId};
 use alloc::vec;
 use alloc::vec::Vec;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ impl FunctionPass for GvnImpl {
         "同一个纯计算在支配者里算过就不再算"
     }
 
-    fn run(&self, f: &mut Function, am: &mut AnalysisManager) -> Result<Preserved, Error> {
+    fn run(&self, f: &mut Function, _tys: &Types, am: &mut AnalysisManager) -> Result<Preserved, Error> {
         let idom: Vec<Option<usize>> = {
             let dom = am.get::<Dom>(f);
             (0..f.blocks.len()).map(|b| dom.idom(b)).collect()

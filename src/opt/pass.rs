@@ -9,7 +9,7 @@
 //!
 //! ⛔ 不支持分析之间的嵌套依赖（那要么用内部可变、要么把管理器拆成两半借用）。需要别的分析的，
 //! 自己算一份存进来（[`super::Dom`] 自带 [`super::Preds`] 就是这么做的）—— 分析都很便宜，重算好过把借用绕复杂。
-use crate::ir::{Error, Function, Module};
+use crate::ir::{Error, Function, Module, Types};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
@@ -76,7 +76,10 @@ pub trait FunctionPass {
     }
 
     /// 改这个函数；回执说明保住了什么。
-    fn run(&self, f: &mut Function, am: &mut AnalysisManager) -> Result<Preserved, Error>;
+    ///
+    /// `tys` 是模块的类型表：`Function::vals` 里存的是 `Ty` 下标，要知道位宽、是不是
+    /// 标量，都得问它（⛔ 函数自己答不了）。
+    fn run(&self, f: &mut Function, tys: &Types, am: &mut AnalysisManager) -> Result<Preserved, Error>;
 }
 
 /// 把函数级变换包成模块级的 [`Pass`]：逐个函数跑，各自一份分析缓存。
@@ -92,12 +95,14 @@ impl<P: FunctionPass> Pass for PerFunction<P> {
     }
 
     fn run(&self, m: &mut Module) -> Result<(), Error> {
-        for f in &mut m.functions {
+        // 分开借：类型表只读，函数要改。
+        let Module { types, functions, .. } = m;
+        for f in functions {
             if f.blocks.is_empty() {
                 continue;
             }
             let mut am = AnalysisManager::default();
-            let kept = self.0.run(f, &mut am)?;
+            let kept = self.0.run(f, types, &mut am)?;
             am.invalidate(&kept);
         }
         Ok(())

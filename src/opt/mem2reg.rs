@@ -6,7 +6,7 @@
 //!
 //! 算法是 Cytron 的老三步：挑槽位、按迭代支配边界插块参数、沿支配树改名。
 use super::{AnalysisManager, Dom, FunctionPass, PerFunction, Preserved};
-use crate::ir::{Const, Error, Function, Inst, Op, ValId};
+use crate::ir::{Const, Error, Function, Inst, Op, Types, ValId};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -47,7 +47,7 @@ impl Mem2RegImpl {
         }
         // 块参数不可能是 alloca 的结果，但跳转实参里出现就是逃逸。
         let mut bad = vec![false; f.vals.len()];
-        let mut note = |v: ValId, t: crate::ir::Ty, ty: &mut Vec<Option<crate::ir::Ty>>| {
+        let note = |v: ValId, t: crate::ir::Ty, ty: &mut Vec<Option<crate::ir::Ty>>| {
             if slot[v.0 as usize] {
                 ty[v.0 as usize] = Some(t);
             }
@@ -141,7 +141,7 @@ impl FunctionPass for Mem2RegImpl {
         "只被整存整取的 alloca 提升成 SSA 值（汇合处加块参数）"
     }
 
-    fn run(&self, f: &mut Function, am: &mut AnalysisManager) -> Result<Preserved, Error> {
+    fn run(&self, f: &mut Function, _tys: &Types, am: &mut AnalysisManager) -> Result<Preserved, Error> {
         let slots = Self::promotable(f);
         if slots.is_empty() {
             return Ok(Preserved::All);
