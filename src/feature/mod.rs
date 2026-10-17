@@ -20,7 +20,7 @@ use crate::ext::{Exec, Extension, Std};
 use crate::isa::Table;
 use crate::sim::Stop;
 pub use c::Compressed;
-pub use f::Float;
+pub use f::{FForm, Float};
 pub use m::M;
 pub use zicsr::Zicsr;
 pub use zmmul::Zmmul;
