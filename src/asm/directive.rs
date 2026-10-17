@@ -142,11 +142,20 @@ impl Assembler<'_> {
                 let l = line()?;
                 for mut a in l.commas() {
                     let e = a.expr(self)?;
-                    let k = self.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("{word} 只做常数（跨节的差要 SET_ULEB128 重定位，没做）")))?;
-                    let bytes = if word == ".uleb128" { Self::uleb(k.cast_unsigned()) } else { Self::sleb(k) };
+                    // 算得出就当场写定；算不出（引用了后面才定义的标号）就先发一字节占位，
+                    // 记进 `lebs`，长度与内容到布局期再定 —— LEB 是变长的，值变了字节数也会变。
+                    let now = self.eval(&e, 0).ok().and_then(|v| v.constant());
+                    let bytes = match now {
+                        Some(k) if word == ".uleb128" => Self::uleb(k.cast_unsigned()),
+                        Some(k) => Self::sleb(k),
+                        None => alloc::vec![0u8],
+                    };
+                    let at = self.here();
+                    if now.is_none() {
+                        self.sections[self.cur].lebs.push(super::layout::Leb { offset: at, size: bytes.len() as u64, expr: e.clone(), signed: word == ".sleb128" });
+                    }
                     // 带标号的：记下，节里有可松弛点时可能要出 SET_ULEB128 / SUB_ULEB128
                     if word == ".uleb128" && !matches!(e, super::Expr::Num(_)) {
-                        let at = self.here();
                         self.sections[self.cur].leb_items.push((at, at + u64::try_from(bytes.len()).unwrap_or_default()));
                         self.note(Fix::Uleb, e);
                     }
@@ -384,7 +393,7 @@ impl Assembler<'_> {
 }
 
 impl Assembler<'_> {
-    fn uleb(mut v: u64) -> Vec<u8> {
+    pub(super) fn uleb(mut v: u64) -> Vec<u8> {
         let mut out = Vec::new();
         loop {
             let b = u8::try_from(v & 0x7f).unwrap_or_default();
@@ -397,7 +406,7 @@ impl Assembler<'_> {
         }
     }
 
-    fn sleb(mut v: i64) -> Vec<u8> {
+    pub(super) fn sleb(mut v: i64) -> Vec<u8> {
         let mut out = Vec::new();
         loop {
             let b = u8::try_from(v & 0x7f).unwrap_or_default();

@@ -85,6 +85,8 @@ pub struct Section {
     pub relax_items: Vec<(u64, u64)>,
     /// 带标号的 `.uleb128`（起, 止）。
     pub leb_items: Vec<(u64, u64)>,
+    /// 汇编时还算不出来的 `.uleb128` / `.sleb128`（前向标号）：长度随值变，到布局期才定。
+    lebs: Vec<layout::Leb>,
     /// 长度到布局时才定的控制流指令（[`layout`]）。
     grows: Vec<layout::Grow>,
     /// 布局变了要重补的对齐。
@@ -116,6 +118,10 @@ impl Section {
             p.offset += delta;
         }
         self.pads.append(&mut s.pads);
+        for l in &mut s.lebs {
+            l.offset += delta;
+        }
+        self.lebs.append(&mut s.lebs);
     }
 
     fn code(&self) -> bool {
@@ -419,7 +425,7 @@ impl<'e> Assembler<'e> {
         let ty = ty.unwrap_or(dty);
         let entsize = entsize.unwrap_or(0);
         let _ = (SHF_MERGE, SHF_STRINGS);
-        self.sections.push(Section { name: String::from(name), subsec, spliced: false, ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), grows: Vec::new(), pads: Vec::new() });
+        self.sections.push(Section { name: String::from(name), subsec, spliced: false, ty, flags, align: if flags & u64::from(SHF_EXECINSTR) != 0 { 4 } else { 1 }, entsize, data: Vec::new(), nobits: 0, fixups: Vec::new(), relax_items: Vec::new(), leb_items: Vec::new(), lebs: Vec::new(), grows: Vec::new(), pads: Vec::new() });
         self.cur = self.sections.len() - 1;
     }
 

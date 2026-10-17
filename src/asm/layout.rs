@@ -51,6 +51,16 @@ pub struct Pad {
     pub seq: u64,
 }
 
+/// 一条汇编时还算不出来的 `.uleb128` / `.sleb128`：长度随值变，布局稳了才定得下。
+#[derive(Clone, Debug)]
+pub struct Leb {
+    pub offset: u64,
+    /// 现在占几字节。
+    pub size: u64,
+    pub expr: Expr,
+    pub signed: bool,
+}
+
 impl Flow {
     /// 这一级够得着的距离。
     fn reach(self, size: u64) -> core::ops::RangeInclusive<i64> {
@@ -178,9 +188,29 @@ impl Assembler<'_> {
                 }) {
                     self.repad(section, k);
                     changed = true;
+                    continue;
+                }
+                if let Some(k) = (0..self.sections[section].lebs.len()).find(|&k| {
+                    let l = &self.sections[section].lebs[k];
+                    self.leb_bytes(l).is_some_and(|b| b.len() as u64 != l.size)
+                }) {
+                    self.releb(section, k);
+                    changed = true;
                 }
             }
             if !changed {
+                // 长度已经稳了，把内容按最终位置再写一遍。
+                for section in 0..self.sections.len() {
+                    for k in 0..self.sections[section].lebs.len() {
+                        let l = self.sections[section].lebs[k].clone();
+                        if let Some(b) = self.leb_bytes(&l)
+                            && b.len() as u64 == l.size
+                        {
+                            let at = usize::try_from(l.offset).unwrap_or_default();
+                            self.sections[section].data[at..at + b.len()].copy_from_slice(&b);
+                        }
+                    }
+                }
                 return Ok(());
             }
         }
@@ -224,6 +254,27 @@ impl Assembler<'_> {
         self.line = g.line;
         self.put_form(section, g.offset, g.flow, size, &g.target);
         self.line = line;
+    }
+
+    /// 这条 LEB 此刻该是哪几个字节。⛔ 按**不考虑链接期松弛**的值算，同 llvm-mc：
+    /// 跨过可松弛点的那些由 `SET_ULEB128` / `SUB_ULEB128` 交给链接器改。
+    fn leb_bytes(&self, l: &Leb) -> Option<Vec<u8>> {
+        let v = self.eval(&l.expr, 0).ok()?;
+        let mut n = v.k;
+        for (name, coeff) in &v.syms {
+            // ⛔ 节内偏移：`.uleb128 a - b` 两头必须同节，跨节的差本来就没意义。
+            let Some(Def::Label(_, off)) = self.symbols.get(name).map(|s| &s.def) else { return None };
+            n += coeff * i64::try_from(*off).ok()?;
+        }
+        Some(if l.signed { Assembler::sleb(n) } else { Assembler::uleb(n.cast_unsigned()) })
+    }
+
+    /// 按当前的值重定这条 LEB 的长度与内容。
+    fn releb(&mut self, section: usize, k: usize) {
+        let l = self.sections[section].lebs[k].clone();
+        let Some(bytes) = self.leb_bytes(&l) else { return };
+        self.splice(section, l.offset, l.size, &bytes, u64::MAX);
+        self.sections[section].lebs[k].size = bytes.len() as u64;
     }
 
     fn repad(&mut self, section: usize, k: usize) {
