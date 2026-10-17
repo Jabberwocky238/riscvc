@@ -21,6 +21,7 @@ mod mem2reg;
 mod pass;
 mod passes;
 mod sccp;
+mod simplify;
 
 pub use dom::{Dom, Preds};
 pub use pass::{Analysis, AnalysisManager, FunctionPass, Pass, PerFunction, Preserved};
@@ -28,3 +29,4 @@ pub use gvn::{GVN, Gvn, GvnImpl};
 pub use mem2reg::{MEM2REG, Mem2Reg, Mem2RegImpl};
 pub use passes::{DCE, Dce, DceImpl};
 pub use sccp::{SCCP, Sccp, SccpImpl};
+pub use simplify::{SIMPLIFY, Simplify, SimplifyImpl};
