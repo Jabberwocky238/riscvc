@@ -1,10 +1,10 @@
-//! mem2reg 之后，块参数与跳转实参必须依旧一一对应。
+//! 中端跑完之后，块参数与跳转实参必须依旧一一对应。
 //!
 //! ⭐ 这个 IR 没有 phi：提升一个槽位要同时「给块加参数」和「给**每个**前驱补实参」。
 //! 两件事但凡漏一半，个数就对不上——这条不变式比任何单点用例都值钱，所以拿入库的
 //! lit 语料整批压。⛔ 不手搓 CFG：真实语料里的不可达块、自环、多重边才是出错的地方。
 use riscvc::ir::Function;
-use riscvc::opt::{MEM2REG, Pass};
+use riscvc::opt::{MEM2REG, Pass, SCCP};
 use riscvc::plugin::Registry;
 use std::fs;
 use std::path::Path;
@@ -55,7 +55,8 @@ fn block_params_and_jump_args_still_line_up() {
         for func in &m.functions {
             before += mismatched(func).len();
         }
-        if MEM2REG.run(&mut m).is_err() {
+        // 任何 pass 跑完这条都得成立，所以把会动 CFG 的 sccp 也压进来。
+        if MEM2REG.run(&mut m).is_err() || SCCP.run(&mut m).is_err() {
             continue;
         }
         for func in &m.functions {

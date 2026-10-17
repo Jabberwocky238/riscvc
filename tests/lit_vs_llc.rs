@@ -16,7 +16,7 @@ use std::path::Path;
 
 /// 这一轮对拍跑的中端流水线。和 `riscvc llc` 的缺省同一处定义；要试别的串就改这里，
 /// 改动会出现在 diff 里。
-const PIPELINE: [&str; 3] = riscvc::opt::DEFAULT_PIPELINE;
+const PIPELINE: [&str; 4] = riscvc::opt::DEFAULT_PIPELINE;
 
 /// 失败的一项：键（`份` 或 `份/函数`）⇒ 原因。
 type Fails = BTreeMap<String, String>;

@@ -133,8 +133,10 @@ impl<'m> Isel<'m> {
         };
         let order = f.rpo();
         s.count(&order);
-        // 非入口块的块参数 ⇒ 机器块参数
-        for (b, blk) in f.blocks.iter().enumerate().skip(1) {
+        // 非入口块的块参数 ⇒ 机器块参数。
+        // ⛔ 只给走得到的块建：走不到的下面只发一条 Unreachable，给它建了参数就成了
+        // 「声明了却没有任何指令用过」的虚拟寄存器，regalloc2 说不出它的类别会 panic。
+        for (b, blk) in f.blocks.iter().enumerate().skip(1).filter(|(b, _)| order.contains(b)) {
             for &p in &blk.params {
                 let parts = s.fresh(f.vals[p.0 as usize]);
                 s.blocks[b].params.extend(parts.iter().filter_map(|r| if let R::V(v) = r { Some(*v) } else { None }));

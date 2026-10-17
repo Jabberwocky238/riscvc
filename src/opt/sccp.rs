@@ -251,10 +251,7 @@ impl FunctionPass for SccpImpl {
         }
         // ⛔ `facts` 借着函数，改之前先把决定算完：哪些块只剩一个出口、哪些块走不到。
         let keep: Vec<(usize, usize)> = (0..n)
-            // ⛔ 只收 `CondBr`。`Switch` 收起来会让后端拿到一个「用了却没定义」的虚拟
-            // 寄存器（machine-sink-load-immediate/sink_li 上必现），原因还没查清，
-            // 查清之前不做——跳转表那条路上的边本来就不传块参数，嫌疑在那儿。
-            .filter(|&b| reach[b] && facts.succs[b].len() > 1 && matches!(f.blocks[b].insts.last().map(|i| &i.op), Some(Op::CondBr(..))))
+            .filter(|&b| reach[b] && facts.succs[b].len() > 1)
             .filter_map(|b| {
                 let mut live = (0..facts.succs[b].len()).filter(|&i| facts.taken(b, i, &lat));
                 match (live.next(), live.next()) {
