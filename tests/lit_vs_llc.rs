@@ -62,14 +62,14 @@ impl Case<'_> {
             Ok(Err(e)) => return Self::fail(fails, &self.key, &format!("解析：{e}")),
             Err(_) => return Self::fail(fails, &self.key, "解析：panic"),
         };
-        // 中端 pass 按需挂上：`RISCVC_LIT_PASSES=mem2reg,dce` 就是拿这 600 多份真语料压它们——
-        // 变换若改了语义，下面的对拍立刻会看见。缺省不挂，基线保持原样。
-        if let Ok(names) = std::env::var("RISCVC_LIT_PASSES") {
-            let reg = riscvc::plugin::Registry::default();
-            let pipeline: Vec<&str> = names.split(',').filter(|n| !n.is_empty()).collect();
-            if let Err(e) = reg.run(&mut m, &pipeline) {
-                return Self::fail(fails, &self.key, &format!("pass：{e}"));
-            }
+        // 中端 pass：缺省跑 `opt::DEFAULT_PIPELINE`（和 `riscvc llc` 的缺省同一处定义），
+        // 拿这 600 多份真语料压它们——变换若改了语义，下面的对拍立刻会看见。
+        // `RISCVC_LIT_PASSES` 可以改这串，给空串就是一个都不跑。
+        let names = std::env::var("RISCVC_LIT_PASSES").unwrap_or_else(|_| riscvc::opt::DEFAULT_PIPELINE.join(","));
+        let reg = riscvc::plugin::Registry::default();
+        let pipeline: Vec<&str> = names.split(',').filter(|n| !n.is_empty()).collect();
+        if let Err(e) = reg.run(&mut m, &pipeline) {
+            return Self::fail(fails, &self.key, &format!("pass：{e}"));
         }
         // 逐个函数隔离着编：编不了的留成声明
         let mut bodies: Vec<_> = m.functions.iter_mut().map(|f| (core::mem::take(&mut f.blocks), core::mem::take(&mut f.vals))).collect();

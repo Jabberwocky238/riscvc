@@ -28,9 +28,12 @@ pub struct Llc {
     /// 并行的线程数（缺省：CPU 数）。
     #[arg(short, long)]
     jobs: Option<std::num::NonZeroUsize>,
-    /// 代码生成前在内部 IR 上跑的 pass（按给的次序，可重复）。
+    /// 代码生成前在内部 IR 上跑的 pass（按给的次序，可重复）。给了就整条取代缺省的那串。
     #[arg(long = "pass")]
     passes: Vec<String>,
+    /// ⛔ 不跑中端 pass（`llc` 本身不优化，要逐条对着它看代码时用这个）。
+    #[arg(long)]
+    no_opt: bool,
     /// 列出注册的方言与 pass。
     #[arg(long)]
     list_plugins: bool,
@@ -113,7 +116,13 @@ impl Llc {
         let reg = Registry::default();
         let text = String::from_utf8(super::read(input)?).map_err(|e| format!("{}：{e}", input.display()))?;
         let mut module = reg.parse(&text).map_err(|e| format!("{}：{e}", input.display()))?;
-        let pipeline: Vec<&str> = self.passes.iter().map(String::as_str).collect();
+        let pipeline: Vec<&str> = match (self.no_opt, self.passes.is_empty()) {
+            (true, _) => Vec::new(),
+            // 缺省这一串：mem2reg 把 alloca 提成 SSA 值，gvn 吃掉它暴露出来的冗余计算，
+            // dce 收尾。⛔ `--pass` 一旦给了就整条取代它。
+            (false, true) => riscvc::opt::DEFAULT_PIPELINE.to_vec(),
+            (false, false) => self.passes.iter().map(String::as_str).collect(),
+        };
         reg.run(&mut module, &pipeline).map_err(|e| format!("{}：{e}", input.display()))?;
         Ok(module)
     }

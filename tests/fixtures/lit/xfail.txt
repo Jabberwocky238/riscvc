@@ -150,7 +150,6 @@ codegen/poison-legalization/PromoteHalf 结果：【poison：store poison】Prom
 codegen/poison-legalization/SoftenFloat 结果：【poison：store poison】SoftenFloat(ptr0)：指针实参指向的内存不同
 codegen/pr145360/signed 域外：【poison：exact 除法除不尽】signed(0xffffffff, ptr1)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
 codegen/pr145360/unsigned 结果：【poison：exact 除法除不尽】unsigned(0x3a, ptr1)：riscvc Returned 0x2  ≠  llc Returned 0xaaaaaaad
-codegen/pr58025/f 编译：指令选择：f：整数运算不支持 Vector(1, Ty(6))（Bin(FDiv, ValId(0), ValId(0))）
 codegen/pr64503/f 结果：【poison：srem 1, 0（除以零）/ store poison】f(0xf57863d13d3a9fd7)：riscvc Returned 0x0  ≠  llc Returned 0x1
 codegen/pr64503/g 结果：【poison：srem 1, 0（除以零）/ store poison】g(ptr0, 0x2c)：riscvc Returned 0x0  ≠  llc Returned 0x2c00000001
 codegen/pr64645/v2f64 编译：指令选择：v2f64：整数运算不支持 Vector(2, Ty(7))（Bin(FAdd, ValId(0), ValId(1))）
@@ -288,26 +287,3 @@ import/fastmath 解析：`llvm.intr.vector.reduce.fmin`：fastmath_intr：不支
 import/incorrect-scalable-vector-check 解析：`llvm.shufflevector`：shufflevector_crash：不支持的 op `llvm.shufflevector`
 import/indirectbr 解析：`llvm.indirectbr`：basic：不支持的 op `llvm.indirectbr`
 import/invoke-argument-attributes 解析：`llvm.invoke`：test：不支持的 op `llvm.invoke`
-target/arm-sme.11 解析：`llvm.call_intrinsic`：arm_sme_streaming_vl：不支持的 op `llvm.call_intrinsic`
-target/blockaddress.0 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
-target/blockaddress.1 解析：`llvm.blockaddress`：blockaddr0：不支持的 op `llvm.blockaddress`
-target/blockaddress.2 解析：`llvm.blockaddress`：不支持的 op `llvm.blockaddress`
-target/ifunc.0 解析：`llvm.mlir.ifunc`：顶层不认识
-target/ifunc.1 解析：`llvm.mlir.ifunc`：顶层不认识
-target/ifunc.2 解析：`llvm.mlir.ifunc`：顶层不认识
-target/ifunc.3 解析：`llvm.mlir.ifunc`：顶层不认识
-target/ifunc.4 解析：`llvm.mlir.ifunc`：顶层不认识
-target/indirectbr 解析：`llvm.blockaddress`：test_indirectbr_phi：不支持的 op `llvm.blockaddress`
-target/invoke-argument-attributes 解析：`llvm.invoke`：test：不支持的 op `llvm.invoke`
-target/llvmir-types.0 解析：MLIR：99:72: unknown type `target`
-target/llvmir.1 解析：`llvm.invoke`：invoke_result：不支持的 op `llvm.invoke`
-target/llvmir.2 解析：`llvm.invoke`：invoke_phis：不支持的 op `llvm.invoke`
-target/llvmir.21 解析：`llvm.invoke`：invoke_branch_weights：不支持的 op `llvm.invoke`
-target/llvmir.34 解析：`llvm.intr.vector.reduce.fmax`：fastmathFlags：不支持的 op `llvm.intr.vector.reduce.fmax`
-target/llvmir.38 解析：`llvm.va_arg`：vararg_function：va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）
-target/llvmir.82 解析：`llvm.dso_local_equivalent`：不支持的 op `llvm.dso_local_equivalent`
-target/llvmir.83 解析：`llvm.dso_local_equivalent`：call_extern_func：不支持的 op `llvm.dso_local_equivalent`
-target/llvmir.84 解析：`llvm.dso_local_equivalent`：call_alias_func：不支持的 op `llvm.dso_local_equivalent`
-target/nvvmir.18 解析：`llvm.call_intrinsic`：nvvm_mapa：不支持的 op `llvm.call_intrinsic`
-target/nvvmir.22 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_4way：不支持的 op `llvm.call_intrinsic`
-target/nvvmir.23 解析：`llvm.call_intrinsic`：nvvm_dot_accumulate_2way：不支持的 op `llvm.call_intrinsic`
