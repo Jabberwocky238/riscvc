@@ -469,10 +469,10 @@ stack, division as an inline shift-subtract loop); scalars wider than 2×XLEN (w
 reference and return values that do not fit in a0 / a1 / fa0 / fa1 go through `sret`, as `CC_RISCV` does; `fp128` is
 soft-float (`__addtf3` …). Not done yet: vector operations, test coverage of stack-passed arguments; `fp128` constants
 are held at double precision by the front end. Code size: the machine-IR passes (constant folding,
-dominator-scoped CSE, branch-condition folding, tail calls), post-allocation branch folding / relaxation and llc's
+dominator-scoped CSE, branch-condition folding, tail calls), post-allocation branch folding / block placement / relaxation and llc's
 selection-time rewrites (small constant-length `memcpy` / `memmove` / `memset` inline, `ctpop(x) == 1` as
 `(x - 1) <u (x ^ (x - 1))`, `floor` / `ceil` / `round` … inline and fused into `fcvt` with a rounding mode) are in;
-still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping, jump tables and
+still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping and
 copy coalescing, plus llc's lowering of `cttz` (de Bruijn table). The register allocator is a vendored copy of
 [regalloc2](https://github.com/bytecodealliance/regalloc2) v0.15.2 in `src/alloc` (see `src/alloc/VENDOR.md`): it has
 no move hints, no rematerialization and coalesces only two-address operands and block parameters, which is where the

@@ -34,11 +34,25 @@ struct Tally {
     merged: usize,
     evicted: usize,
     bparam: usize,
+    insts: usize,
+    /// 「多固定寄存器」赔掉的搬运，按 MOp 种类归类
+    multi: Vec<(&'static str, usize, usize)>,
 }
 
 impl Observer for Tally {
-    fn allocated(&mut self, _name: &str, out: &riscvc::regalloc::Output) {
+    fn wants_shape(&self) -> bool {
+        true
+    }
+
+    fn allocated(&mut self, _name: &str, shape: riscvc::codegen::Shape<'_>, out: &riscvc::regalloc::Output) {
         let s = &out.stats;
+        self.insts += shape.insts;
+        for &(k, d, c) in shape.multi_fixed {
+            match self.multi.iter_mut().find(|(s, ..)| *s == k) {
+                Some((_, a, b)) => (*a, *b) = (*a + d, *b + c),
+                None => self.multi.push((k, d, c)),
+            }
+        }
         self.funcs += 1;
         for (a, b) in self.by_prio.iter_mut().zip(s.moves_by_prio) {
             *a += b;
@@ -70,8 +84,12 @@ fn main() {
                 println!("  {n:7}  {:3}%  {why}", n * 100 / total.max(1));
             }
         }
-        println!("拆分 {} 次；最终 bundle {}，其中溢出 bundle {}；合并 {}，驱逐 {}；块参数进出 {}",
-                 t.splits, t.bundles, t.spill_bundles, t.merged, t.evicted, t.bparam);
+        t.multi.sort_by_key(|x| core::cmp::Reverse(x.1 + x.2));
+        let (dup, clob): (usize, usize) = t.multi.iter().fold((0, 0), |a, x| (a.0 + x.1, a.1 + x.2));
+        println!("「多固定寄存器」合计 {}：同一个值传了两次 {dup}，实参在调用后还活着 {clob}；按指令种类：{}",
+                 dup + clob, t.multi.iter().map(|(k, d, c)| format!("{k} {}+{}", d, c)).collect::<Vec<_>>().join("，"));
+        println!("机器指令 {}；拆分 {} 次；最终 bundle {}，其中溢出 bundle {}；合并 {}，驱逐 {}；块参数进出 {}",
+                 t.insts, t.splits, t.bundles, t.spill_bundles, t.merged, t.evicted, t.bparam);
         // ⚠ 上游的 splits_clobbers / splits_hot / splits_conflicts / splits_defs / splits_all
         //   在 0.15.2 里声明了但一次都不写（死字段），⛔ 别去读它们。
     }

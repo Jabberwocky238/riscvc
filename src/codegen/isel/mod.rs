@@ -612,7 +612,17 @@ impl<'m> Isel<'m> {
         b
     }
 
-    /// 条件跳转的一条出边：目标有块参数或多个前驱 ⇒ 切一个中转块（regalloc2 不许关键边）。
+    /// 条件跳转的一条出边：目标有块参数或多个前驱 ⇒ 切一个中转块。
+    ///
+    /// 两个条件各管一件事，⛔ 缺一不可：
+    /// * **多前驱** —— regalloc2 不许关键边（判据见 `alloc/ion/moves.rs`：
+    ///   `to_ins > 1 && from_outs > 1` 直接报错）；
+    /// * **有块参数** —— [`MOp::Branch`] **带不了实参**（`branch()` 把 `args` 填成空），
+    ///   实参只能由中转块里那条 `jump(to, args)` 传。
+    ///
+    /// ⚠ 2026-10-18 我按「只有关键边才需要切」去掉过第二个条件：四份语料输出一字不变，
+    /// 但 `lit_vs_llc` 立刻报出 7 条 `RegAllocError::Branch`（实参个数与后继块参数对不上）。
+    /// ⛔ 别再去掉它；也别只拿那四份语料当安全判据。
     fn edge(&mut self, t: &Target) -> Result<usize, Error> {
         if t.args.is_empty() && self.preds[t.block.0 as usize] <= 1 {
             return Ok(self.bmap[t.block.0 as usize]);

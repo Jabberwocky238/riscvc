@@ -3,7 +3,8 @@
 //! ```text
 //! frame    栈帧布局（溢出槽、被调方保存寄存器、帧指针）
 //! lower    机器 IR + 分配结果 ⇒ PFunc（序言 / 尾声、regalloc2 的搬运、select 切成块）
-//! branch   分支折叠：穿过空块、两边同目标的条件跳转变无条件、删走不到的块
+//! branch   分支折叠：穿过空块、两边同目标的条件跳转变无条件、删走不到的块；
+//!          之后重排块布局，让跳转尽量落成「下一块」（同 LLVM MachineBlockPlacement）
 //! relax    分支松弛：按真实字节数算距离，够不着 ±4 KiB 的条件跳转改长形式（同 LLVM 的 BranchRelaxation）
 //! print    ⇒ 汇编文本（落到布局里下一块的跳转不出；真分支落在下一块就反过来跳）
 //! ```
@@ -94,6 +95,7 @@ impl PFunc {
     pub fn new(sel: &Selected, mf: &MFunc, out: &Output, id: usize) -> Self {
         let mut f = lower::Lower::new(sel, mf, out, id).run();
         f.fold_branches();
+        f.place();
         f.relax();
         f
     }

@@ -25,19 +25,32 @@ pub enum Error {
 use crate::ir::{Const, Module};
 use core::fmt::Write;
 
+/// 分配前机器 IR 的概况（诊断用）。⛔ 不把 `mir` 本身摊到公开 API 上。
+pub struct Shape<'a> {
+    pub insts: usize,
+    /// 「多固定寄存器」赔掉的搬运，按 `MOp` 种类名归类，分两种来由
+    /// （见 `mir::MInst::multi_fixed`）：`.1` 是同一个值传了两次，
+    /// `.2` 是实参在调用之后还活着。
+    pub multi_fixed: &'a [(&'static str, usize, usize)],
+}
+
 /// 代码生成的旁路观察者：每个函数分配完寄存器之后收到一次分配器的回执。
 ///
 /// ⛔ 诊断一律走注入，不用环境变量、也不用 feature —— 要看就传一个进来，
 /// 不传就什么都不发生（[`Module::compile`] 就是传了 `&mut ()`）。
 pub trait Observer {
-    /// `name` 是函数名，`out` 是 [`crate::regalloc`] 的回执（含 `stats`；
-    /// 函数规模看 `out.inst_alloc_offsets.len()`）。
-    fn allocated(&mut self, name: &str, out: &crate::regalloc::Output);
+    /// 要不要算 `Shape::multi_fixed`（要扫全函数，缺省不算）。
+    fn wants_shape(&self) -> bool {
+        false
+    }
+
+    /// `name` 是函数名，`shape` 是分配前的概况，`out` 是 [`crate::regalloc`] 的回执（含 `stats`）。
+    fn allocated(&mut self, name: &str, shape: Shape<'_>, out: &crate::regalloc::Output);
 }
 
 /// 什么都不看。
 impl Observer for () {
-    fn allocated(&mut self, _: &str, _: &crate::regalloc::Output) {}
+    fn allocated(&mut self, _: &str, _: Shape<'_>, _: &crate::regalloc::Output) {}
 }
 
 impl Module {
@@ -61,7 +74,32 @@ impl Module {
             }
             let opts = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
             let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
-            obs.allocated(&f.name, &out);
+            let mut multi: Vec<(&'static str, usize, usize)> = Vec::new();
+            if obs.wants_shape() {
+                // 一个 vreg 在第 `i` 条之后还活着：之后还有指令读它，或它被跳转当实参传出去。
+                let last: std::collections::HashMap<_, _> =
+                    mf.insts.iter().enumerate().flat_map(|(n, x)| x.uses.iter().filter_map(move |r| match r {
+                        mir::R::V(v) => Some(((v.class() as u8, v.vreg()), n)),
+                        mir::R::P(_) => None,
+                    })).collect();
+                let out: std::collections::HashSet<_> =
+                    mf.blocks.iter().flat_map(|b| b.args.iter().flatten()).map(|v| (v.class() as u8, v.vreg())).collect();
+                for (n, i) in mf.insts.iter().enumerate() {
+                    let live = |v: crate::regalloc::VReg| {
+                        let k = (v.class() as u8, v.vreg());
+                        out.contains(&k) || last.get(&k).is_some_and(|&l| l > n)
+                    };
+                    let (dup, clob) = i.multi_fixed(&live);
+                    if dup + clob > 0 {
+                        let k = mir::MInst::kind(&i.op);
+                        match multi.iter_mut().find(|(s, ..)| *s == k) {
+                            Some((_, a, b)) => (*a, *b) = (*a + dup, *b + clob),
+                            None => multi.push((k, dup, clob)),
+                        }
+                    }
+                }
+            }
+            obs.allocated(&f.name, Shape { insts: mf.insts.len(), multi_fixed: &multi }, &out);
             let body = post::PFunc::new(&sel, &mf, &out, id).to_string();
             let section = f.section.as_deref().map_or_else(|| String::from("\t.text"), |s| format!("\t.section\t{s},\"ax\",@progbits"));
             let _ = writeln!(text, "{section}");

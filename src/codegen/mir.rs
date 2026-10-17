@@ -4,6 +4,11 @@ use crate::isa::{Opcode, Rv32i as IOp};
 use crate::regalloc::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
 use smallvec::SmallVec;
 
+/// `VReg` 没有 `Ord`，排序借它的编号。
+fn regalloc2_key(v: &VReg) -> (u8, usize) {
+    (v.class() as u8, v.vreg())
+}
+
 /// 一条指令的寄存器（内联放 3 个：调用、`select` 这种多的才上堆）。
 pub type Regs = SmallVec<[R; 3]>;
 /// 与 [`Regs`] 一一对应的约束。
@@ -183,6 +188,60 @@ impl MInst {
             ([R::V(v)], [Rule::Any]) => Some(*v),
             _ => None,
         }
+    }
+
+    /// 这条指令的种类名（诊断归类用）。
+    #[must_use]
+    pub fn kind(op: &MOp) -> &'static str {
+        match op {
+            MOp::Reg(..) => "Reg",
+            MOp::Imm(..) => "Imm",
+            MOp::Select(_) => "Select",
+            MOp::Li(_) => "Li",
+            MOp::La(..) => "La",
+            MOp::Addr(..) => "Addr",
+            MOp::Load(..) => "Load",
+            MOp::Store(..) => "Store",
+            MOp::Args => "Args",
+            MOp::Call(_) => "Call",
+            MOp::Ret => "Ret",
+            MOp::Tail(_) => "Tail",
+            MOp::Jump(_) => "Jump",
+            MOp::Branch(..) => "Branch",
+            MOp::JumpTable(_) => "JumpTable",
+            MOp::Unreachable => "Unreachable",
+            MOp::Trap => "Trap",
+            MOp::Break => "Break",
+            MOp::Fence => "Fence",
+            MOp::SpAlloc => "SpAlloc",
+            MOp::SpSave => "SpSave",
+            MOp::SpRestore => "SpRestore",
+        }
+    }
+
+    /// 这条指令上有几个固定约束的使用会赔掉一条搬运。两种来由，合起来就是 Ion 的
+    /// 「多固定寄存器」（见 `alloc/ion/liveranges.rs` 的 505 行与 `fixup_multi_fixed_vregs`）：
+    ///
+    /// * **甲**：同一个 vreg 带着多于一个固定约束（`f(x, x)`，真传了两次，没办法）；
+    /// * **乙**：使用被固定在某个 preg 上，而这条指令**同时破坏**那个 preg，且这个值
+    ///   **之后还活着** —— 也就是「实参在调用之后还要用」。`live_after` 由调用方给。
+    ///
+    /// ⭐ 乙是大头。它不是分配器的毛病：值要进 `a0`，而 `a0` 被调用破坏，只能另存一份再搬。
+    #[must_use]
+    pub fn multi_fixed(&self, live_after: &impl Fn(VReg) -> bool) -> (usize, usize) {
+        let mut fixed: SmallVec<[VReg; 4]> = SmallVec::new();
+        let mut clobbered = 0;
+        for (r, rule) in self.uses.iter().zip(&self.use_rules) {
+            if let (R::V(v), Rule::Fixed(p)) = (r, rule) {
+                fixed.push(*v);
+                if self.clobbers.contains(*p) && live_after(*v) {
+                    clobbered += 1;
+                }
+            }
+        }
+        fixed.sort_unstable_by_key(regalloc2_key);
+        let dup = fixed.windows(2).filter(|w| w[0] == w[1]).count();
+        (dup, clobbered)
     }
 
     fn is_term(&self) -> bool {

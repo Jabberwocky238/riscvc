@@ -50,4 +50,43 @@ impl PFunc {
         }
         self.layout.retain(|&b| live[b]);
     }
+
+    /// 块布局：贪心串链，让尽量多的跳转落成「下一块」从而不出代码（同 LLVM MachineBlockPlacement
+    /// 里不含分支概率的那一半）。
+    ///
+    /// ⭐ 布局**只是发射顺序**：终结符在 [`Term`] 里是显式的，`print` 会把跳到下一块的 `j` 省掉、
+    /// 真分支落在下一块时把条件反过来。所以重排顺序不改变语义，⛔ 但必须保证每个活块恰好出现一次。
+    ///
+    /// 走法：从入口起跟着后继往下串；条件跳转优先跟**假边**（省掉反转），跟不动就换一个还没放的块起新链。
+    pub(super) fn place(&mut self) {
+        let n = self.blocks.len();
+        let mut placed = vec![true; n];
+        for &b in &self.layout {
+            placed[b] = false;
+        }
+        let order = core::mem::take(&mut self.layout);
+        let mut out = Vec::with_capacity(order.len());
+        for &seed in &order {
+            if placed[seed] {
+                continue;
+            }
+            let mut at = seed;
+            loop {
+                placed[at] = true;
+                out.push(at);
+                // 下一块：条件跳转先试假边再试真边；无条件跳转就试目标
+                let next = match self.blocks[at].term {
+                    Term::Branch { t, f, .. } => [f, t].into_iter().find(|&b| !placed[b]),
+                    Term::Jump(t) => (!placed[t]).then_some(t),
+                    _ => None,
+                };
+                match next {
+                    Some(b) => at = b,
+                    None => break,
+                }
+            }
+        }
+        debug_assert_eq!(out.len(), order.len(), "布局丢了块");
+        self.layout = out;
+    }
 }
