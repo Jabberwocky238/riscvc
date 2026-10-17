@@ -6,11 +6,10 @@
 //! ⛔ 只碰 [`Op::pure`] 的指令：有副作用的（load / store / call / 原子操作）一概不动，
 //! 所以这一遍不需要别名分析，也不会把两次 load 合成一次。
 use super::{AnalysisManager, Dom, FunctionPass, PerFunction, Preserved};
-use crate::ir::{Error, Function, Op, ValId};
-use alloc::format;
-use alloc::string::String;
+use crate::ir::{Error, Function, Op, Ty, ValId};
 use alloc::vec;
 use alloc::vec::Vec;
+use std::collections::HashMap;
 
 /// `gvn`：删掉支配者里已经算过的纯计算。
 pub struct GvnImpl;
@@ -51,31 +50,38 @@ impl FunctionPass for GvnImpl {
         }
         let mut repl: Vec<Option<ValId>> = vec![None; f.vals.len()];
         let mut dead: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.insts.len()]).collect();
-        // 算式按 `Op` 的调试写法加结果类型作键：操作数先顺着 repl 归一，`x + y` 才认得出第二遍。
-        // ⚠ 拼字符串不便宜，所以只对纯指令做——它们是少数。
-        let mut seen: Vec<(String, ValId)> = Vec::new();
-        // (块, 进块时的表长)；`None` 表示还没进去过。
+        // 算式直接拿 `Op` 当键（操作数先顺着 repl 归一，`x + y` 才认得出第二遍），再带上
+        // 结果类型 —— ⚠ 常量的类型不在 `Op` 里而在 `f.vals[result]`，`undef : i32` 和
+        // `undef : i64` 本身完全相等，合成一个就串了类型。
+        let mut table: HashMap<(Op, Ty), ValId> = HashMap::new();
+        // 记下进表的顺序，出作用域时按这个往回撤——同一个键同时只会在表里有一份，
+        // 因为撞上了就直接复用、不会再插。
+        let mut undo: Vec<(Op, Ty)> = Vec::new();
+        // (块, 进块时的撤销位)；`None` 表示还没进去过。
         let mut stack: Vec<(usize, Option<usize>)> = vec![(0, None)];
         while let Some((b, mark)) = stack.pop() {
             if let Some(mark) = mark {
-                seen.truncate(mark);
+                for k in undo.drain(mark..) {
+                    table.remove(&k);
+                }
                 continue;
             }
-            stack.push((b, Some(seen.len())));
+            stack.push((b, Some(undo.len())));
             for n in 0..f.blocks[b].insts.len() {
                 let i = &f.blocks[b].insts[n];
                 let (Some(r), true) = (i.result, i.op.pure()) else { continue };
-                let mut key = i.op.clone();
-                key.rename(&|v| resolve(&repl, v));
-                // ⚠ 结果类型要进键：常量的类型不在 `Op` 里而在 `f.vals[result]`，
-                // `undef : i32` 和 `undef : i64` 的调试写法一模一样，合成一个就串了类型。
-                let key = format!("{key:?}|{:?}", f.vals[r.0 as usize]);
-                match seen.iter().find(|(k, _)| *k == key) {
-                    Some(&(_, v)) => {
+                let mut op = i.op.clone();
+                op.rename(&|v| resolve(&repl, v));
+                let key = (op, f.vals[r.0 as usize]);
+                match table.get(&key) {
+                    Some(&v) => {
                         repl[r.0 as usize] = Some(v);
                         dead[b][n] = true;
                     }
-                    None => seen.push((key, r)),
+                    None => {
+                        table.insert(key.clone(), r);
+                        undo.push(key);
+                    }
                 }
             }
             stack.extend(kids[b].iter().map(|&c| (c, None)));

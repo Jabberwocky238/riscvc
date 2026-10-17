@@ -25,7 +25,7 @@ pub struct BlockId(pub u32);
 pub struct ValId(pub u32);
 
 /// 常量（全局初值、`llvm.mlir.constant` / `zero` / `undef` / `poison` / `addressof`）。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Const {
     /// 整数位型（按位宽截断）。
     Int(u128),
@@ -44,7 +44,7 @@ pub enum Const {
 
 macro_rules! enums {
     ($($(#[$m:meta])* $name:ident { $($v:ident),* $(,)? })*) => {
-        $($(#[$m])* #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum $name { $($v),* })*
+        $($(#[$m])* #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum $name { $($v),* })*
     };
 }
 
@@ -60,7 +60,7 @@ enums! {
 }
 
 /// `llvm.intr.*`（代码生成认得的）。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Intr {
     Ctlz,
     Cttz,
@@ -115,7 +115,7 @@ pub enum Intr {
 }
 
 /// 参数 / 返回值上影响代码生成的属性。
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ArgAttrs {
     pub signext: bool,
     pub zeroext: bool,
@@ -126,27 +126,27 @@ pub struct ArgAttrs {
 }
 
 /// 跳转目标与传给块参数的实参。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Target {
     pub block: BlockId,
     pub args: Vec<ValId>,
 }
 
 /// GEP 的一个下标：常数或 SSA 值。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Index {
     Const(i64),
     Dyn(ValId),
 }
 
 /// 被调用者。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Callee {
     Direct(String),
     Indirect(ValId),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     Const(Const),
     Ret(Option<ValId>),
