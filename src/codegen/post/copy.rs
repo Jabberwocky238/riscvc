@@ -4,13 +4,19 @@
 //! **没有**分配后的拷贝消除（上游 issue #265 开着没修），Cranelift 也没有。
 //! 这一步不碰分配器，纯窥孔。
 //!
-//! **目的前移**：`op … → rs` 之后跟着 `mv rd, rs`，且 `rs` 此后不再被读
-//! ⇒ 把 `op` 的目的直接写成 `rd`，删掉 `mv`。块内变换，靠一份全函数的物理寄存器活跃性兜底。
+//! 两条变换，都在块内，靠一份全函数的物理寄存器活跃性兜底：
 //!
-//! ⚠ **本来还有第二条「删死拷贝」（`mv rd, rs` 而 `rd` 此后不再被读 ⇒ 直接删），没有收进来。**
-//! 它在四份语料上多省 300~700 条指令、`lit_vs_llc` 1080 份也全过，但 `rust_e2e`（真链接、
-//! 真跑）会 panic。逐条核对过被删的实例都是对的，根因没找到。
-//! ⛔ 想加回来的，先让 `rust_e2e` 绿，别只看 lit。
+//! * **甲 目的前移**：`op … → rs` 之后跟着 `mv rd, rs`，且 `rs` 此后不再被读
+//!   ⇒ 把 `op` 的目的直接写成 `rd`，删掉 `mv`；
+//! * **乙 删死拷贝**：`mv rd, rs` 而 `rd` 此后不再被读 ⇒ 直接删。
+//!
+//! ⚠ 乙踩过一个坑，值得记住：[`shape`] 里**间接调用（`jalr ra, rs`）的实参寄存器**
+//! 一度被放进「写」而不是「读」，于是 `jalr` 不是读 a0–a7 而是杀掉它们，
+//! `mv a0, …` 看着就成了死的。⛔ 这是「把活的当成死的」那一侧，必错。
+//! `lit_vs_llc` 1080 份**全过**（语料里间接调用稀少），`rust_e2e`（真链接真跑）才抓得住。
+//!
+//! ⭐ 甲与乙的差别是定位这类错的钥匙：甲要求定义在**同一个块内**，它碰的值不可能从前驱
+//! 活进来，所以块间活跃性算错伤不到甲；乙没这个约束。两者一个绿一个红 ⇒ 错必在块间。
 //!
 //! ⛔ 正确性全压在 [`shape`] 上：认不出的指令一律当屏障（读写全部），宁可不优化。
 use super::{PFunc, PInst, Term};
@@ -42,6 +48,8 @@ enum Slot {
     Rs1,
     Rs2,
     Rs3,
+    /// 隐含读（调用的实参寄存器）：指令里**没有对应字段**，⛔ 改写不得。
+    Implicit,
 }
 
 /// 一条真指令的寄存器形态：目的（能不能改名）与各使用的位置。
@@ -58,17 +66,28 @@ struct Shape {
 fn shape(x: &Inst, clob: Set) -> Option<Shape> {
     let (rd, rs1, rs2, rs3) = (x.rd, x.rs1, x.rs2, x.rs3);
     let d = |r: u8| (r != 0).then_some(xr(r));
-    let args = || mask((10..=17u8).map(xr).chain((10..=17u8).map(fr)));
+    // 实参寄存器是**隐含读**：指令里没有字段装它们，所以标成 [`Slot::Implicit`]，⛔ 改写不得。
+    let arg_uses = || (10..=17u8).map(xr).chain((10..=17u8).map(fr)).map(|r| (Slot::Implicit, r));
     let plain = |def, renamable, uses: &[(Slot, Reg)]| Some(Shape { def, renamable, uses: SmallVec::from_slice(uses), clobbers: 0 });
     match x.op {
         Opcode::I(o) => match o.form() {
             // ⚠ 两种形态，⛔ 别混：`jalr ra, …` 是间接调用（破坏调用方保存集）；
             //   `jr rs`（`rd == x0`）是跳转表的块内跳转，**什么都不破坏**——
             //   当成调用会把还活着的值误判为死的，那是不安全的一边。
+            // ⚠ `jr rs`（`rd == x0`）是跳转表的块内跳转：什么都不破坏，也不读实参。
             Base::Jalr if rd == 0 => Some(Shape { def: None, renamable: false, uses: SmallVec::from_slice(&[(Slot::Rs1, xr(rs1))]), clobbers: 0 }),
-            Base::Jalr => Some(Shape { def: d(rd), renamable: false, uses: SmallVec::from_slice(&[(Slot::Rs1, xr(rs1))]), clobbers: clob | args() | bit(xr(1)) }),
-            // `jal`：目的由 ABI 定（ra）
-            Base::J => Some(Shape { def: d(rd), renamable: false, uses: SmallVec::new(), clobbers: clob }),
+            // ⭐ `jalr ra, rs` 是**间接调用**：和 [`PInst::Call`] 一样**读**各实参寄存器。
+            // ⛔ 实参属于「读」，⛔ 不是「写」——写进破坏集会让 `mv a0, …` 看着像死的而被删掉，
+            //    那正是「把活的当成死的」。lit 碰不到（间接调用少），真程序一碰就错。
+            Base::Jalr => Some(Shape {
+                def: d(rd),
+                renamable: false,
+                uses: core::iter::once((Slot::Rs1, xr(rs1))).chain(arg_uses()).collect(),
+                clobbers: clob | bit(xr(1)),
+            }),
+            // `j 目标`（`rd == x0`）只是跳转；`jal ra, 目标` 是直接调用，同样读实参。
+            Base::J if rd == 0 => Some(Shape { def: None, renamable: false, uses: SmallVec::new(), clobbers: 0 }),
+            Base::J => Some(Shape { def: d(rd), renamable: false, uses: arg_uses().collect(), clobbers: clob | bit(xr(1)) }),
             Base::U => plain(d(rd), true, &[]),
             Base::Load | Base::Imm | Base::Shift => plain(d(rd), true, &[(Slot::Rs1, xr(rs1))]),
             Base::R => plain(d(rd), true, &[(Slot::Rs1, xr(rs1)), (Slot::Rs2, xr(rs2))]),
@@ -177,6 +196,10 @@ impl PFunc {
             let rs_later = self.read_after(b, i, rs, live_out, clob);
             if !rs_later && self.fold_def(b, i, rd, rs, clob, &drop) {
                 drop.push(i);
+                continue;
+            }
+            if !self.read_after(b, i, rd, live_out, clob) && self.forward(b, i, rd, rs, clob) {
+                drop.push(i);
             }
         }
         for &i in drop.iter().rev() {
@@ -185,19 +208,66 @@ impl PFunc {
         drop.len()
     }
 
-    /// 第 `i` 条之后 `rs` 还会不会被读（含块末与活出块）。⛔ 认不出的指令一律算「会」。
-    fn read_after(&self, b: usize, i: usize, rs: Reg, live_out: Set, clob: Set) -> bool {
+    /// 第 `i` 条之后某个寄存器还会不会被读（含块末与活出块）。⛔ 认不出的指令一律算「会」。
+    fn read_after(&self, b: usize, i: usize, r0: Reg, live_out: Set, clob: Set) -> bool {
         let blk = &self.blocks[b];
-        let mut read = (live_out | term_reads(&blk.term)) & bit(rs) != 0;
+        let mut read = (live_out | term_reads(&blk.term)) & bit(r0) != 0;
         let mut dead = false;
         for k in i + 1..blk.insts.len() {
             let Some((r, w)) = eff(&blk.insts[k], clob) else { return true };
-            read |= !dead && r & bit(rs) != 0;
-            dead |= w & bit(rs) != 0;
+            read |= !dead && r & bit(r0) != 0;
+            dead |= w & bit(r0) != 0;
         }
         read
     }
 
+    /// 乙：把 `(i, end)` 里读 `rd` 的改读 `rs`。⭐ 先全部查通再动手，⛔ 不留半改的状态。
+    fn forward(&mut self, b: usize, i: usize, rd: Reg, rs: Reg, clob: Set) -> bool {
+        let n = self.blocks[b].insts.len();
+        let mut end = n;
+        for k in i + 1..n {
+            let Some((_, w)) = eff(&self.blocks[b].insts[k], clob) else { return false };
+            if w & (bit(rs) | bit(rd)) != 0 {
+                end = k + usize::from(w & bit(rd) != 0 && w & bit(rs) == 0);
+                break;
+            }
+        }
+        // 块末还读 `rd`，而中途没人重写它 ⇒ 改不掉
+        if end == n && term_reads(&self.blocks[b].term) & bit(rd) != 0 {
+            return false;
+        }
+        let mut todo: Vec<usize> = Vec::new();
+        for k in i + 1..end {
+            let Some((r, _)) = eff(&self.blocks[b].insts[k], clob) else { return false };
+            if r & bit(rd) == 0 {
+                continue;
+            }
+            // 只有真指令的使用才改得动（调用的隐含读改不了）
+            let PInst::I(x) = &self.blocks[b].insts[k] else { return false };
+            // ⛔ 隐含读（调用实参）没有字段可改，碰上就整条放弃
+            if !shape(x, clob).is_some_and(|s| s.uses.iter().any(|&(sl, u)| u == rd && sl != Slot::Implicit)) {
+                return false;
+            }
+            if shape(x, clob).is_some_and(|s| s.uses.iter().any(|&(sl, u)| u == rd && sl == Slot::Implicit)) {
+                return false;
+            }
+            todo.push(k);
+        }
+        for k in todo {
+            let PInst::I(x) = &mut self.blocks[b].insts[k] else { continue };
+            let slots: SmallVec<[Slot; 3]> = shape(x, clob).map(|s| s.uses.iter().filter(|&&(_, u)| u == rd).map(|&(s, _)| s).collect()).unwrap_or_default();
+            for s in slots {
+                match s {
+                    Slot::Rs1 => x.rs1 = rs % 32,
+                    Slot::Rs2 => x.rs2 = rs % 32,
+                    Slot::Rs3 => x.rs3 = rs % 32,
+                    // 到不了：上面已经把带隐含读的整条放弃了
+                    Slot::Implicit => unreachable!("隐含读没有字段可改"),
+                }
+            }
+        }
+        true
+    }
     /// 甲：往回找唯一定义 `rs` 的那条，把它的目的改成 `rd`。
     fn fold_def(&mut self, b: usize, i: usize, rd: Reg, rs: Reg, clob: Set, drop: &[usize]) -> bool {
         let mut at = None;
