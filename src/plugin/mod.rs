@@ -13,7 +13,7 @@
 pub use crate::ir::Lowering;
 use crate::ir::{Error, Module};
 use mlirformat::MlirOpt;
-pub use crate::opt::{DCE, Dce, MEM2REG, Mem2Reg, Pass};
+pub use crate::opt::{DCE, Dce, GVN, Gvn, MEM2REG, Mem2Reg, Pass};
 
 /// ⭐ 方言插件。
 pub trait Dialect {
@@ -55,7 +55,7 @@ pub struct Registry<'p> {
 impl Default for Registry<'_> {
     /// 内置的 `llvm` 方言与 pass。
     fn default() -> Self {
-        Self { dialects: vec![&Llvm], passes: vec![&MEM2REG, &DCE] }
+        Self { dialects: vec![&Llvm], passes: vec![&MEM2REG, &GVN, &DCE] }
     }
 }
 

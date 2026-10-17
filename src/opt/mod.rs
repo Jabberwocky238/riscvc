@@ -11,11 +11,13 @@
 //! ⭐ 这个 IR 是 **SSA + 块参数**（⛔ 没有 phi：前驱在跳转处传实参）。所以 LLVM 里「插一个 phi」在这里是
 //! 「给块加一个参数 + 在**每个**前驱的跳转处补一个实参」。任何改 CFG 的变换都要维护这条不变式。
 mod dom;
+mod gvn;
 mod mem2reg;
 mod pass;
 mod passes;
 
 pub use dom::{Dom, Preds};
 pub use pass::{Analysis, AnalysisManager, FunctionPass, Pass, PerFunction, Preserved};
+pub use gvn::{GVN, Gvn, GvnImpl};
 pub use mem2reg::{MEM2REG, Mem2Reg, Mem2RegImpl};
 pub use passes::{DCE, Dce, DceImpl};
