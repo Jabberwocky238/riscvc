@@ -126,6 +126,45 @@ impl Assign {
 /// 调用约定里与具体实参无关的部分：返回寄存器、破坏集、被调方保存、regalloc2 的机器环境。
 pub struct Abi;
 
+/// ⭐ 可分配的寄存器集 —— **结构体注入**：宿主要独占某几个（比如扩展包把常量钉在
+/// `x5…x10`），就在这里把它们拿掉。⛔ 不走 feature、不走环境变量。
+///
+/// 缺省是 RV32 的通用寄存器：整数先用 t / a（调用方保存），再用 s（被调方保存）；
+/// ⛔ 不分配 `zero` / `ra` / `sp` / `gp` / `tp`，`t6` 留给帧地址的大偏移。
+///
+/// ⚠ 实测过：把 s 挪到前面、或全放 preferred，指令总数都会涨 6%~13%
+/// （`mv` 确实降了，但每个函数的序言 / 尾声要存取 s ⇒ 栈访问暴涨）。⛔ 别动这个次序。
+#[derive(Clone, Debug)]
+pub struct Allocatable {
+    /// 整数，优先用的。
+    pub int_first: Vec<u8>,
+    /// 整数，其次用的。
+    pub int_then: Vec<u8>,
+    pub float_first: Vec<u8>,
+    pub float_then: Vec<u8>,
+}
+
+impl Default for Allocatable {
+    fn default() -> Self {
+        Self {
+            int_first: [5u8, 6, 7].into_iter().chain(10..=17).chain(28..=30).collect(),
+            int_then: [8u8, 9].into_iter().chain(18..=27).collect(),
+            float_first: (0u8..=7).chain(10..=17).chain(28..=31).collect(),
+            float_then: [8u8, 9].into_iter().chain(18..=27).collect(),
+        }
+    }
+}
+
+impl Allocatable {
+    /// 去掉这几个整数寄存器（宿主自己占着）。
+    #[must_use]
+    pub fn without_int(mut self, regs: &[u8]) -> Self {
+        self.int_first.retain(|r| !regs.contains(r));
+        self.int_then.retain(|r| !regs.contains(r));
+        self
+    }
+}
+
 impl Abi {
 /// 返回值的位置：整数部件 a0、a1，浮点部件 fa0、fa1；放不下 ⇒ `None`（改由调用方给地址，sret）。
 #[must_use]
@@ -173,10 +212,9 @@ pub const fn callee_saved_f(r: u8) -> bool {
     matches!(r, 8 | 9 | 18..=27)
 }
 
-/// regalloc2 的机器环境：整数先用 t / a，再用 s（不分配 zero、ra、sp、gp、tp，t6 留给帧地址的大偏移）；浮点同理。
-/// `frame`：`s0` 当帧指针（动态改 `sp` 的函数）⇒ ⛔ 分配 `s0`。
+/// regalloc2 的机器环境。`frame`：`s0` 当帧指针（动态改 `sp` 的函数）⇒ ⛔ 分配 `s0`。
 #[must_use]
-pub fn machine_env(frame: bool) -> crate::regalloc::MachineEnv {
+pub fn machine_env(frame: bool, regs: &Allocatable) -> crate::regalloc::MachineEnv {
     let set = |rs: &[u8], class: RegClass| {
         let mut s = PRegSet::empty();
         for &r in rs {
@@ -184,13 +222,10 @@ pub fn machine_env(frame: bool) -> crate::regalloc::MachineEnv {
         }
         s
     };
-    let xp: Vec<u8> = [5u8, 6, 7].into_iter().chain(10..=17).chain(28..=30).collect();
-    let xn: Vec<u8> = [8u8, 9].into_iter().filter(|&r| !(frame && r == 8)).chain(18..=27).collect();
-    let fp: Vec<u8> = (0u8..=7).chain(10..=17).chain(28..=31).collect();
-    let fnp: Vec<u8> = [8u8, 9].into_iter().chain(18..=27).collect();
+    let xn: Vec<u8> = regs.int_then.iter().copied().filter(|&r| !(frame && r == 8)).collect();
     crate::regalloc::MachineEnv {
-        preferred_regs_by_class: [set(&xp, RegClass::Int), set(&fp, RegClass::Float), PRegSet::empty()],
-        non_preferred_regs_by_class: [set(&xn, RegClass::Int), set(&fnp, RegClass::Float), PRegSet::empty()],
+        preferred_regs_by_class: [set(&regs.int_first, RegClass::Int), set(&regs.float_first, RegClass::Float), PRegSet::empty()],
+        non_preferred_regs_by_class: [set(&xn, RegClass::Int), set(&regs.float_then, RegClass::Float), PRegSet::empty()],
         scratch_by_class: [None, None, None],
         fixed_stack_slots: Vec::new(),
     }

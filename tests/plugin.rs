@@ -237,7 +237,7 @@ fn codegen_delegated_to_a_module() {
 
     // ① 代码生成：Op::Custom 交给 Twice::select
     let twice = Twice;
-    let asm = m.compile_with(&[&twice]).expect("代码生成");
+    let asm = m.compile_with(&riscvc::codegen::Options { modules: &[&twice], ..Default::default() }).expect("代码生成");
     assert!(asm.contains("demo.twice"), "选出来的汇编里应当有 demo.twice：\n{asm}");
 
     // ② 汇编：同一个 Module 的 Assemble 编成字节
@@ -343,7 +343,7 @@ fn a_module_can_pin_its_own_registers() {
     reg.dialect(&Pd);
     let m = reg.parse(SRC).unwrap();
     let p = Pinned;
-    let asm = m.compile_with(&[&p]).expect("代码生成");
+    let asm = m.compile_with(&riscvc::codegen::Options { modules: &[&p], ..Default::default() }).expect("代码生成");
     // ⭐ 判据：源操作数必须是 x7 —— 分配器没有替它挑别的
     assert!(asm.contains("demo.pin\tx") && asm.contains(", x7"), "钉死的 x7 应当原样出现：\n{asm}");
 
@@ -360,4 +360,57 @@ fn a_module_can_pin_its_own_registers() {
         assert_eq!(cpu.run_on(0x10000, 0x0fff_fff0, 1000, &mut mods, &mut []), Stop::Returned, "a={a}");
         assert_eq!(cpu.x[10], a.wrapping_add(1), "a={a}");
     }
+}
+
+/// ⭐ 宿主独占一批寄存器：[`Allocatable::without_int`] 拿掉之后，分配器**一个都不许用**。
+///
+/// calvx 要的正是这个：宽指令的常量钉在 `x5…x10`，跨标量片段活着 ⇒ 分配器不能碰。
+///
+/// ⚠ 这条**自验证**：先编一遍不独占的，断言那几个寄存器**确实会被用到** ——
+/// ⛔ 否则「独占后没出现」是白验的（函数太简单、或判据写错了都查不出来）。
+#[test]
+fn the_host_can_reserve_registers() {
+    const SRC: &str = r#"
+"llvm.func"() <{function_type = !llvm.func<i32 (i32, i32, i32, i32, i32)>, linkage = #llvm.linkage<external>, sym_name = "f"}> ({
+^bb0(%a: i32, %b: i32, %c: i32, %d: i32, %e: i32):
+  %1 = "llvm.mul"(%a, %b) : (i32, i32) -> i32
+  %2 = "llvm.mul"(%c, %d) : (i32, i32) -> i32
+  %3 = "llvm.add"(%1, %2) : (i32, i32) -> i32
+  %4 = "llvm.add"(%3, %e) : (i32, i32) -> i32
+  %5 = "llvm.mul"(%4, %1) : (i32, i32) -> i32
+  %6 = "llvm.add"(%5, %2) : (i32, i32) -> i32
+  "llvm.return"(%6) : (i32) -> ()
+}) : () -> ()
+"#;
+    if !needs_m() {
+        return;
+    }
+    /// 一行里有没有用到这个寄存器（⛔ 只看操作数，不看助记符）。
+    fn uses(asm: &str, name: &str) -> bool {
+        asm.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('.'))
+            .any(|l| l.split_whitespace().skip(1).any(|t| t.trim_end_matches(',').trim_matches(['(', ')']) == name))
+    }
+
+    const RESERVED: [u8; 3] = [5, 6, 7];
+    const NAMES: [&str; 3] = ["t0", "t1", "t2"];
+    let reg = Registry::default();
+    let m = reg.parse(SRC).unwrap();
+
+    // ① 不独占：⭐ 至少有一个会被用到，否则这条判据没有意义
+    let before = m.compile().expect("代码生成");
+    let hit: Vec<&str> = NAMES.into_iter().filter(|n| uses(&before, n)).collect();
+    assert!(!hit.is_empty(), "不独占时一个都没用到 ⇒ 这条判据是空的，换个更复杂的函数：\n{before}");
+
+    // ② 独占：一个都不许出现
+    let opts = riscvc::codegen::Options {
+        registers: riscvc::codegen::Allocatable::default().without_int(&RESERVED),
+        ..Default::default()
+    };
+    let after = m.compile_with(&opts).expect("代码生成");
+    for (r, name) in RESERVED.into_iter().zip(NAMES) {
+        assert!(!uses(&after, name), "分配器用了被独占的 {name}（x{r}）：\n{after}");
+    }
+    eprintln!("不独占时用到 {hit:?}，独占后都不见了");
 }

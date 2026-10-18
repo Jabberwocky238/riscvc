@@ -10,6 +10,7 @@
 mod abi;
 mod data;
 mod isel;
+pub use abi::Allocatable;
 pub use isel::Sel;
 mod mir;
 mod opt;
@@ -33,6 +34,16 @@ pub struct Shape<'a> {
     /// （见 `mir::MInst::multi_fixed`）：`.1` 是同一个值传了两次，
     /// `.2` 是实参在调用之后还活着。
     pub multi_fixed: &'a [(&'static str, usize, usize)],
+}
+
+/// ⭐ 代码生成的选项 —— **结构体注入**，⛔ 不走 feature、不走环境变量。
+#[derive(Default)]
+pub struct Options<'a> {
+    /// 挂上的扩展包：`ir::Op::Custom` 由它们选成机器指令（见 [`crate::ext::Module::select`]）。
+    pub modules: &'a [&'a dyn crate::ext::Module],
+    /// 可分配的寄存器。宿主要独占某几个（比如扩展包把常量钉在 `x5…x10`）就写
+    /// `Allocatable::default().without_int(&[5, 6, 7, 8, 9, 10])`。
+    pub registers: Allocatable,
 }
 
 /// 代码生成的旁路观察者：每个函数分配完寄存器之后收到一次分配器的回执。
@@ -60,31 +71,30 @@ impl Module {
         self.compile_observed(&mut ())
     }
 
-    /// 同 [`Self::compile`]，另外挂上扩展包：`ir::Op::Custom` 由它们选成机器指令
-    /// （见 [`crate::ext::Select`]）。
-    pub fn compile_with(&self, mods: &[&dyn crate::ext::Module]) -> Result<String, Error> {
-        self.compile_all(&mut (), mods)
+    /// 同 [`Self::compile`]，另外给一套选项（扩展包、可分配寄存器）。
+    pub fn compile_with(&self, opts: &Options<'_>) -> Result<String, Error> {
+        self.compile_all(&mut (), opts)
     }
 
     /// 同 [`Self::compile`]，另外把每个函数的分配回执交给 `obs`（诊断用）。
     pub fn compile_observed(&self, obs: &mut impl Observer) -> Result<String, Error> {
-        self.compile_all(obs, &[])
+        self.compile_all(obs, &Options::default())
     }
 
-    fn compile_all(&self, obs: &mut impl Observer, mods: &[&dyn crate::ext::Module]) -> Result<String, Error> {
+    fn compile_all(&self, obs: &mut impl Observer, opts: &Options<'_>) -> Result<String, Error> {
         let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::feature::Target::march());
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
                 continue;
             }
-            let mut sel = isel::Isel::select(self, f, mods)?;
+            let mut sel = isel::Isel::select(self, f, opts.modules)?;
             sel.optimize();
             let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs);
             if !mf.well_formed() {
                 return Err(Error::Select(format!("{}：机器块没有以终结指令收尾", f.name)));
             }
-            let opts = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
-            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp), &opts).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
+            let ra = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
+            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp, &opts.registers), &ra).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
             let mut multi: Vec<(&'static str, usize, usize)> = Vec::new();
             if obs.wants_shape() {
                 // 一个 vreg 在第 `i` 条之后还活着：之后还有指令读它，或它被跳转当实参传出去。
