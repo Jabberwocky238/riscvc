@@ -45,6 +45,8 @@ impl PInst {
             Self::I(_) | Self::Trap => 4,
             Self::Li(_, k) if (-2048..2048).contains(k) || k & 0xfff == 0 => 4,
             Self::Li(..) | Self::La(..) | Self::Call(_) => 8,
+            // ⚠ 由插件在选择时声明（`Sel::emit` 的 `bytes`）
+            Self::Ext(_, n) => *n,
         }
     }
 }
@@ -80,6 +82,7 @@ impl fmt::Display for PInst {
             Self::La(rd, sym, off) => write!(f, "lla\t{}, {sym}{off:+}", X(*rd)),
             Self::Call(sym) => write!(f, "call\t{sym}"),
             Self::Trap => f.write_str("unimp"),
+            Self::Ext(text, _) => f.write_str(text),
         }
     }
 }

@@ -58,6 +58,8 @@ pub struct Selected {
 }
 
 pub struct Isel<'m> {
+    /// ⭐ 挂上的扩展包：`Op::Custom` 按它们逐个问（见 [`crate::ext::Select`]）。
+    mods: Vec<&'m dyn crate::ext::Module>,
     m: &'m Module,
     f: &'m Function,
     blocks: Vec<MBlock>,
@@ -101,9 +103,10 @@ pub struct Isel<'m> {
 
 impl<'m> Isel<'m> {
     /// ⭐ 一个函数。
-    pub fn select(m: &'m Module, f: &'m Function) -> Result<Selected, Error> {
+    pub fn select(m: &'m Module, f: &'m Function, mods: &[&'m dyn crate::ext::Module]) -> Result<Selected, Error> {
         let n = f.blocks.len();
         let mut s = Self {
+            mods: mods.to_vec(),
             m,
             f,
             blocks: (0..n).map(|_| MBlock::default()).collect(),
@@ -491,6 +494,23 @@ impl<'m> Isel<'m> {
     fn inst(&mut self, inst: &Inst) -> Result<(), Error> {
         let r = inst.result;
         match &inst.op {
+            Op::Custom { name, args, attrs } => {
+                // ⭐ 交给认得它的扩展包（见 `ext::Select`）；都不认 ⇒ 报错，⛔ 不静默跳过
+                let mods = core::mem::take(&mut self.mods);
+                let mut done = false;
+                for m in &mods {
+                    let mut cx = Sel { isel: self, name, args, attrs, result: r };
+                    if let Some(res) = m.select(&mut cx) {
+                        res.map_err(Error::Select)?;
+                        done = true;
+                        break;
+                    }
+                }
+                self.mods = mods;
+                if !done {
+                    return Err(Error::Select(format!("没有扩展包认得 `{name}`")));
+                }
+            }
             Op::Const(c) => {
                 if let Some(r) = r {
                     self.consts.insert(r, c.clone());
@@ -820,5 +840,80 @@ impl<'m> Isel<'m> {
             self.varargs_stack = assign.stack;
         }
         Ok(())
+    }
+}
+
+/// ⭐ 扩展包做指令选择时的上下文：读这条 [`Op::Custom`] 的操作数与属性，
+/// 开临时寄存器，发机器指令。
+///
+/// ⭐⭐ **委派的粒度是逐操作数**：每个操作数自己选 [`Self::reg`] / [`Self::temp`]
+/// （`R::V`，交给 regalloc2）还是 [`Self::phys`]（`R::P`，插件自己钉死，分配器看不见）。
+/// ⇒ 要复刻某一份飞过的字节就全钉死，要分配器帮忙就放开，**同一个机制两种模式**。
+pub struct Sel<'i, 'm> {
+    isel: &'i mut Isel<'m>,
+    name: &'i str,
+    args: &'i [ValId],
+    attrs: &'i [(String, i64)],
+    result: Option<ValId>,
+}
+
+impl<'i, 'm> Sel<'i, 'm> {
+    /// 这条 op 的完整名字（`<方言>.<操作>`）。
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    /// 整数属性。
+    #[must_use]
+    pub fn attr(&self, key: &str) -> Option<i64> {
+        self.attrs.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
+    }
+
+    /// 有几个操作数。
+    #[must_use]
+    pub fn arity(&self) -> usize {
+        self.args.len()
+    }
+
+    /// 第 `n` 个操作数所在的机器寄存器（⚠ 宽于一个寄存器的值取低半）。
+    pub fn reg(&mut self, n: usize) -> Result<R, String> {
+        let v = *self.args.get(n).ok_or_else(|| format!("`{}` 没有第 {n} 个操作数", self.name))?;
+        self.isel.get1(v).map_err(|e| e.to_string())
+    }
+
+    /// 开一个新的虚拟寄存器（交给分配器）。
+    pub fn temp(&mut self, float: bool) -> R {
+        if float { self.isel.fr() } else { self.isel.xr() }
+    }
+
+    /// ⭐ 钉死一个物理寄存器（`x0`、或要复刻的那一个）。⛔ 分配器看不见它。
+    #[must_use]
+    pub const fn phys(n: u8) -> R {
+        R::P(n)
+    }
+
+    /// 发一条机器指令。`template` 里的 `{}` 由 `defs` 后接 `uses` 的**寄存器号**
+    /// （纯数字，模板自己写 `x{}` / `f{}`）按序填。
+    ///
+    /// ⚠ `bytes` 必须是这条指令真实的字节数：分支松弛按它算距离，⛔ 写错就是跳错地方。
+    pub fn emit(&mut self, template: &str, bytes: u32, defs: &[R], uses: &[R]) {
+        self.isel.emit(MOp::Ext { template: template.into(), bytes }, defs, uses);
+    }
+
+    /// ⭐ 把一个值搬进钉死的物理寄存器 `n`，给出 `R::P(n)`。
+    ///
+    /// 复刻厂商字节时用：⛔ 分配器看不见 `R::P`，所以它不会替你挑别的。
+    /// ⚠ 自己负责别和分配器要用的寄存器撞 —— 要独占某几个就把它们从
+    /// [`crate::codegen::abi`] 的可分配集里去掉。
+    pub fn pin(&mut self, n: u8, src: R) -> R {
+        let dst = R::P(n);
+        self.isel.emit(MOp::Imm(IOp::Addi, 0), &[dst], &[src]);
+        dst
+    }
+
+    /// 把结果绑到这些寄存器上。⛔ 有结果却不绑 ⇒ 后面读它的地方会报「没有定义」。
+    pub fn bind(&mut self, parts: &[R]) {
+        self.isel.set(self.result, parts.to_vec());
     }
 }

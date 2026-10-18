@@ -114,3 +114,250 @@ fn dialect_and_pass() {
         assert_eq!(cpu.x[10], a.wrapping_mul(b).wrapping_add(c));
     }
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// ⭐⭐⭐ 代码生成也委派给扩展包：一条自定义指令走完**四项能力**
+//
+//   Dialect::lower  ⇒ ir::Op::Custom          方言认得 `demo.twice`
+//   Module::select  ⇒ MOp::Ext               选成一条自定义机器指令
+//   Assemble        ⇒ 字节                    汇编器编它
+//   Disassemble     ⇒ 文本                    反汇编回来（对偶，法则 disasm(asm(x)) == x）
+//   Module::execute ⇒ 语义                    模拟器跑它
+//
+// ⭐ 判据是**模拟器跑出来的值**，⛔ 不是「编过了」。这同时验了两组对偶：
+//    assemble/disassemble 的语法对偶，与 select/execute 的**语义**对偶。
+// ───────────────────────────────────────────────────────────────────────────────
+
+use riscvc::codegen::Sel;
+use riscvc::ext::{Args, Assemble, Disassemble, Emit, Exec, Module as ExtModule, Operand};
+use riscvc::isa::Style;
+
+/// `demo.twice rd, rs1, rs2` —— 语义 `rd = (rs1 + rs2) * 2`。
+///
+/// 编码借 RISC-V 的 custom-0 主操作码（0x0b）：`funct7=0 rs2 rs1 funct3=0 rd 0001011`。
+struct Twice;
+
+const OPCODE: u32 = 0x0b;
+
+impl Twice {
+    fn word(bytes: &[u8]) -> u32 {
+        u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+    }
+    fn encode(rd: u8, rs1: u8, rs2: u8) -> u32 {
+        OPCODE | u32::from(rd) << 7 | u32::from(rs1) << 15 | u32::from(rs2) << 20
+    }
+}
+
+impl Disassemble for Twice {
+    fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
+        (Self::word(bytes) & 0xfe00_707f == OPCODE).then_some(4)
+    }
+
+    fn print(&self, bytes: &[u8], _pc: u64, style: Style) -> String {
+        let w = Self::word(bytes);
+        let (rd, rs1, rs2) = ((w >> 7 & 31) as u8, (w >> 15 & 31) as u8, (w >> 20 & 31) as u8);
+        format!("demo.twice\t{}, {}, {}", style.x(rd), style.x(rs1), style.x(rs2))
+    }
+}
+
+impl Assemble for Twice {
+    fn knows(&self, mnemonic: &str) -> bool {
+        mnemonic == "demo.twice"
+    }
+
+    fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
+        if mnemonic != "demo.twice" {
+            return None;
+        }
+        let [Operand::X(rd), Operand::X(rs1), Operand::X(rs2)] = args.ops else {
+            return Some(Err(String::from("demo.twice 要三个整数寄存器")));
+        };
+        Some(Ok(Emit::Bytes(Self::encode(*rd, *rs1, *rs2).to_le_bytes().to_vec())))
+    }
+}
+
+impl ExtModule for Twice {
+    fn name(&self) -> &str {
+        "xdemo"
+    }
+
+    fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), riscvc::sim::Stop> {
+        let w = Self::word(bytes);
+        let (rd, rs1, rs2) = ((w >> 7 & 31) as u8, (w >> 15 & 31) as u8, (w >> 20 & 31) as u8);
+        let v = cx.x(rs1).wrapping_add(cx.x(rs2)).wrapping_mul(2);
+        cx.set(rd, v);
+        Ok(())
+    }
+
+    /// ⭐ 两个操作数都走 `R::V` ⇒ 寄存器由 regalloc2 挑。
+    fn select(&self, cx: &mut Sel<'_, '_>) -> Option<Result<(), String>> {
+        if cx.name() != "demo.twice" {
+            return None;
+        }
+        Some((|| {
+            let (a, b) = (cx.reg(0)?, cx.reg(1)?);
+            let d = cx.temp(false);
+            cx.emit("demo.twice\tx{}, x{}, x{}", 4, &[d], &[a, b]);
+            cx.bind(&[d]);
+            Ok(())
+        })())
+    }
+}
+
+/// 方言：`demo.twice` ⇒ `Op::Custom`。
+struct Twd;
+
+impl Dialect for Twd {
+    fn namespace(&self) -> &str {
+        "demo"
+    }
+
+    fn lower(&self, cx: &mut Lowering<'_, '_>) -> Result<(), Error> {
+        let [a, b] = cx.operands()?[..] else { return Err(Error::Parse(String::from("demo.twice 要两个操作数"))) };
+        let [r] = cx.results()?[..] else { return Err(Error::Parse(String::from("demo.twice 要一个结果"))) };
+        cx.emit(Some(r), Op::Custom { name: String::from("demo.twice"), args: vec![a, b], attrs: Vec::new() });
+        Ok(())
+    }
+}
+
+const TWICE_SRC: &str = r#"
+"llvm.func"() <{function_type = !llvm.func<i32 (i32, i32)>, linkage = #llvm.linkage<external>, sym_name = "f"}> ({
+^bb0(%a: i32, %b: i32):
+  %t = "demo.twice"(%a, %b) : (i32, i32) -> i32
+  %u = "demo.twice"(%t, %b) : (i32, i32) -> i32
+  "llvm.return"(%u) : (i32) -> ()
+}) : () -> ()
+"#;
+
+#[test]
+fn codegen_delegated_to_a_module() {
+    let mut reg = Registry::default();
+    reg.dialect(&Twd);
+    let m = reg.parse(TWICE_SRC).unwrap();
+
+    // ① 代码生成：Op::Custom 交给 Twice::select
+    let twice = Twice;
+    let asm = m.compile_with(&[&twice]).expect("代码生成");
+    assert!(asm.contains("demo.twice"), "选出来的汇编里应当有 demo.twice：\n{asm}");
+
+    // ② 汇编：同一个 Module 的 Assemble 编成字节
+    let obj = riscvc::asm::Assembler::new().modules(&[&twice]).assemble(&asm).expect("汇编");
+
+    // ③ 链接 + 在模拟器里跑 —— ⭐ 判据是值，⛔ 不是「编过了」
+    let script = "SECTIONS {\n  . = 0x10000;\n  .text : { *(.text*) }\n}\n";
+    let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), ..Default::default() }, &[("m.o", obj.as_slice())]).unwrap();
+    for (a, b) in [(3u32, 4u32), (0, 0), (1_000_000, 7), (u32::MAX, 1)] {
+        let mut cpu = Cpu::default();
+        cpu.load(&elf).unwrap();
+        cpu.x[2] = 0x7ff0_0000;
+        cpu.x[10] = a;
+        cpu.x[11] = b;
+        let mut ext = Twice;
+        let mut mods: [&mut dyn ExtModule; 1] = [&mut ext];
+        assert_eq!(cpu.run_on(0x10000, 0x0fff_fff0, 1000, &mut mods, &mut []), Stop::Returned, "a={a} b={b}");
+        // 语义：t = (a+b)*2，u = (t+b)*2
+        let t = a.wrapping_add(b).wrapping_mul(2);
+        assert_eq!(cpu.x[10], t.wrapping_add(b).wrapping_mul(2), "a={a} b={b}");
+    }
+}
+
+/// `demo.pin rd, rs1` —— 语义 `rd = rs1 + 1`，但 **rs1 钉死在 x7**（`R::P`）。
+///
+/// ⭐ 这一条验的是「部分委派」的另一半：插件自己钉死的操作数，regalloc2 **看不见**
+/// （`MInst::finish` 只给 `R::V` 生成 `Operand`）⇒ 复刻厂商字节时全钉死，分配器一个都碰不到。
+struct Pinned;
+
+const PIN_OPCODE: u32 = 0x200b; // custom-0，funct3 = 2
+
+impl Disassemble for Pinned {
+    fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
+        (Twice::word(bytes) & 0xfe00_707f == PIN_OPCODE).then_some(4)
+    }
+    fn print(&self, bytes: &[u8], _pc: u64, style: Style) -> String {
+        let w = Twice::word(bytes);
+        format!("demo.pin\t{}, {}", style.x((w >> 7 & 31) as u8), style.x((w >> 15 & 31) as u8))
+    }
+}
+
+impl Assemble for Pinned {
+    fn knows(&self, mnemonic: &str) -> bool {
+        mnemonic == "demo.pin"
+    }
+    fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
+        if mnemonic != "demo.pin" {
+            return None;
+        }
+        let [Operand::X(rd), Operand::X(rs1)] = args.ops else { return Some(Err(String::from("demo.pin 要两个寄存器"))) };
+        Some(Ok(Emit::Bytes((PIN_OPCODE | u32::from(*rd) << 7 | u32::from(*rs1) << 15).to_le_bytes().to_vec())))
+    }
+}
+
+impl ExtModule for Pinned {
+    fn name(&self) -> &str {
+        "xdemo"
+    }
+    fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), riscvc::sim::Stop> {
+        let w = Twice::word(bytes);
+        let v = cx.x((w >> 15 & 31) as u8).wrapping_add(1);
+        cx.set((w >> 7 & 31) as u8, v);
+        Ok(())
+    }
+    fn select(&self, cx: &mut Sel<'_, '_>) -> Option<Result<(), String>> {
+        if cx.name() != "demo.pin" {
+            return None;
+        }
+        Some((|| {
+            // ⭐ 先把操作数搬进钉死的 x7（用内置的 `mv`），再发这条指令
+            let a = cx.reg(0)?;
+            let pinned = cx.pin(7, a);
+            let d = cx.temp(false);
+            cx.emit("demo.pin\tx{}, x{}", 4, &[d], &[pinned]);
+            cx.bind(&[d]);
+            Ok(())
+        })())
+    }
+}
+
+#[test]
+fn a_module_can_pin_its_own_registers() {
+    const SRC: &str = r#"
+"llvm.func"() <{function_type = !llvm.func<i32 (i32)>, linkage = #llvm.linkage<external>, sym_name = "f"}> ({
+^bb0(%a: i32):
+  %t = "demo.pin"(%a) : (i32) -> i32
+  "llvm.return"(%t) : (i32) -> ()
+}) : () -> ()
+"#;
+    struct Pd;
+    impl Dialect for Pd {
+        fn namespace(&self) -> &str {
+            "demo"
+        }
+        fn lower(&self, cx: &mut Lowering<'_, '_>) -> Result<(), Error> {
+            let [a] = cx.operands()?[..] else { return Err(Error::Parse(String::from("要一个操作数"))) };
+            let [r] = cx.results()?[..] else { return Err(Error::Parse(String::from("要一个结果"))) };
+            cx.emit(Some(r), Op::Custom { name: String::from("demo.pin"), args: vec![a], attrs: Vec::new() });
+            Ok(())
+        }
+    }
+    let mut reg = Registry::default();
+    reg.dialect(&Pd);
+    let m = reg.parse(SRC).unwrap();
+    let p = Pinned;
+    let asm = m.compile_with(&[&p]).expect("代码生成");
+    // ⭐ 判据：源操作数必须是 x7 —— 分配器没有替它挑别的
+    assert!(asm.contains("demo.pin\tx") && asm.contains(", x7"), "钉死的 x7 应当原样出现：\n{asm}");
+
+    let obj = riscvc::asm::Assembler::new().modules(&[&p]).assemble(&asm).expect("汇编");
+    let script = "SECTIONS {\n  . = 0x10000;\n  .text : { *(.text*) }\n}\n";
+    let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), ..Default::default() }, &[("m.o", obj.as_slice())]).unwrap();
+    for a in [0u32, 41, u32::MAX] {
+        let mut cpu = Cpu::default();
+        cpu.load(&elf).unwrap();
+        cpu.x[2] = 0x7ff0_0000;
+        cpu.x[10] = a;
+        let mut ext = Pinned;
+        let mut mods: [&mut dyn ExtModule; 1] = [&mut ext];
+        assert_eq!(cpu.run_on(0x10000, 0x0fff_fff0, 1000, &mut mods, &mut []), Stop::Returned, "a={a}");
+        assert_eq!(cpu.x[10], a.wrapping_add(1), "a={a}");
+    }
+}

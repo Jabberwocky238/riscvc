@@ -30,6 +30,11 @@ pub struct Lower<'a> {
     cur: usize,
 }
 
+/// 寄存器号 ⇒ 文本（⛔ 不上 `format!`：这条路每条扩展指令都走）。
+fn itoa(n: u8) -> String {
+    n.to_string()
+}
+
 impl<'a> Lower<'a> {
     #[must_use]
     pub fn new(sel: &'a Selected, mf: &'a MFunc, out: &'a Output, id: usize) -> Self {
@@ -307,6 +312,20 @@ impl<'a> Lower<'a> {
             MOp::Break => self.real(Inst::new(IOp::Ebreak)),
             // `fence rw, rw`
             MOp::Fence => self.real(Inst::new(IOp::Fence).with_imm(0x33)),
+            // ⭐ 扩展包的指令：把分配到的寄存器按 defs → uses 的次序填进 `{}`，出一行文本。
+            // ⛔ 这里不编任何一个机器字 —— 编码是同一个 Module 的 `Assemble` 的事。
+            MOp::Ext { template, bytes } => {
+                // ⚠ `{}` 填的是**寄存器号**（纯数字）：模板自己写 `x{}` / `f{}`，
+                // ⇒ ⛔ 这里不猜类别，形状由插件与它自己的 `Disassemble::print` 对齐。
+                let mut text = String::new();
+                let mut parts = template.split("{}");
+                text.push_str(parts.next().unwrap_or(""));
+                for (r, rest) in d.iter().chain(u.iter()).zip(parts) {
+                    text.push_str(itoa(*r).as_str());
+                    text.push_str(rest);
+                }
+                self.push(PInst::Ext(text, *bytes));
+            }
             MOp::SpAlloc => {
                 self.rrr(IOp::Sub, X::SP.0, X::SP.0, u[0]);
                 self.addr(d[0], X::SP.0, Frame::up(self.sel.out_args, 16));

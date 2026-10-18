@@ -171,6 +171,14 @@ pub enum Op {
     InsertValue(ValId, ValId, Vec<u32>),
     Freeze(ValId),
     Intr(Intr, Vec<ValId>),
+    /// ⭐ 方言的逃逸口：本 crate 不认识的操作，由扩展包的 [`crate::ext::Select`] 选成机器指令。
+    ///
+    /// `name` 是完整的 op 名（`<方言>.<操作>`），选择时按它分派；`attrs` ⛔ 只收整数 ——
+    /// 要别的就让方言在下降时自己化简掉。
+    ///
+    /// ⚠ 一律当成**有副作用**：dce 不删、gvn / sccp / simplify 不碰、
+    /// 出现在 `args` 里的指针算逃逸（mem2reg ⛔ 不提升）。
+    Custom { name: String, args: Vec<ValId>, attrs: Vec<(String, i64)> },
     /// 运算、指针、值、C 内存序。
     AtomicRmw(RmwOp, ValId, ValId, u8),
     /// 指针、期望值、新值、成功 / 失败时的 C 内存序（编码同 `AtomicRmw`）。
@@ -195,7 +203,7 @@ impl Op {
                 }
                 args = a;
             }
-            Self::Intr(_, a) => list = a,
+            Self::Intr(_, a) | Self::Custom { args: a, .. } => list = a,
             Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
         }
         self.targets()
@@ -272,7 +280,7 @@ impl Op {
                     *v = to(*v);
                 }
             }
-            Self::Intr(_, list) => {
+            Self::Intr(_, list) | Self::Custom { args: list, .. } => {
                 for v in list {
                     *v = to(*v);
                 }

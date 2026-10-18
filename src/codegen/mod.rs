@@ -10,6 +10,7 @@
 mod abi;
 mod data;
 mod isel;
+pub use isel::Sel;
 mod mir;
 mod opt;
 mod post;
@@ -59,14 +60,24 @@ impl Module {
         self.compile_observed(&mut ())
     }
 
+    /// 同 [`Self::compile`]，另外挂上扩展包：`ir::Op::Custom` 由它们选成机器指令
+    /// （见 [`crate::ext::Select`]）。
+    pub fn compile_with(&self, mods: &[&dyn crate::ext::Module]) -> Result<String, Error> {
+        self.compile_all(&mut (), mods)
+    }
+
     /// 同 [`Self::compile`]，另外把每个函数的分配回执交给 `obs`（诊断用）。
     pub fn compile_observed(&self, obs: &mut impl Observer) -> Result<String, Error> {
+        self.compile_all(obs, &[])
+    }
+
+    fn compile_all(&self, obs: &mut impl Observer, mods: &[&dyn crate::ext::Module]) -> Result<String, Error> {
         let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::feature::Target::march());
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
                 continue;
             }
-            let mut sel = isel::Isel::select(self, f)?;
+            let mut sel = isel::Isel::select(self, f, mods)?;
             sel.optimize();
             let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs);
             if !mf.well_formed() {

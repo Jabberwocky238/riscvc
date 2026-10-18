@@ -81,6 +81,14 @@ pub enum MOp {
     Break,
     /// `fence`
     Fence,
+    /// ⭐ 扩展包的指令：`template` 里的 `{}` 由分配到的寄存器按 `defs` → `uses` 的次序填，
+    /// 出一行汇编文本，交给**同一个** [`crate::ext::Module`] 的 `Assemble` 编成字节。
+    ///
+    /// ⚠ 寄存器与约束走 [`MInst`] 的通用字段 ⇒ 分配器不必知道它是谁家的；
+    /// 插件逐操作数选 `R::V`（分配）还是 `R::P`（钉死）。
+    /// `bytes` 是这条指令的字节数 —— ⚠ **必须准**：分支松弛按它算距离。
+    /// ⛔ 这一层问不到扩展包，所以由插件在选择时声明。
+    Ext { template: String, bytes: u32 },
     /// 动态调整 `sp`：`sub sp, sp, rs`（动态 alloca）后，`rd = sp + 出参区大小`。
     SpAlloc,
     /// `stacksave`：`rd = sp`；`stackrestore`：`sp = rs`。
@@ -213,6 +221,7 @@ impl MInst {
             MOp::Trap => "Trap",
             MOp::Break => "Break",
             MOp::Fence => "Fence",
+            MOp::Ext { .. } => "Ext",
             MOp::SpAlloc => "SpAlloc",
             MOp::SpSave => "SpSave",
             MOp::SpRestore => "SpRestore",

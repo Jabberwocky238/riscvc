@@ -119,6 +119,8 @@ fn eff(i: &PInst, clob: Set) -> Option<(Set, Set)> {
         PInst::Li(rd, _) | PInst::La(rd, ..) => Some((0, if *rd == 0 { 0 } else { bit(xr(*rd)) })),
         PInst::Call(_) => Some((args, clob | bit(xr(1)))),
         PInst::Trap => Some((0, 0)),
+        // ⛔ 扩展包的指令：这一层不知道它读写什么 ⇒ 当屏障
+        PInst::Ext(..) => None,
         PInst::I(x) => shape(x, clob).map(|s| (mask(s.uses.iter().map(|&(_, r)| r)), s.clobbers | s.def.map_or(0, bit))),
     }
 }
@@ -290,7 +292,7 @@ impl PFunc {
                     && match &self.blocks[b].insts[k] {
                         PInst::Li(..) | PInst::La(..) => true,
                         PInst::I(x) => shape(x, clob).is_some_and(|s| s.renamable && s.def == Some(rs)),
-                        PInst::Call(_) | PInst::Trap => false,
+                        PInst::Call(_) | PInst::Trap | PInst::Ext(..) => false,
                     };
                 if !ok {
                     return false;
@@ -303,7 +305,7 @@ impl PFunc {
         match &mut self.blocks[b].insts[k] {
             PInst::Li(d, _) | PInst::La(d, ..) => *d = rd % 32,
             PInst::I(x) => x.rd = rd % 32,
-            PInst::Call(_) | PInst::Trap => return false,
+            PInst::Call(_) | PInst::Trap | PInst::Ext(..) => return false,
         }
         true
     }

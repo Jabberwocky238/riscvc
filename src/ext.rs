@@ -12,6 +12,7 @@
 //! ⭐ 写一张标准格式的指令表：`#[derive(Isa)]`（`crate::macros`）+ [`Std<表>`]，见 `src/feature/zmmul.rs`。
 //! 先问扩展、再走标准表：扩展可以占用标准表里没有的编码（RISC-V 的 custom-0..3、低两位不是 `11` 的长指令）。
 use crate::asm::Expr;
+use crate::codegen::Sel;
 use crate::isa::{Inst, Style, Table};
 use crate::sim::{Cpu, Stop};
 use core::marker::PhantomData;
@@ -128,6 +129,22 @@ pub trait Module: Assemble + Disassemble {
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
         let _ = (cx, bytes);
         Ok(())
+    }
+
+    /// ⭐ **指令选择**：一条 [`crate::ir::Op::Custom`] ⇒ 若干条机器指令；不是本模块的 ⇒ `None`。
+    ///
+    /// ⭐⭐ 委派的粒度是**逐操作数**：每个操作数自己选 [`Sel::reg`] / [`Sel::temp`]
+    /// （交给寄存器分配器）还是 [`Sel::phys`]（自己钉死，分配器看不见）。
+    /// ⇒ 要复刻某一份飞过的字节就全钉死，要分配器帮忙就放开。
+    ///
+    /// 与 [`Self::execute`] 是一组对偶，法则是**语义相等**：选出来的指令在模拟器里
+    /// 跑一遍，效果必须等于这条 op 的语义。⭐ riscvc 自带模拟器 ⇒ 这是**可执行的判据**，
+    /// 不是口头约定。
+    ///
+    /// 缺省不参与代码生成（绝大多数扩展只要汇编 / 反汇编）。
+    fn select(&self, cx: &mut Sel<'_, '_>) -> Option<Result<(), String>> {
+        let _ = cx;
+        None
     }
 }
 

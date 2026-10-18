@@ -34,6 +34,8 @@ pub enum PInst {
     Call(String),
     /// `unimp`
     Trap,
+    /// ⭐ 扩展包的指令：整行汇编文本（由 [`crate::codegen::Sel::emit`] 的模板填出来）。
+    Ext(String, u32),
 }
 
 /// 块的结尾。
