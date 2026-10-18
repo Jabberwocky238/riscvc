@@ -64,7 +64,7 @@ fn verbatim_roundtrip() {
     let script = "SECTIONS {\n  . = 0x10000;\n  .text : { *(.text*) }\n  .rodata : { *(.rodata*) }\n  .data : { *(.data*) *(.sdata*) }\n  .bss : { *(.bss*) *(.sbss*) }\n}\n";
     for path in files(&root.join("mc")).into_iter().filter(|p| p.extension().is_some_and(|e| e == "s")) {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let Ok(object) = Assembler::new(AsmOptions::default()).assemble(&std::fs::read_to_string(&path).unwrap()) else { continue };
+        let Ok(object) = Assembler::new().options(AsmOptions::default()).assemble(&std::fs::read_to_string(&path).unwrap()) else { continue };
         objects += 1;
         bad.extend(check(&format!("{name}.o"), &object).err());
         let options = LinkOptions { script: Some(script.into()), allow_undefined: true, ..Default::default() };

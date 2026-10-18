@@ -3,7 +3,7 @@
 //! 只在开了 `c` feature 时编；没有 LLVM ⇒ SKIP。
 #![cfg(feature = "c")]
 mod llvm;
-use riscvc::ext::Disasm;
+use riscvc::ext::Disassembler;
 use riscvc::isa::Style;
 
 fn compare(style: Style, args: &[&str]) {
@@ -35,7 +35,7 @@ fn compare(style: Style, args: &[&str]) {
     for (i, &h) in halves.iter().enumerate() {
         let pc = 2 * i as u64;
         let bytes = h.to_le_bytes();
-        let ours = Disasm::new(&bytes, pc, &[], style).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
+        let ours = Disassembler::new().style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
         let expect = theirs.get(&pc).cloned().unwrap_or_default();
         if ours != expect {
             bad += 1;

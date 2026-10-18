@@ -81,7 +81,7 @@ fn link_with(script: &str, name: &str, objs_from: Objs, no_relax: bool) {
         let text = std::fs::read_to_string(f).unwrap();
         let o = tmp.join(f.file_name().unwrap()).with_extension("o");
         match objs_from {
-            Objs::Riscvc => std::fs::write(&o, riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&text).unwrap()).unwrap(),
+            Objs::Riscvc => std::fs::write(&o, riscvc::asm::Assembler::new().assemble(&text).unwrap()).unwrap(),
             Objs::LlvmRelax => {
                 let (_, err) = llvm.run("llvm-mc", &["-triple=riscv32", "-mattr=+m,+f,+zicsr,+relax", "-target-abi=ilp32f", "-filetype=obj", f.to_str().unwrap(), "-o", o.to_str().unwrap()], "");
                 assert!(!err.contains("error"), "llvm-mc: {err}");

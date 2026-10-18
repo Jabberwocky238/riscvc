@@ -105,7 +105,7 @@ fn division_by_constants_matches_arithmetic() {
     }
     let module = riscvc::ir::Module::try_from(src.as_str()).expect("解析");
     let asm = module.compile().expect("代码生成");
-    let obj = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).expect("汇编");
+    let obj = riscvc::asm::Assembler::new().assemble(&asm).expect("汇编");
     let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(SCRIPT)), ..Default::default() }, &[("div.o", obj.as_slice())]).expect("链接");
     let file = object::File::parse(elf.as_slice()).unwrap();
     let addr = |n: &str| file.symbols().find(|s| s.name() == Ok(n)).map(|s| u32::try_from(s.address()).unwrap()).unwrap();

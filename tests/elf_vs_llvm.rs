@@ -59,14 +59,14 @@ fn missing<'a>(objs: impl Iterator<Item = &'a [u8]>) -> (String, Vec<u8>) {
         }
     }
     let asm: String = used.difference(&defined).map(|n| format!("    .globl {n}\n{n}:\n    ebreak\n")).collect();
-    (String::from("missing.o"), riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&format!("    .text\n{asm}")).unwrap())
+    (String::from("missing.o"), riscvc::asm::Assembler::new().assemble(&format!("    .text\n{asm}")).unwrap())
 }
 
 fn riscvc_obj(mlir: &Path) -> Result<Vec<u8>, String> {
     let text = std::fs::read_to_string(mlir).map_err(|e| e.to_string())?;
     let m = riscvc::ir::Module::try_from(text.as_str()).map_err(|e| format!("转换：{e}"))?;
     let asm = m.compile().map_err(|e| format!("代码生成：{e}"))?;
-    riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).map_err(|e| format!("汇编：{e}"))
+    riscvc::asm::Assembler::new().assemble(&asm).map_err(|e| format!("汇编：{e}"))
 }
 
 fn llc_obj(llvm: &llvm::Llvm, ll: &Path, out: &Path) -> Vec<u8> {

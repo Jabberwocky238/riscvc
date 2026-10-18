@@ -53,7 +53,7 @@ fn needs_m() -> bool {
 /// 编译、链接，在解释器里调 0x10000 处的函数。
 fn run(m: &riscvc::ir::Module, args: &[u32]) -> u32 {
     let asm = m.compile().unwrap();
-    let obj = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).unwrap();
+    let obj = riscvc::asm::Assembler::new().assemble(&asm).unwrap();
     let script = "SECTIONS {\n  . = 0x10000;\n  .text : { *(.text*) }\n}\n";
     let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), ..Default::default() }, &[("m.o", obj.as_slice())]).unwrap();
     let mut cpu = Cpu::default();
@@ -101,7 +101,7 @@ fn dialect_and_pass() {
     reg.run(&mut m, &["dce"]).unwrap();
     assert_eq!(m.functions[0].blocks[0].insts.len(), 3, "dce 删掉 %dead");
     let asm = m.compile().unwrap();
-    let obj = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).unwrap();
+    let obj = riscvc::asm::Assembler::new().assemble(&asm).unwrap();
     let script = "SECTIONS {\n  . = 0x10000;\n  .text : { *(.text*) }\n}\n";
     let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(script)), ..Default::default() }, &[("mac.o", obj.as_slice())]).unwrap();
     let mut cpu = Cpu::default();

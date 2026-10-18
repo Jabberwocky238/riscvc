@@ -22,7 +22,7 @@ fn ours(path: &Path) -> Result<(Module, Vec<u8>), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}：{e}", path.display()))?;
     let m = Module::try_from(text.as_str()).map_err(|e| format!("{}：解析 {e}", path.display()))?;
     let asm = m.compile().map_err(|e| format!("{}：编译 {e}", path.display()))?;
-    let obj = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).map_err(|e| format!("{}：汇编 {e}", path.display()))?;
+    let obj = riscvc::asm::Assembler::new().assemble(&asm).map_err(|e| format!("{}：汇编 {e}", path.display()))?;
     Ok((m, obj))
 }
 

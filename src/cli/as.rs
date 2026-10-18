@@ -46,7 +46,7 @@ impl As {
             attributes: self.arch_attribute.clone(),
             relax: !self.no_relax,
         };
-        let bytes = crate::asm::Assembler::new(opts).assemble(&text).map_err(|e| format!("{}：{e}", self.input.display()))?;
+        let bytes = crate::asm::Assembler::new().options(opts).assemble(&text).map_err(|e| format!("{}：{e}", self.input.display()))?;
         super::write(&self.output, &bytes)
     }
 }

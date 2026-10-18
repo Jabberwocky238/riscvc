@@ -101,7 +101,7 @@ impl Lib {
         for p in builtins {
             let text = std::fs::read_to_string(&p).unwrap();
             let Ok(asm) = Module::try_from(text.as_str()).map_err(|e| e.to_string()).and_then(|m| m.compile().map_err(|e| e.to_string())) else { continue };
-            if let Ok(obj) = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm) {
+            if let Ok(obj) = riscvc::asm::Assembler::new().assemble(&asm) {
                 objs.push((p.file_name().unwrap().to_string_lossy().into_owned(), obj));
             }
         }
@@ -225,7 +225,7 @@ impl Image {
             used.extend(u);
         }
         let asm: String = used.difference(&defs).map(|n| format!("    .globl {n}\n{n}:\n    unimp\n")).collect();
-        riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&format!("    .text\n{asm}")).unwrap()
+        riscvc::asm::Assembler::new().assemble(&format!("    .text\n{asm}")).unwrap()
     }
 
     /// 地址 ⇒ 「符号+偏移」（落在实参缓冲区里 ⇒ `buf+偏移`）。

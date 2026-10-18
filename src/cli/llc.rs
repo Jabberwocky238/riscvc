@@ -157,6 +157,6 @@ impl Llc {
 
     /// 生成的汇编 ⇒ 目标文件。
     fn object(&self, asm: &str) -> Result<Vec<u8>, String> {
-        crate::asm::Assembler::new(crate::asm::Options { attributes: None, relax: !self.no_relax, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
+        crate::asm::Assembler::new().options(crate::asm::Options { attributes: None, relax: !self.no_relax, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
     }
 }

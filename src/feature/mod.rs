@@ -1,4 +1,4 @@
-//! 指令集扩展：一个扩展一个文件夹、一个 cargo feature，全部用 `#[derive(Isa)]` 写表、经 [`crate::ext::Extension`]
+//! 指令集扩展：一个扩展一个文件夹、一个 cargo feature，全部用 `#[derive(Isa)]` 写表、经 [`crate::ext::Module`]
 //! 接进汇编器、反汇编与解释器（核心只认 RV32I）。写新扩展照 `zmmul/` 抄。
 //!
 //! | 文件夹 | feature | 内容 |
@@ -16,7 +16,7 @@ pub mod xthead;
 mod zicsr;
 mod zmmul;
 
-use crate::ext::{Exec, Extension, Std};
+use crate::ext::{Disassemble, Exec, Module, Std};
 use crate::isa::Table;
 use crate::sim::Stop;
 pub use c::Compressed;
@@ -95,8 +95,8 @@ macro_rules! tables {
 
         /// ⭐ 这次编译开了的内置扩展。
         #[must_use]
-        pub fn builtin<'a>() -> Vec<&'a dyn Extension> {
-            let mut out: Vec<&'a dyn Extension> = Vec::new();
+        pub fn builtin<'a>() -> Vec<&'a dyn Module> {
+            let mut out: Vec<&'a dyn Module> = Vec::new();
             $(if $t::ENABLED {
                 const E: Std<$t> = Std::new();
                 out.push(&E);

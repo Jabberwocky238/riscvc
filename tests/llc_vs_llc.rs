@@ -24,7 +24,7 @@ fn level(name: &str) {
         let text = std::fs::read_to_string(f).unwrap();
         let m = Module::try_from(text.as_str()).unwrap();
         let asm = m.compile().unwrap_or_else(|e| panic!("{stem}: {e}"));
-        let ours = riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).unwrap_or_else(|e| panic!("{stem}: 汇编 {e}"));
+        let ours = riscvc::asm::Assembler::new().assemble(&asm).unwrap_or_else(|e| panic!("{stem}: 汇编 {e}"));
         let out = tmp.join(format!("{stem}.o"));
         let ll = root.join("ll").join(format!("{stem}.ll"));
         // 目标跟着 feature 走（开了 C 两边都压缩）

@@ -1,7 +1,7 @@
 //! 译码 + 打印 vs `llvm-objdump`（riscv32，-mattr 同开了的扩展）：随机字逐条比，别名与 no-aliases 两种风格。
 //! 我们这边走 [`Disasm`]（内置扩展 + RV32I），同 `riscvc objdump`。
 mod llvm;
-use riscvc::ext::Disasm;
+use riscvc::ext::Disassembler;
 use riscvc::isa::Style;
 
 fn words(n: usize) -> Vec<u32> {
@@ -52,7 +52,7 @@ fn compare(style: Style, args: &[&str]) {
         let pc = 4 * i as u64;
         // 一个字的反汇编：内置扩展先认，再 RV32I（同 objdump）
         let bytes = w.to_le_bytes();
-        let ours = Disasm::new(&bytes, pc, &[], style).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
+        let ours = Disassembler::new().style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
         let expect = theirs.get(&pc).cloned().unwrap_or_default();
         if ours != expect {
             bad += 1;

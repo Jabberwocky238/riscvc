@@ -179,8 +179,8 @@ struct Mode {
 /// 汇编器状态。
 pub struct Assembler<'e> {
     opts: Options,
-    /// 扩展指令（[`crate::ext::Extension::assemble`]）：给的在前、内置的（M / Zmmul / F / Zicsr）在后；助记符先问它们，不认再走 RV32I。
-    exts: Vec<&'e dyn crate::ext::Extension>,
+    /// 扩展指令（[`crate::ext::Module::assemble`]）：给的在前、内置的（M / Zmmul / F / Zicsr）在后；助记符先问它们，不认再走 RV32I。
+    exts: Vec<&'e dyn crate::ext::Module>,
     pub sections: Vec<Section>,
     cur: usize,
     prev: usize,
@@ -215,7 +215,7 @@ pub struct Assembler<'e> {
 impl<'e> Assembler<'e> {
     /// 挂上扩展指令（借用），排在内置扩展前面。
     #[must_use]
-    pub fn extensions(self, exts: &[&'e dyn crate::ext::Extension]) -> Self {
+    pub fn modules(self, exts: &[&'e dyn crate::ext::Module]) -> Self {
         let mut all = exts.to_vec();
         all.extend(crate::ext::builtin());
         Self { exts: all, ..self }
@@ -237,9 +237,26 @@ impl expr::Names for Assembler<'_> {
     }
 }
 
+impl Default for Assembler<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'e> Assembler<'e> {
+    /// ⭐ 一个汇编器：缺省选项、只有内置模块。选项用 [`Self::options`]、扩展包用 [`Self::modules`]。
     #[must_use]
-    pub fn new(opts: Options) -> Self {
+    pub fn new() -> Self {
+        Self::with(Options::default())
+    }
+
+    /// 换一套选项（⚠ 会重建状态，⛔ 在加过内容之后别调）。
+    #[must_use]
+    pub fn options(self, opts: Options) -> Self {
+        Self::with(opts)
+    }
+
+    fn with(opts: Options) -> Self {
         let relax = opts.relax;
         let mut asm = Self {
             opts,
@@ -271,7 +288,7 @@ impl<'e> Assembler<'e> {
 
     /// ⭐ 汇编一份源文本 ⇒ ELF 目标文件字节。
     ///
-    /// 挂扩展：`Assembler::new(opts).extensions(&[&my_ext]).assemble(text)`。
+    /// 挂扩展：`Assembler::new().options(opts).extensions(&[&my_ext]).assemble(text)`。
     pub fn assemble(mut self, text: &str) -> Result<Vec<u8>, Error> {
         let source = Source { defines: self.opts.defines.clone(), preprocess: self.opts.preprocess };
         let lines = source.lines(text)?;
@@ -624,7 +641,7 @@ impl<'e> Assembler<'e> {
         }
         let l = Toks::try_from(text)?;
         let e = l.cur().expr(&mut NoNames)?;
-        let asm = Self::new(Options::default());
+        let asm = Self::new();
         asm.eval(&e, 0)?.constant().ok_or_else(|| Error::Syntax(format!("`{text}` 不是常数")))
     }
 }

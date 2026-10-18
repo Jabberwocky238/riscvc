@@ -80,31 +80,49 @@ impl From<Vec<u8>> for Emit {
     }
 }
 
-/// ⭐ 一个指令集扩展。
-pub trait Extension {
-    /// 名字（报错与 `--list` 用），同 `-mattr` 的写法（`m`、`f`、`x<厂商>`）。
-    fn name(&self) -> &str;
-
-    /// `bytes` 是 pc 处起的 8 个字节（越过节尾的补 0）⇒ 本扩展的指令有几字节；不是本扩展的 ⇒ `None`。
-    fn decode(&self, bytes: &[u8; 8]) -> Option<usize>;
-
-    /// 一条（`bytes` 恰好是 [`Self::decode`] 给的长度）⇒ 「助记符\t操作数」。
-    fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String;
-
-    /// 助记符（小写）+ 操作数 ⇒ [`Emit`]；不是本扩展的助记符 ⇒ `None`。
+/// ⭐ **汇编**：助记符 + 操作数 ⇒ 字节。
+///
+/// 与 [`Disassemble`] 是**一组对偶**（像 `From` / `Into`），法则是
+/// `disassemble(assemble(助记符, 操作数)) == (助记符, 操作数)`。
+///
+/// ⚠ 两个方向都得自己实现 —— 编码表推不出解码表。⭐ 但标准格式的指令表只要写一次：
+/// `#[derive(Isa)]` 出一张表，[`Std<T>`] 从这**同一张表**同时给出两边。
+pub trait Assemble {
+    /// 助记符（小写）+ 操作数 ⇒ [`Emit`]；不是本模块的助记符 ⇒ `None`。
     fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
         let _ = (mnemonic, args);
         None
     }
 
-    /// 这个助记符**可能**归本扩展吗（⛔ 只看名字、不看操作数）。汇编器按助记符缓存结果，
-    /// 每条指令只问命中的那个扩展 ⇒ 挂了扩展的宿主不必每条都把各家的伪指令表扫一遍。
+    /// 这个助记符**可能**归本模块吗（⛔ 只看名字、不看操作数）。汇编器按助记符缓存结果，
+    /// 每条指令只问命中的那个模块 ⇒ 挂了模块的宿主不必每条都把各家的伪指令表扫一遍。
     ///
     /// 缺省保守地认（`true`），行为与没有这个方法时相同；自己实现能少挨一次 [`Self::assemble`]。
     fn knows(&self, mnemonic: &str) -> bool {
         let _ = mnemonic;
         true
     }
+}
+
+/// ⭐ **反汇编**：字节 ⇒ 助记符 + 操作数。[`Assemble`] 的对偶，见那边的法则。
+pub trait Disassemble {
+    /// `bytes` 是 pc 处起的 8 个字节（越过节尾的补 0）⇒ 本模块的指令有几字节；不是本模块的 ⇒ `None`。
+    fn decode(&self, bytes: &[u8; 8]) -> Option<usize>;
+
+    /// 一条（`bytes` 恰好是 [`Self::decode`] 给的长度）⇒ 「助记符\t操作数」。
+    fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String;
+}
+
+/// ⭐⭐ 一个**扩展包**：汇编与反汇编两半，加上执行。
+///
+/// 运行时挂给 [`crate::asm::Assembler`]、[`Disassembler`] 与 [`Cpu`]
+/// （⛔ 静态注册、编进二进制，不加载 `.so`）。
+///
+/// ⚠ 名字叫 `Module` 而不是 `Extension`：它是**一包东西**（一张表、一组语义），
+/// 不是一条指令，也不是 `-mattr` 里的那个「扩展」——那个是 [`Self::name`] 的取值。
+pub trait Module: Assemble + Disassemble {
+    /// 名字（报错与 `--list` 用），同 `-mattr` 的写法（`m`、`f`、`x<厂商>`）。
+    fn name(&self) -> &str;
 
     /// 执行一条：`cx.cpu.pc` 指着它。要改流向就设 `cx.next`，否则顺序往下（pc + 长度）。
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
@@ -259,11 +277,7 @@ impl<T: Semantics> Std<T> {
     }
 }
 
-impl<T: Semantics> Extension for Std<T> {
-    fn name(&self) -> &str {
-        T::ALL.first().map_or("?", |op| op.ext())
-    }
-
+impl<T: Semantics> Disassemble for Std<T> {
     fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
         Self::inst(bytes).map(|_| 4)
     }
@@ -271,7 +285,9 @@ impl<T: Semantics> Extension for Std<T> {
     fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String {
         Self::inst(bytes).map_or_else(|| String::from("<unknown>"), |i| i.print(pc, style))
     }
+}
 
+impl<T: Semantics> Assemble for Std<T> {
     fn knows(&self, mnemonic: &str) -> bool {
         T::ALL.first().is_some_and(Table::enabled)
             && (mnemonic.parse::<T>().is_ok() || T::PSEUDOS.iter().any(|(pat, _)| pat.split([' ', '\t']).next() == Some(mnemonic)))
@@ -290,6 +306,12 @@ impl<T: Semantics> Extension for Std<T> {
             let bytes = u32::from(f.with_op(op)).to_le_bytes().to_vec();
             if fixups.is_empty() { Emit::Bytes(bytes) } else { Emit::Fixed(bytes, fixups) }
         }))
+    }
+}
+
+impl<T: Semantics> Module for Std<T> {
+    fn name(&self) -> &str {
+        T::ALL.first().map_or("?", |op| op.ext())
     }
 
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
@@ -340,7 +362,7 @@ impl Template {
 
 /// ⭐ 这次编译开了的内置扩展（`src/feature/`，按 cargo feature）。
 #[must_use]
-pub fn builtin<'a>() -> Vec<&'a dyn Extension> {
+pub fn builtin<'a>() -> Vec<&'a dyn Module> {
     crate::feature::builtin()
 }
 
@@ -351,21 +373,42 @@ pub struct Line<'b> {
     pub text: String,
 }
 
-/// ⭐ 反汇编一段代码（给的扩展先认，再内置扩展、RV32I；都不认 ⇒ 4 字节 `<unknown>`，同 llvm-objdump）。
-pub struct Disasm<'b, 'e> {
-    data: &'b [u8],
-    base: u64,
-    at: usize,
-    exts: Vec<&'e dyn Extension>,
+/// ⭐ 反汇编器：挂上模块与打印风格，[`Self::lines`] 反汇编一段。
+///
+/// 认的次序：给的模块先认，再内置的（M / Zmmul / F / Zicsr），最后 RV32I；
+/// 都不认 ⇒ 4 字节 `<unknown>`（同 llvm-objdump）。
+#[derive(Default)]
+pub struct Disassembler<'m> {
+    mods: Vec<&'m dyn Module>,
     style: Style,
 }
 
-impl<'b, 'e> Disasm<'b, 'e> {
+impl<'m> Disassembler<'m> {
     #[must_use]
-    pub fn new(data: &'b [u8], base: u64, exts: &[&'e dyn Extension], style: Style) -> Self {
-        let mut all = exts.to_vec();
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 挂上扩展包（借用），排在内置的前面。
+    #[must_use]
+    pub fn modules(mut self, mods: &[&'m dyn Module]) -> Self {
+        self.mods.extend_from_slice(mods);
+        self
+    }
+
+    /// 打印风格（同 llvm-objdump 的 `-M`）。
+    #[must_use]
+    pub const fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// ⭐ 反汇编 `base` 处起的一段，逐条给出。
+    #[must_use]
+    pub fn lines<'b>(&self, data: &'b [u8], base: u64) -> Lines<'b, 'm> {
+        let mut all = self.mods.clone();
         all.extend(builtin());
-        Self { data, base, at: 0, exts: all, style }
+        Lines { data, base, at: 0, mods: all, style: self.style }
     }
 
     /// pc 处起的 8 个字节（越过末尾补 0）。
@@ -377,14 +420,23 @@ impl<'b, 'e> Disasm<'b, 'e> {
         w
     }
 
-    /// 哪个扩展认这几个字节、长度几何。
+    /// 哪个模块认这几个字节、长度几何。
     #[must_use]
-    pub fn claim<'x>(exts: &'x [&'x dyn Extension], window: &[u8; 8]) -> Option<(&'x dyn Extension, usize)> {
-        exts.iter().find_map(|&e| e.decode(window).map(|n| (e, n)))
+    pub fn claim<'x>(mods: &'x [&'x dyn Module], window: &[u8; 8]) -> Option<(&'x dyn Module, usize)> {
+        mods.iter().find_map(|&e| e.decode(window).map(|n| (e, n)))
     }
 }
 
-impl<'b> Iterator for Disasm<'b, '_> {
+/// 一段代码的逐条反汇编（由 [`Disassembler::lines`] 给）。
+pub struct Lines<'b, 'm> {
+    data: &'b [u8],
+    base: u64,
+    at: usize,
+    mods: Vec<&'m dyn Module>,
+    style: Style,
+}
+
+impl<'b> Iterator for Lines<'b, '_> {
     type Item = Line<'b>;
 
     fn next(&mut self) -> Option<Line<'b>> {
@@ -392,8 +444,8 @@ impl<'b> Iterator for Disasm<'b, '_> {
             return None;
         }
         let pc = self.base + self.at as u64;
-        let window = Self::window(self.data, self.at);
-        let (n, text) = match Self::claim(&self.exts, &window) {
+        let window = Disassembler::window(self.data, self.at);
+        let (n, text) = match Disassembler::claim(&self.mods, &window) {
             Some((e, n)) if self.at + n <= self.data.len() => (n, e.print(&self.data[self.at..self.at + n], pc, self.style)),
             // 开了 C：低两位不是 11 的是 16 位（认不出也只占 2 字节，同 llvm-objdump）
             _ if crate::feature::Compressed::ENABLED && window[0] & 3 != 3 => (2, String::from("<unknown>")),

@@ -84,14 +84,14 @@ fn corpus(sub: &str, how: &str, relax: bool) {
         n += 1;
         // llvm-mc 拒绝的（+relax 下 `%hi(A − B)` 跨可松弛点 …）：riscvc 也得拒绝
         if err.contains("error:") {
-            if riscvc::asm::Assembler::new(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text).is_ok() {
+            if riscvc::asm::Assembler::new().options(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text).is_ok() {
                 bad += 1;
                 eprintln!("{}: llvm-mc 报错、riscvc 没报：{err}", f.display());
             }
             continue;
         }
         let theirs = Norm::of(&std::fs::read(&out).unwrap());
-        let ours = match riscvc::asm::Assembler::new(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text) {
+        let ours = match riscvc::asm::Assembler::new().options(riscvc::asm::Options { relax, ..Default::default() }).assemble(&text) {
             Ok(bytes) => Norm::of(&bytes),
             Err(e) => {
                 bad += 1;

@@ -9,7 +9,7 @@
 //! ```
 //!
 //! 保留编码（`c.addi4spn` 立即数 0、`c.lwsp` rd = 0、RV32 上移位量第 5 位为 1 …）不成行 ⇒ `<unknown>`、执行陷入。
-use crate::ext::{Args, Emit, Exec, Extension, Operand};
+use crate::ext::{Args, Assemble, Disassemble, Emit, Exec, Module, Operand};
 use crate::feature::Float;
 use crate::isa::{Inst, Opcode, Rv32i as IOp, Style};
 use crate::sim::Stop;
@@ -496,11 +496,7 @@ impl Compressed {
     }
 }
 
-impl Extension for Compressed {
-    fn name(&self) -> &str {
-        "c"
-    }
-
+impl Disassemble for Compressed {
     fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
         Self::decode16(&ROWS, Self::half(bytes)).map(|_| 2)
     }
@@ -517,12 +513,20 @@ impl Extension for Compressed {
         }
         Self::print_c(&ROWS, &c, pc, style)
     }
+}
 
+impl Assemble for Compressed {
     fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
         if !mnemonic.starts_with("c.") {
             return None;
         }
         ROWS.iter().any(|r| r.name == mnemonic).then(|| Self::encode(&ROWS, mnemonic, args.ops).map(|h| Emit::Bytes(h.to_le_bytes().to_vec())))
+    }
+}
+
+impl Module for Compressed {
+    fn name(&self) -> &str {
+        "c"
     }
 
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {

@@ -40,7 +40,7 @@ impl Objdump {
                 .map(|s| (s.address(), s.name().unwrap_or("")))
                 .collect();
             labels.sort_unstable();
-            for line in crate::ext::Disasm::new(data, base, &[], style) {
+            for line in crate::ext::Disassembler::new().style(style).lines(data, base) {
                 for (_, name) in labels.iter().filter(|(a, _)| *a == line.pc) {
                     println!("\n{:08x} <{name}>:", line.pc);
                 }

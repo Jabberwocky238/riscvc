@@ -51,7 +51,8 @@ statically linked Rust binary or a library call, so that:
 
 - the backend can be embedded directly into a Rust host (compile, link and load in-process, no temp files);
 - custom instructions (accelerator ops, vendor extensions) are added in Rust, in one place, and are understood by
-  the assembler, the disassembler, the simulator and the code generator at the same time;
+  the assembler, the disassembler and the simulator at the same time (⚠ not the code generator yet — its IR and
+  instruction-selection enums are closed; see [Limitations](#limitations-and-non-goals));
 - results stay reproducible: every component is diffed against the LLVM tool it replaces (see
   [Correctness](#correctness-how-it-is-checked)).
 
@@ -394,10 +395,14 @@ pub enum Zmmul {
   format type.
 - If the standard formats (R / I / S / B / U / J / R4 …) are not enough, implement `riscvc::isa::Layout` for your
   own format — see [`src/feature/xthead/`](src/feature/xthead/).
-- Wrap the table as `riscvc::ext::Std<YourTable>` to obtain an `Extension`, then hand it to
-  `Assembler::extensions`, `Disasm::new` and `Cpu::run_on`.
-- For instructions that do not fit a table at all, implement the `Extension` trait by hand (`decode`, `print`,
-  `assemble`, `execute`). Memory-mapped peripherals implement `Device` (`load` / `store`).
+- Wrap the table as `riscvc::ext::Std<YourTable>` to obtain a `Module`, then hand it to
+  `Assembler::modules`, `Disassembler::modules` and `Cpu::run_on`.
+- A `Module` is an extension pack: it is `Assemble + Disassemble` plus a name and `execute`. The two halves are
+  **duals** (`assemble` turns mnemonic + operands into bytes, `disassemble` turns bytes back), with the law
+  `disassemble(assemble(x)) == x`; a `#[derive(Isa)]` table gives both at once, which is why the common case
+  only writes the table.
+- For instructions that do not fit a table at all, implement `Assemble` / `Disassemble` / `Module` by hand.
+  Memory-mapped peripherals implement `Device` (`load` / `store`).
 
 ## Cargo features
 

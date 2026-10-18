@@ -93,7 +93,7 @@ impl Case<'_> {
                 (f.blocks, f.vals) = body;
             }
         }
-        let ours = match m.compile().map_err(|e| e.to_string()).and_then(|asm| riscvc::asm::Assembler::new(riscvc::asm::Options::default()).assemble(&asm).map_err(|e| format!("汇编：{e}"))) {
+        let ours = match m.compile().map_err(|e| e.to_string()).and_then(|asm| riscvc::asm::Assembler::new().assemble(&asm).map_err(|e| format!("汇编：{e}"))) {
             Ok(o) => o,
             Err(e) => return Self::fail(fails, &self.key, &format!("整份：{e}")),
         };

@@ -1,9 +1,9 @@
 //! RV32 解释器：装 ELF、设寄存器、跑到返回。给代码生成做对拍用（同一份输入，两份编译产物比结果）。
 //!
-//! 核心只执行 RV32I；M / Zmmul / F / Zicsr 的语义在 `src/feature/`，与自定义扩展一样经 [`Extension`] 执行：
+//! 核心只执行 RV32I；M / Zmmul / F / Zicsr 的语义在 `src/feature/`，与自定义扩展一样经 [`Module`] 执行：
 //! [`Cpu::step_on`] / [`Cpu::run_on`] 先问给的扩展、再问内置扩展（按 cargo feature），访存先问 [`Device`]（MMIO）；
 //! [`Cpu::step`] / [`Cpu::run`] = 只挂内置扩展。
-use crate::ext::{Device, Exec, Extension};
+use crate::ext::{Device, Exec, Module};
 use crate::isa::{Inst, Rv32i as Op};
 use std::collections::HashMap;
 
@@ -115,7 +115,7 @@ impl Cpu {
     }
 
     /// ⭐ 执行一条指令：pc 处的字节先给扩展认（给的、再内置的；认了就由它执行），再走 RV32I；访存经设备。
-    pub fn step_on(&mut self, exts: &mut [&mut dyn Extension], devs: &mut [&mut dyn Device]) -> Result<(), Stop> {
+    pub fn step_on(&mut self, exts: &mut [&mut dyn Module], devs: &mut [&mut dyn Device]) -> Result<(), Stop> {
         let mut window = [0; 8];
         self.mem.read(self.pc, &mut window);
         // 给的扩展先认，再内置的（src/feature）
@@ -239,7 +239,7 @@ impl Cpu {
     }
 
     /// 同 [`Self::run`]，挂上扩展与设备（[`Self::step_on`]）。
-    pub fn run_on(&mut self, entry: u32, ret: u32, limit: u64, exts: &mut [&mut dyn Extension], devs: &mut [&mut dyn Device]) -> Stop {
+    pub fn run_on(&mut self, entry: u32, ret: u32, limit: u64, exts: &mut [&mut dyn Module], devs: &mut [&mut dyn Device]) -> Stop {
         self.pc = entry;
         self.x[1] = ret;
         let start = self.steps;
