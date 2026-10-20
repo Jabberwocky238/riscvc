@@ -1,14 +1,14 @@
-//! mlirformat 解析出的模块 ⇒ 内部 IR。函数体里的 op 按命名空间交给注册的方言插件（[`crate::plugin`]）下降，
+//! mlirformat 解析出的模块（有高层方言的先经 mlirpass 下降成 llvm 方言，见 [`Registry::mlirpass`]）⇒ 内部 IR。函数体里的 op 按命名空间交给注册的方言插件（[`crate::plugin`]）下降，
 //! `llvm` 方言是内置的那个（[`Module::op`]）。
 //!
-//! 带操作数分段的 op（`cond_br` / `switch` / `call` / `func` / `mlir.global` …）走 `ops.gen.rs` 的类型化结构体；
+//! 带操作数分段的 op（`cond_br` / `switch` / `call` / `func` / `mlir.global` …）走 mlirformat `llvm` 方言的类型化结构体；
 //! 二元运算、转换、intrinsic 这类只有操作数与一两个属性的，按名字查表读通用 `Operation`。
 use super::{
     Alias, ArgAttrs, BinOp, Block, BlockId, Callee, CastOp, Const, Error, FPred, Function, Global, IPred, Index, Inst, Intr, Kind, Linkage, Module, Op, Param, RmwOp, Target, Ty, Types, ValId,
 };
-use crate::llvm::{self, Llvm, LlvmType};
 use crate::plugin::Registry;
-use mlirformat::{Attribute, FloatKind, Item, NamedAttr, Operation, Region, ShapedKind, Type, Value};
+use mlirformat::llvm_types::LlvmType;
+use mlirformat::{Attribute, FloatKind, Item, NamedAttr, Operation, Region, ShapedKind, Type, Value, llvm};
 use std::collections::HashMap;
 
 impl TryFrom<&str> for Module {
@@ -24,7 +24,11 @@ impl Module {
     /// MLIR 文本 ⇒ 内部 IR，op 交给 `reg` 里注册的方言。
     pub(crate) fn parse_with(text: &str, reg: &Registry<'_>) -> Result<Self, Error> {
         let opt = reg.opt();
-        let parsed = opt.parse(text).map_err(|e| Error::Parse(e.to_string()))?;
+        let mut parsed = opt.parse(text).map_err(|e| Error::Parse(e.to_string()))?;
+        let lower = parsed.items.iter().any(|i| matches!(i, Item::Op(op) if reg.needs_lowering(op)));
+        if lower || reg.optimizes() {
+            parsed = reg.mlirpass(&opt, &parsed, lower)?;
+        }
         let mut m = Self::default();
         for item in &parsed.items {
             let Item::Op(op) = item else { continue };
@@ -488,33 +492,37 @@ impl Module {
                 let e = self.ty(&s.elem)?;
                 self.types.get(Kind::Vector(n, e))
             }
-            Type::Extended(_) => match Llvm::llvm_type(t).ok_or_else(bad)? {
+            Type::Extended(_) => match LlvmType::try_from(t).map_err(|()| bad())? {
                 LlvmType::Void => Types::VOID,
-                LlvmType::Ptr => Types::PTR,
+                LlvmType::Ptr(_) => Types::PTR,
                 LlvmType::Array(n, e) => {
-                    let e = self.ty(e)?;
+                    let e = self.ty(&e)?;
                     self.types.get(Kind::Array(n, e))
                 }
-                LlvmType::Struct { fields, packed, name, opaque } => {
-                    if opaque {
-                        self.types.get(Kind::Opaque(String::from(name.unwrap_or(""))))
-                    } else {
-                        let fields = fields.into_iter().map(|f| self.ty(f)).collect::<Result<Vec<_>, _>>()?;
-                        self.types.get(Kind::Struct(fields, packed))
-                    }
+                LlvmType::Struct { name, opaque: true, .. } => self.types.get(Kind::Opaque(name.unwrap_or_default())),
+                // 只有名字的（引用外层的具名结构体）没有字段
+                LlvmType::Struct { body, packed, .. } => {
+                    let fields = body.unwrap_or_default().iter().map(|f| self.ty(f)).collect::<Result<Vec<_>, _>>()?;
+                    self.types.get(Kind::Struct(fields, packed))
                 }
-                LlvmType::Func(r, args, varargs) => {
-                    let r = self.ty(r)?;
-                    let args = args.into_iter().map(|a| self.ty(a)).collect::<Result<Vec<_>, _>>()?;
-                    self.types.get(Kind::Func(r, args, varargs))
+                LlvmType::Func { ret, params, vararg } => {
+                    let r = self.ty(&ret)?;
+                    let args = params.iter().map(|a| self.ty(a)).collect::<Result<Vec<_>, _>>()?;
+                    self.types.get(Kind::Func(r, args, vararg))
                 }
+                LlvmType::Token | LlvmType::Label | LlvmType::Metadata => return Err(bad()),
             },
             _ => return Err(bad()),
         })
     }
 
     fn linkage(attr: Option<&Attribute<'_>>) -> Linkage {
-        match attr.and_then(Llvm::keyword_of) {
+        // `#llvm.linkage<internal>`：方言属性体保留原文
+        let word = match attr {
+            Some(Attribute::Extended { ext, .. }) => ext.body.as_deref().and_then(|b| b.strip_prefix('<')?.strip_suffix('>')).map(str::trim),
+            _ => None,
+        };
+        match word {
             Some("internal") => Linkage::Internal,
             Some("private") => Linkage::Private,
             Some("weak" | "weak_odr") => Linkage::Weak,
@@ -687,15 +695,15 @@ impl Module {
             "llvm.return" => Op::Ret(op.operands.first().map(|v| b.get(v)).transpose()?),
             "llvm.unreachable" => Op::Unreachable,
             "llvm.br" => {
-                let o: llvm::BrOp<'_> = op.to_op().map_err(typed)?;
+                let o = llvm::BrOp::try_from(op).map_err(typed)?;
                 Op::Br(b.target(&o.dest, &o.dest_operands)?)
             }
             "llvm.cond_br" => {
-                let o: llvm::CondBrOp<'_> = op.to_op().map_err(typed)?;
+                let o = llvm::CondBrOp::try_from(op).map_err(typed)?;
                 Op::CondBr(b.get(&o.condition)?, b.target(&o.true_dest, &o.true_dest_operands)?, b.target(&o.false_dest, &o.false_dest_operands)?)
             }
             "llvm.switch" => {
-                let o: llvm::SwitchOp<'_> = op.to_op().map_err(typed)?;
+                let o = llvm::SwitchOp::try_from(op).map_err(typed)?;
                 let bits = self.types.bits(b.vals[b.get(&o.value)?.0 as usize]).unwrap_or(32);
                 let values = o.case_values.as_ref().map(|v| Self::dense_ints(v)).transpose()?.unwrap_or_default();
                 let segments = o.case_operand_segments.dense();
@@ -717,14 +725,14 @@ impl Module {
                 arg(1)?,
             ),
             "llvm.alloca" => {
-                let o: llvm::AllocaOp<'_> = op.to_op().map_err(typed)?;
+                let o = llvm::AllocaOp::try_from(op).map_err(typed)?;
                 let ty = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
                 Op::Alloca { ty, count: arg(0)?, align: Self::uint(op, "alignment").max(1) }
             }
             "llvm.load" => Op::Load { ptr: arg(0)?, align: Self::uint(op, "alignment"), volatile: flag(op, "volatile_"), atomic: Self::order(op, "ordering") },
             "llvm.store" => Op::Store { val: arg(0)?, ptr: arg(1)?, align: Self::uint(op, "alignment"), volatile: flag(op, "volatile_"), atomic: Self::order(op, "ordering") },
             "llvm.getelementptr" => {
-                let o: llvm::GEPOp<'_> = op.to_op().map_err(typed)?;
+                let o = llvm::GEPOp::try_from(op).map_err(typed)?;
                 let src = self.ty(o.elem_type.ty().ok_or_else(|| Error::Parse(String::from("没有 elem_type")))?)?;
                 let mut dynamic = b.all(&o.dynamic_indices)?.into_iter();
                 let indices = o
@@ -775,7 +783,7 @@ impl Module {
     }
 
     fn call(&mut self, op: &Operation<'_>, b: &Body) -> Result<Op, Error> {
-        let o: llvm::CallOp<'_> = op.to_op().map_err(|e| Error::Parse(e.0))?;
+        let o = llvm::CallOp::try_from(op).map_err(|e| Error::Parse(e.0))?;
         let mut operands = b.all(&o.callee_operands)?;
         let callee = match o.callee.as_ref().and_then(Attr::symbol) {
             Some(name) => Callee::Direct(name),

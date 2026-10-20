@@ -1,4 +1,4 @@
-//! `riscvc llc`：MLIR（`llvm` 方言，通用形式）⇒ 汇编 `.s` 或目标文件 `.o`。
+//! `riscvc llc`：MLIR（`llvm` 方言，通用形式；有高层方言的先经 mlirpass 下降）⇒ 汇编 `.s` 或目标文件 `.o`。
 //!
 //! ⭐ 并行（`-j`）：两层，都在这里（代码生成本身是串行的 `Module::compile`）。
 //! ```text
@@ -31,6 +31,9 @@ pub struct Llc {
     /// 代码生成前在内部 IR 上跑的 pass（按给的次序，可重复）。给了就整条取代缺省的那串。
     #[arg(long = "pass")]
     passes: Vec<String>,
+    /// 高层方言（func / arith / scf / memref …）下降成 llvm 方言的 mlirpass 流水线（缺省 `plugin::LOWERING`）。
+    #[arg(long)]
+    lowering: Option<String>,
     /// ⛔ 不跑中端 pass（`llc` 本身不优化，要逐条对着它看代码时用这个）。
     #[arg(long)]
     no_opt: bool,
@@ -113,7 +116,10 @@ impl Llc {
 
     /// 读 + 解析 + pass（每个任务自己一份注册表：插件不要求 `Sync`）。
     fn parse(&self, input: &Path) -> Result<Module, String> {
-        let reg = Registry::default();
+        let mut reg = Registry::default();
+        if let Some(p) = &self.lowering {
+            reg.lowering(p);
+        }
         let text = String::from_utf8(super::read(input)?).map_err(|e| format!("{}：{e}", input.display()))?;
         let mut module = reg.parse(&text).map_err(|e| format!("{}：{e}", input.display()))?;
         let pipeline: Vec<&str> = match (self.no_opt, self.passes.is_empty()) {

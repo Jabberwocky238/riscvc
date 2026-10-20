@@ -68,7 +68,7 @@ derived from the enabled features):
 | `riscvc as` | `llvm-mc -filetype=obj` / `clang -c x.s` |
 | `riscvc ld` | `ld.lld` (default options, incl. `-z relro`, `-O1` merge, relaxation) |
 | `riscvc objdump` | `llvm-objdump -d` |
-| MLIR input | `mlir-opt --mlir-print-op-generic` output of the LLVM 22 `llvm` dialect (op definitions generated from that release's `LLVMOps.td` / `LLVMIntrinsicOps.td`) |
+| MLIR input | `mlir-opt --mlir-print-op-generic` output of the LLVM 22 `llvm` dialect (op definitions from [mlirformat](https://crates.io/crates/mlirformat), generated from that release's `LLVMOps.td` / `LLVMIntrinsicOps.td`) |
 
 Behaviour of other LLVM versions (older relaxation rules, different section defaults, changed dialect ops) is not
 tracked. The comparison corpus is the compiler-rt builtins and the MC / lld RISC-V tests of the same release.
@@ -80,7 +80,7 @@ tracked. The comparison corpus is the compiler-rt builtins and the MC / lld RISC
 | ISA | RV32I base; M, Zmmul, F, Zicsr; C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a Cargo feature | D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot, Zcb / Zcmp |
 | ABI | `ilp32f` (with `f`), `ilp32` + soft-float (without `f`) | `ilp32d`, `lp64*` |
 | Default target | `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`, ABI `ilp32f` | |
-| Compiler input | MLIR `llvm` dialect in **generic form** (`mlir-opt --mlir-print-op-generic`) | C / C++ (this is not a front end) |
+| Compiler input | MLIR `llvm` dialect in **generic form** (`mlir-opt --mlir-print-op-generic`); higher-level dialects (`func`, `arith`, `scf`, `cf`, `memref`, `math`, `index`, `affine`, `ub`) in any form, lowered in-process by [mlirpass](#higher-level-dialects-mlirpass) | C / C++ (this is not a front end); `vector`, `tensor`, `linalg` (bufferize / lower them first) |
 | Assembler input | GNU assembly (`.s`); `.S` with a simple preprocessor (`#if`, `#ifdef`, `#define`) | full C preprocessor, macros beyond that |
 | Linker | linker-script subset (`ENTRY`, `SECTIONS`, `.`, `ALIGN`, `/DISCARD/`, assignments), static executables, RISC-V relocations, linker relaxation, `SHF_MERGE` deduplication | shared objects, dynamic linking, TLS relaxation |
 | Output | ELF32 little-endian object files and executables | other formats |
@@ -89,6 +89,22 @@ About the generic form: 19 LLVM-dialect ops (`llvm.func`, `llvm.call`, `llvm.icm
 `llvm.mlir.global`, …) have hand-written custom assembly formats that [mlirformat](https://crates.io/crates/mlirformat)
 does not parse, so they must be in generic form. The other 61 ops are accepted in either form. Printing the whole
 module with `--mlir-print-op-generic` is the simplest rule to follow.
+
+### Higher-level dialects: mlirpass
+
+A module with ops outside `llvm` / `builtin` / a registered plugin dialect is first lowered to the `llvm` dialect by
+[mlirpass](https://github.com/Jabberwocky238/mlirpass) (pure Rust, checked against `mlir-opt` 22.1.8), in the same
+process, with the pipeline `riscvc::plugin::LOWERING`:
+
+```text
+lower-affine, convert-scf-to-cf, convert-math-to-llvm, convert-math-to-libm, expand-strided-metadata,
+finalize-memref-to-llvm, convert-{arith,index,cf,func,ub}-to-llvm (all index-bitwidth=32), reconcile-unrealized-casts
+```
+
+`index` is 32 bits (RV32). `riscvc llc --lowering '<pipeline>'` / `Registry::lowering` replace the pipeline
+(`mlir-opt --pass-pipeline` syntax, any mlirpass pass). A module that is already all `llvm` dialect does not go
+through mlirpass. `memref.alloc` lowers to `malloc` / `free` calls and `math` ops without an LLVM intrinsic to libm
+calls: link those yourself. Example: [`tests/mlirpass.rs`](tests/mlirpass.rs).
 
 Coming from LLVM IR instead of MLIR:
 
@@ -263,6 +279,7 @@ riscvc llc [OPTIONS] -o <OUTPUT> <INPUTS>...
 | `--emit <asm\|obj>` | what to produce (default: from the `-o` extension for one input, `obj` for several) |
 | `-j, --jobs <N>` | worker threads (default: number of CPUs) |
 | `--pass <NAME>` | run a pass on the internal IR before code generation (repeatable, runs in order) |
+| `--lowering <PIPELINE>` | mlirpass pipeline lowering higher-level dialects to `llvm` (default `riscvc::plugin::LOWERING`) |
 | `--list-plugins` | list registered dialects and passes |
 | `--no-relax` | object output without `R_RISCV_RELAX` / `R_RISCV_ALIGN` (like `llc -mattr=-relax`; default on, like llc) |
 
@@ -423,13 +440,13 @@ depending on `thiserror` only.
 
 ```toml
 # plain rv32i with soft-float
-riscvc = { version = "0.1", default-features = false, features = ["toolchain", "zicsr"] }
+riscvc = { version = "0.2", default-features = false, features = ["toolchain", "zicsr"] }
 
 # only the ELF model (no_std)
-riscvc = { version = "0.1", default-features = false }
+riscvc = { version = "0.2", default-features = false }
 
 # defaults plus all T-Head extensions
-riscvc = { version = "0.1", features = ["xthead"] }
+riscvc = { version = "0.2", features = ["xthead"] }
 ```
 
 The `.riscv.attributes` arch string (`feature::Target::march()`) and the LLVM `-mattr` string used for comparisons
@@ -484,6 +501,10 @@ no move hints, no rematerialization and coalesces only two-address operands and 
 remaining code-size gap against llc mostly comes from.
 
 ## Building and testing
+
+mlirformat and mlirpass are path dependencies (one mlirformat for both, since modules pass between them in memory):
+checkouts at `../../../mlirformat.rs` and `../../../mlirpass` relative to this directory (next to the `dopamine`
+super-repository).
 
 ```bash
 cargo build --release

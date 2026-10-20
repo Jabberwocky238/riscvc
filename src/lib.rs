@@ -30,8 +30,6 @@ pub mod ir;
 pub mod isa;
 #[cfg(feature = "toolchain")]
 pub mod link;
-#[cfg(feature = "toolchain")]
-pub mod llvm;
 /// 过程宏（`riscvc-macros`）：`#[derive(Isa)]` 指令表、`#[derive(Opcode)]` 操作码并集。
 #[cfg(feature = "toolchain")]
 pub mod macros {
