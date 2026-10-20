@@ -503,8 +503,7 @@ remaining code-size gap against llc mostly comes from.
 ## Building and testing
 
 mlirformat and mlirpass are path dependencies (one mlirformat for both, since modules pass between them in memory):
-checkouts at `../../../mlirformat.rs` and `../../../mlirpass` relative to this directory (next to the `dopamine`
-super-repository).
+checkouts at `../../../mlirformat.rs` and `../../../mlirpass` relative to this directory (sibling checkouts).
 
 ```bash
 cargo build --release

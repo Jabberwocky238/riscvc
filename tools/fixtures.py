@@ -2,7 +2,7 @@
 """LLVM 自带的测试 fixture ⇒ 对拍语料（入库）tests/fixtures/mc/<目录>-<名>.s。用法：tools/fixtures.py [LLVM bin 目录]
 
   来源：llvm/test/MC/RISCV（含子目录）、lld/test/ELF/riscv-*.s 的全部 `.s`。
-  按 CCU 标量核的开关（rv32 +m,+f,+zicsr,-relax，ilp32f）过 llvm-mc：它报错的行注释掉、再过，直到不报错；
+  按 rv32 +m,+f,+zicsr,-relax、ilp32f 的开关过 llvm-mc：它报错的行注释掉、再过，直到不报错；
   剩下的就是「llvm-mc 在这个目标上接受的部分」，riscvc as 必须出一样的目标文件。整份删光或 10 轮还报错的丢掉。
   lld 的 fixture 里 `split-file` 的多份（`#--- 名`）拆成多份。
   ⛔ 范围外的先注释掉（见 SCOPE），再过 llvm-mc：被它们打开的扩展指令随之被 llvm-mc 拒掉。

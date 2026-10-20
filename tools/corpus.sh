@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 对拍语料：compiler-rt builtins 的 C 源 ⇒ clang（对照用的 LLVM）⇒ target/corpus/{s,ll,mlir}/<名>.<档>.{s,ll,mlir}
 #   mlir：.ll ⇒ mlir-translate --import-llvm ⇒ mlir-opt --mlir-print-op-generic（LLVM 方言、通用形式）
-#   档：O0 / O2；目标同 CCU 标量核（rv32imf + zicsr，ilp32f，-mno-relax）。
+#   档：O0 / O2；目标 rv32imf + zicsr，ilp32f，-mno-relax。
 #   用法：tools/corpus.sh [LLVM bin 目录]（缺省 ../llvm-project/build/bin）
 set -euo pipefail
 cd "$(dirname "$0")/.."

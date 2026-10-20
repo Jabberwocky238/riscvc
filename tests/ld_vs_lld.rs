@@ -1,14 +1,14 @@
 //! 链接器 vs `ld.lld`：`target/corpus/s/*.O2.s`（compiler-rt）经 riscvc 汇编成一组目标文件，一起链，
-//! 用 docc 在用的两种链接脚本；比可装载节（含 0 字节的：名字、地址、大小、类型、标志、项长、字节）、程序头、
+//! 用两种常见的嵌入式链接脚本（平铺 / 带 AT 装载地址）；比可装载节（含 0 字节的：名字、地址、大小、类型、标志、项长、字节）、程序头、
 //! 入口、全局符号的值。
 mod llvm;
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::collections::BTreeMap;
 
-/// docc calvx `toolchain.rs` 的脚本。
+/// 平铺：一个基址，各节顺次排下去。
 const FLAT: &str = "ENTRY(_start)\nSECTIONS {\n  . = 0x0a210000;\n  .text : { *(.text.start) *(.text*) }\n  .rodata : ALIGN(8) { *(.rodata*) *(.srodata*) }\n  .bss : ALIGN(4) { *(.bss*) *(.sbss*) *(COMMON) }\n  /DISCARD/ : { *(.comment) }\n}\n";
 
-/// docc calvx `libccu.rs` 的 `Program::script`（ccu0）。
+/// 运行地址与装载地址分开（`AT`）、带 `NOLOAD` 的 `.bss` 与 `/DISCARD/`。
 const PROGRAM: &str = "ENTRY(__fixsfsi)\n__stack_top = 0xa208000;\nSECTIONS {\n  .text 0xa210000 : AT(0x10000) { KEEP(*fixsfsi.O2.o(.text)) *(.text .text.*) }\n  .nops : { KEEP(*(.nops)) }\n  .rodata : { *(.rodata .rodata.* .srodata .srodata.*) }\n  .data : { *(.data .data.* .sdata .sdata.*) }\n  .bss (NOLOAD) : { __bss_start = .; *(.bss .bss.* .sbss .sbss.* COMMON) . = ALIGN(4); __bss_end = .; }\n  /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.riscv.attributes) }\n}\n";
 
 #[derive(Debug, PartialEq)]

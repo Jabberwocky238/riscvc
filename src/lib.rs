@@ -40,7 +40,7 @@ pub mod macros {
 pub mod opt;
 
 /// 插件接口（方言与 pass）。⛔ 必须跟着 `toolchain` 走：它依赖 `ir` / `opt` / mlirformat，
-/// 没门的话 `--no-default-features` 编不过，连带 libdope（path 依赖 + `default-features = false`）一起红。
+/// 没门的话 `--no-default-features` 编不过，连带只用 `elf` 的下游（`default-features = false`）一起红。
 #[cfg(feature = "toolchain")]
 pub mod plugin;
 #[cfg(feature = "toolchain")]

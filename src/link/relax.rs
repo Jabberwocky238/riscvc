@@ -8,7 +8,7 @@
 //! 同时按「锚」（符号的起点与终点）更新本节符号的值与大小。有变化就重排地址、再来一轮（最多 30 轮）。
 //! 定下来以后改写节内容（删字节、写 jal / nop）、重定位的位置与类型、符号的值与大小。
 //! ```
-//! ⛔ 不做：TLS 的 tprel / tlsdesc 松弛（CCU 静态、无 TLS）、`--relax-gp`（lld 缺省也不做）、压缩指令。
+//! ⛔ 不做：TLS 的 tprel / tlsdesc 松弛（目标是静态可执行文件、无 TLS）、`--relax-gp`（lld 缺省也不做）、压缩指令。
 use super::input::Place;
 use super::{Def, Error, Linker, Piece};
 use object::elf;

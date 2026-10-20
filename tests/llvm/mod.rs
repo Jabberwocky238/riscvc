@@ -1,4 +1,4 @@
-//! 对照用的 LLVM（⛔ 不是依赖）：`RISCVC_LLVM_BIN`，缺省 `../llvm-project/build/bin`（jw238 下 docc 的构建树）。
+//! 对照用的 LLVM（⛔ 不是依赖）：`RISCVC_LLVM_BIN`，缺省 `../llvm-project/build/bin`（相邻的 llvm-project 构建树）。
 //! 找不到就说 SKIP、测试照过。
 #![allow(dead_code)]
 use std::path::PathBuf;

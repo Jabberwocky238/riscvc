@@ -170,7 +170,7 @@ pub struct Style {
     pub no_aliases: bool,
     /// `numeric`：寄存器印 `x5` / `f3`。
     pub numeric: bool,
-    /// 立即数十六进制（docc 的 shim：`setPrintImmHex(true)`）。
+    /// 立即数十六进制（同 LLVM 的 `setPrintImmHex(true)`）。
     pub hex: bool,
     /// 跳转目标印成地址（`pc + 偏移`）而不是偏移。
     pub address: bool,
