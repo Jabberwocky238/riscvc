@@ -3,7 +3,7 @@ use super::XtForm;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadmac", feature = "xtheadmac", form = XtForm)]
+#[isa(name = "xtheadmac", form = XtForm)]
 pub enum XTheadMac {
     #[isa("th.mula", R, 0x2000_100b, exec = |c, i| c.set(i.rd, c.x(i.rd).wrapping_add(c.x(i.rs1).wrapping_mul(c.x(i.rs2)))))]
     Mula,

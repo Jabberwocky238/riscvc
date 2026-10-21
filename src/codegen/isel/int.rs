@@ -313,12 +313,12 @@ impl Isel<'_> {
     fn bitcast(&mut self, from: Ty, x: Vec<R>, to: Ty) -> Result<Vec<R>, Error> {
         let class = |s: &Self, t: Ty| s.parts(t).map(|p| p.iter().map(|q| q.class()).collect::<Vec<_>>());
         Ok(match (self.kind(from), self.kind(to)) {
-            (Kind::Float, Kind::Int(32)) if Float::ENABLED => {
+            (Kind::Float, Kind::Int(32)) if self.float() => {
                 let d = self.xr();
                 self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[d], &x);
                 vec![d]
             }
-            (Kind::Int(32), Kind::Float) if Float::ENABLED => {
+            (Kind::Int(32), Kind::Float) if self.float() => {
                 let d = self.fr();
                 self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &x);
                 vec![d]

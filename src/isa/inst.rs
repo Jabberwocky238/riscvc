@@ -40,8 +40,6 @@ pub trait Table: Copy + PartialEq + fmt::Debug + fmt::Display + FromStr + 'stati
         let _ = op;
         Self::ALL
     }
-    /// 这次编译认不认（扩展的 cargo feature 开了没有）。
-    fn enabled(&self) -> bool;
     fn mask(&self) -> u32;
     fn encode(&self, f: &Fields) -> u32;
     fn decode(&self, w: u32) -> Option<Fields>;
@@ -147,9 +145,9 @@ impl<O: Table> From<Inst<O>> for u32 {
 
 impl<O: Table> TryFrom<u32> for Inst<O> {
     type Error = ();
-    /// 按这张表译一个字（只认开了的）：命中多条时取掩码位最多的（`fence.tso` 胜过 `fence`）。
+    /// 按这张表译一个字（开不开是调用方的事：模块列表里有这张表才会问到它）：命中多条时取掩码位最多的（`fence.tso` 胜过 `fence`）。
     fn try_from(w: u32) -> Result<Self, ()> {
-        let op = O::by_opcode(w & 0x7f).iter().copied().filter(|op| op.enabled() && w & op.mask() == op.bits()).max_by_key(|op| op.mask().count_ones()).ok_or(())?;
+        let op = O::by_opcode(w & 0x7f).iter().copied().filter(|op| w & op.mask() == op.bits()).max_by_key(|op| op.mask().count_ones()).ok_or(())?;
         Ok(op.decode(w).ok_or(())?.with_op(op))
     }
 }
@@ -174,6 +172,8 @@ pub struct Style {
     pub hex: bool,
     /// 跳转目标印成地址（`pc + 偏移`）而不是偏移。
     pub address: bool,
+    /// 目标没有 F：浮点 CSR（`fcsr` / `frm` / `fflags`）⛔ 印成 `frcsr` 一类别名（同 llvm-objdump 不带 `+f`）。
+    pub no_float_csr: bool,
 }
 
 impl Style {

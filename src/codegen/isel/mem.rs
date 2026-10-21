@@ -168,7 +168,7 @@ impl Isel<'_> {
                 }
                 words.push(acc);
             }
-            if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
+            if matches!(self.kind(t), Kind::Float) && self.float() {
                 let d = self.fr();
                 self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[words[0]]);
                 return Ok(vec![d]);
@@ -203,7 +203,7 @@ impl Isel<'_> {
             Kind::Fp128 => (0..4).map(|k| one(self, IOp::Lw.into(), false, off + 4 * k)).collect(),
             Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
             Kind::Half | Kind::BFloat => vec![one(self, IOp::Lhu.into(), false, off)],
-            Kind::Float if crate::feature::Float::ENABLED => vec![one(self, Float::Flw.into(), true, off)],
+            Kind::Float if self.float() => vec![one(self, Float::Flw.into(), true, off)],
             Kind::Float => vec![one(self, IOp::Lw.into(), false, off)],
             k => return Self::bad(format!("不能 load {k:?}")),
         })
@@ -249,7 +249,7 @@ impl Isel<'_> {
             s.emit(MOp::Store(op, b, o), &[], &uses);
         };
         if align < natural && size > 1 {
-            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && crate::feature::Float::ENABLED {
+            let words: Vec<R> = if matches!(self.kind(t), Kind::Float) && self.float() {
                 let x = self.xr();
                 self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[parts[0]]);
                 vec![x]
@@ -288,7 +288,7 @@ impl Isel<'_> {
             }
             Kind::Ptr => one(self, IOp::Sw.into(), parts[0], off),
             Kind::Half | Kind::BFloat => one(self, IOp::Sh.into(), parts[0], off),
-            Kind::Float if crate::feature::Float::ENABLED => one(self, Float::Fsw.into(), parts[0], off),
+            Kind::Float if self.float() => one(self, Float::Fsw.into(), parts[0], off),
             Kind::Float => one(self, IOp::Sw.into(), parts[0], off),
             k => return Self::bad(format!("不能 store {k:?}")),
         }

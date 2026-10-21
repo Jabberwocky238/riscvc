@@ -2,7 +2,7 @@
 //!
 //! ```ignore
 //! #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-//! #[isa(name = "zmmul", feature = "zmmul")]                   // 扩展名（-mattr 写法）；可选：feature = cargo feature、
+//! #[isa(name = "zmmul")]                                     // 扩展名（-mattr 写法，也是 `Module::name`）；可选：
 //!                                                             // form = 格式类型（实现 Layout，缺省 riscvc::isa::Base）、alias = 打印别名的函数
 //! #[pseudo("mul.lo $rd:x, $a:x, $b:x" => "mul $rd, $a, $b")]  // 伪指令模板：`$名:类`（x / f / 不写 = 任意）
 //! pub enum Zmmul {
@@ -11,7 +11,7 @@
 //! }
 //! ```
 //!
-//! `Isa` 生成：`ALL`、`ENABLED`、`form()`、`Table`（名字、固定位、开没开、按格式编 / 译 / 印 / 汇编、打印别名）、`FromStr` / `Display`；
+//! `Isa` 生成：`ALL`、`form()`、`Table`（名字、固定位、按格式编 / 译 / 印 / 汇编、打印别名）、`FromStr` / `Display`；
 //! 有 `exec` 的再生成 `Semantics`（执行、伪指令模板），配 `riscvc::ext::Std<T>` 就是一个完整的扩展。
 //! `Opcode` 写在「每个变体包一张表」的枚举上，生成 `From<表>`、`Table` 的委托与按表的 `match`。
 use proc_macro::TokenStream;
@@ -73,8 +73,8 @@ pub fn derive_isa(input: TokenStream) -> TokenStream {
 fn isa(input: &DeriveInput) -> syn::Result<Ts> {
     let ty = &input.ident;
     let Data::Enum(data) = &input.data else { return Err(syn::Error::new_spanned(ty, "`Isa` 只用在枚举上")) };
-    // 表头：name / feature / alias
-    let (mut name, mut feature, mut alias, mut form) = (None::<LitStr>, None::<LitStr>, None::<Path>, None::<Path>);
+    // 表头：name / alias
+    let (mut name, mut alias, mut form) = (None::<LitStr>, None::<Path>, None::<Path>);
     let mut pseudos = Vec::new();
     for a in &input.attrs {
         if a.path().is_ident("isa") {
@@ -82,13 +82,13 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
                 if m.path.is_ident("name") {
                     name = Some(m.value()?.parse()?);
                 } else if m.path.is_ident("feature") {
-                    feature = Some(m.value()?.parse()?);
+                    return Err(m.error("扩展不再是 cargo feature：开不开由运行时的 `feature::Target`（一组 `ext::Module`）决定，删掉 `feature = …`"));
                 } else if m.path.is_ident("alias") {
                     alias = Some(m.value()?.parse()?);
                 } else if m.path.is_ident("form") {
                     form = Some(m.value()?.parse()?);
                 } else {
-                    return Err(m.error("表头只认 name / feature / alias / form"));
+                    return Err(m.error("表头只认 name / alias / form"));
                 }
                 Ok(())
             })?;
@@ -97,7 +97,6 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
         }
     }
     let name = name.ok_or_else(|| syn::Error::new_spanned(ty, "要 `#[isa(name = \"…\")]`"))?;
-    let enabled = feature.map_or_else(|| quote!(true), |f| quote!(cfg!(feature = #f)));
     let form = form.map_or_else(|| quote!(::riscvc::isa::Base), |f| quote!(#f));
     let alias = alias.map(|a| quote! {
         fn alias(i: &::riscvc::isa::Inst<Self>, pc: u64, style: ::riscvc::isa::Style) -> Option<(String, String)> {
@@ -138,8 +137,6 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
         impl #ty {
             /// 全部指令。
             pub const ALL: &'static [Self] = &[#(Self::#idents),*];
-            /// 这次编译开没开（扩展的 cargo feature）。
-            pub const ENABLED: bool = #enabled;
             /// 这条的格式。
             #[must_use]
             pub fn form(&self) -> #form { match self { #(Self::#idents => <#form>::#forms),* } }
@@ -150,7 +147,6 @@ fn isa(input: &DeriveInput) -> syn::Result<Ts> {
             fn name(&self) -> &str { match self { #(Self::#idents => #names),* } }
             fn bits(&self) -> u32 { match self { #(Self::#idents => #bits),* } }
             fn by_opcode(op: u32) -> &'static [Self] { match op { #(#arms)* _ => &[#(Self::#rest),*] } }
-            fn enabled(&self) -> bool { Self::ENABLED }
             fn mask(&self) -> u32 { ::riscvc::isa::Layout::mask(self.form()) }
             fn encode(&self, f: &::riscvc::isa::Fields) -> u32 { ::riscvc::isa::Layout::encode(self.form(), f) }
             fn decode(&self, w: u32) -> Option<::riscvc::isa::Fields> { ::riscvc::isa::Layout::decode(self.form(), w) }
@@ -233,7 +229,6 @@ fn opcode(input: &DeriveInput) -> syn::Result<Ts> {
             fn ext(&self) -> &str { match self { #(Self::#vs(o) => ::riscvc::isa::Table::ext(o)),* } }
             fn name(&self) -> &str { match self { #(Self::#vs(o) => ::riscvc::isa::Table::name(o)),* } }
             fn bits(&self) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::bits(o)),* } }
-            fn enabled(&self) -> bool { match self { #(Self::#vs(o) => ::riscvc::isa::Table::enabled(o)),* } }
             fn mask(&self) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::mask(o)),* } }
             fn encode(&self, f: &::riscvc::isa::Fields) -> u32 { match self { #(Self::#vs(o) => ::riscvc::isa::Table::encode(o, f)),* } }
             fn decode(&self, w: u32) -> Option<::riscvc::isa::Fields> { match self { #(Self::#vs(o) => ::riscvc::isa::Table::decode(o, w)),* } }

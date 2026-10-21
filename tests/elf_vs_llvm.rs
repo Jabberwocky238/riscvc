@@ -3,14 +3,14 @@
 //! 结构体传值、switch、函数指针、64 位、位操作、单 / 双精度、可变参数、递归、链表、大数、全局表；main 回校验和，⛔ 自检）。同一份 C 源出的 `.ll`：llc + ld.lld 链一个 ELF；由它转来的 `.mlir`：
 //! riscvc llc + riscvc ld 链一个 ELF。被测的 builtins（`tests/fixtures/builtins`）同理两边各编各的，
 //! 桩（`tests/fixtures/support/<abi>/`）两边共用一份。
-//! 目标跟着 feature 走：llc 的 `-mattr` / `-target-abi` 取 [`Ext::mattr`] / [`Ext::abi`]，`.ll` 里每个函数写死的
+//! 目标 = 缺省（`Target::default()`）：llc 的 `-mattr` / `-target-abi` 取它的 `mattr` / `abi`，`.ll` 里每个函数写死的
 //! `target-features` 去掉、`target-abi` 换掉（同一份 IR，换目标对拍；没开 M / F 时两边都走 libcall / 软浮点）。
 //! 两个 ELF 都在 `src/sim.rs` 里从 `main` 跑，比停机方式与 a0。两边都没定义的函数（有的 builtins 要 atomic / unwind 库、
 //! 有的测试要 libm）落到共用的桩：一条 `ebreak` 停机。
 //! 没有对照用的 LLVM（llc、ld.lld）就 SKIP。
 mod llvm;
 use object::{Object, ObjectSymbol};
-use riscvc::feature::Target as Ext;
+use riscvc::feature::Target;
 use riscvc::sim::{Cpu, Stop};
 use std::path::Path;
 
@@ -73,9 +73,9 @@ fn llc_obj(llvm: &llvm::Llvm, ll: &Path, out: &Path) -> Vec<u8> {
     // 去掉函数上的 target-features、换掉 target-abi：让 -mattr / -target-abi 说了算
     let text = std::fs::read_to_string(ll).unwrap();
     let text = text.split("\"target-features\"=\"").enumerate().map(|(i, p)| if i == 0 { p } else { p.split_once('"').map_or(p, |(_, rest)| rest) }).collect::<String>();
-    let text = text.replace("!\"target-abi\", !\"ilp32f\"", &format!("!\"target-abi\", !\"{}\"", Ext::abi()));
-    let mattr = format!("-mattr={},-relax", Ext::mattr());
-    let abi = format!("-target-abi={}", Ext::abi());
+    let text = text.replace("!\"target-abi\", !\"ilp32f\"", &format!("!\"target-abi\", !\"{}\"", Target::default().abi()));
+    let mattr = format!("-mattr={},-relax", Target::default().mattr());
+    let abi = format!("-target-abi={}", Target::default().abi());
     let (_, err) = llvm.run("llc", &["-mtriple=riscv32", &mattr, &abi, "-filetype=obj", "-", "-o", out.to_str().unwrap()], &text);
     assert!(!err.contains("error"), "llc {}: {err}", ll.display());
     std::fs::read(out).unwrap()
@@ -88,8 +88,8 @@ fn level(name: &str) {
     let tmp = std::env::temp_dir().join(format!("riscvc-elf-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // 桩：按调用约定选
-    let support: Vec<(String, Vec<u8>)> = ["support.o", "mulsi3.o"].iter().map(|n| (String::from(*n), std::fs::read(root.join("support").join(Ext::abi()).join(n)).unwrap())).collect();
-    eprintln!("目标：{}（{}）", Ext::march(), Ext::abi());
+    let support: Vec<(String, Vec<u8>)> = ["support.o", "mulsi3.o"].iter().map(|n| (String::from(*n), std::fs::read(root.join("support").join(Target::default().abi()).join(n)).unwrap())).collect();
+    eprintln!("目标：{}（{}）", Target::default().march(), Target::default().abi());
     // builtins：O2，两边各编各的
     let (mut ours, mut theirs) = (Side { objs: support.clone() }, Side { objs: support });
     let mut builtins: Vec<_> = builtins.map(|e| e.unwrap().path()).filter(|p| p.to_str().unwrap().ends_with(".O2.mlir")).collect();

@@ -27,7 +27,7 @@ use super::mir::{Base, MBlock, MInst, MOp, R, Rule};
 use super::Error;
 use crate::ir::{Block as IBlock, CastOp, Const, Function, IPred, Inst, Intr, Kind, Module, Op, Target, Ty, Types, ValId};
 use crate::feature::{Float, M, Zmmul};
-use crate::isa::{Opcode, Rm, Rv32i as IOp, Table};
+use crate::isa::{Opcode, Rm, Rv32i as IOp};
 use crate::regalloc::{Block, RegClass, VReg};
 use std::collections::HashMap;
 
@@ -60,6 +60,8 @@ pub struct Selected {
 pub struct Isel<'m> {
     /// ⭐ 挂上的扩展包：`Op::Custom` 按它们逐个问（见 [`crate::ext::Select`]）。
     mods: Vec<&'m dyn crate::ext::Module>,
+    /// ⭐ 目标（挂了哪些内置扩展）：乘除走不走 libcall、浮点走不走软浮点都看它。
+    target: crate::feature::Target<'m>,
     m: &'m Module,
     f: &'m Function,
     blocks: Vec<MBlock>,
@@ -103,10 +105,11 @@ pub struct Isel<'m> {
 
 impl<'m> Isel<'m> {
     /// ⭐ 一个函数。
-    pub fn select(m: &'m Module, f: &'m Function, mods: &[&'m dyn crate::ext::Module]) -> Result<Selected, Error> {
+    pub fn select(m: &'m Module, f: &'m Function, mods: &[&'m dyn crate::ext::Module], target: &crate::feature::Target<'m>) -> Result<Selected, Error> {
         let n = f.blocks.len();
         let mut s = Self {
             mods: mods.to_vec(),
+            target: target.clone(),
             m,
             f,
             blocks: (0..n).map(|_| MBlock::default()).collect(),
@@ -227,7 +230,7 @@ impl<'m> Isel<'m> {
                 (Op::ICmp(p, a, b), _) if self.pops.contains_key(a) && ints.get(b).is_some_and(|k| Self::pop_kind(*p, *k).is_some()) => {
                     *tests.entry(*a).or_default() += 1;
                 }
-                (Op::Intr(Intr::Libm(name), args), Some(r)) if Float::ENABLED && matches!(self.kind(self.ty(args[0])), Kind::Float) => {
+                (Op::Intr(Intr::Libm(name), args), Some(r)) if self.float() && matches!(self.kind(self.ty(args[0])), Kind::Float) => {
                     if let Some(rm) = Self::round_mode(name) {
                         self.rounds.insert(r, (args[0], rm, false));
                     }
@@ -253,7 +256,7 @@ impl<'m> Isel<'m> {
         match self.kind(t) {
             Kind::Double => Some("df"),
             Kind::Fp128 => Some("tf"),
-            Kind::Float if !crate::feature::Float::ENABLED => Some("sf"),
+            Kind::Float if !self.float() => Some("sf"),
             _ => None,
         }
     }
@@ -297,7 +300,7 @@ impl<'m> Isel<'m> {
             // 更宽的整数：⌈w/32⌉ 个字（过调用边界按引用，见 call.rs）
             Kind::Int(w) => vec![Part::X; w.div_ceil(32) as usize],
             Kind::Ptr | Kind::Half | Kind::BFloat => vec![Part::X],
-            Kind::Float if crate::feature::Float::ENABLED => vec![Part::F],
+            Kind::Float if self.float() => vec![Part::F],
             // 没有 F（ilp32）：float 是一个整数部件
             Kind::Float => vec![Part::X],
             Kind::Double => vec![Part::Lo, Part::Hi],
@@ -325,15 +328,25 @@ impl<'m> Isel<'m> {
         self.blocks[self.cur].insts.push(inst);
     }
 
+    /// 目标挂了 `op` 所在的扩展（RV32I 总在）。
+    fn has(&self, op: &impl crate::isa::Table) -> bool {
+        op.ext() == "i" || self.target.has(op.ext())
+    }
+
+    /// 目标有硬件单精度浮点（F）⇒ ilp32f；否则软浮点。
+    fn float(&self) -> bool {
+        self.target.float()
+    }
+
     fn emit(&mut self, op: MOp, defs: &[R], uses: &[R]) {
         self.push(MInst::new(op, defs, uses));
     }
 
     /// `op rd, a, b`，rd 是新整数寄存器。
-    /// `op rd, a, b`。M / Zmmul 没开（feature）的乘除改调 compiler-rt（同 llc 的 libcall 降级）。
+    /// `op rd, a, b`。目标没挂 M / Zmmul 的乘除改调 compiler-rt（同 llc 的 libcall 降级）。
     fn rr(&mut self, op: impl Into<Opcode>, a: R, b: R) -> R {
         let op: Opcode = op.into();
-        if !op.enabled() {
+        if !self.has(&op) {
             return self.soft_muldiv(op, a, b);
         }
         let d = self.xr();
@@ -448,7 +461,7 @@ impl<'m> Isel<'m> {
                 .collect(),
             (Const::Int(v), Kind::Int(w)) => self.int_words(*v, *w),
             (Const::Int(v), Kind::Ptr) => vec![self.li(*v as u32 as i32)],
-            (Const::Float(bits), Kind::Float) if !crate::feature::Float::ENABLED => vec![self.li(*bits as u32 as i32)],
+            (Const::Float(bits), Kind::Float) if !self.float() => vec![self.li(*bits as u32 as i32)],
             (Const::Float(bits), Kind::Float) => {
                 let x = self.li(*bits as u32 as i32);
                 let d = self.fr();
@@ -495,8 +508,10 @@ impl<'m> Isel<'m> {
         let r = inst.result;
         match &inst.op {
             Op::Custom { name, args, attrs } => {
-                // ⭐ 交给认得它的扩展包（见 `ext::Select`）；都不认 ⇒ 报错，⛔ 不静默跳过
-                let mods = core::mem::take(&mut self.mods);
+                // ⭐ 交给认得它的扩展包（先 `Options::modules`、再目标里的模块）；都不认 ⇒ 报错，⛔ 不静默跳过
+                let mut mods = core::mem::take(&mut self.mods);
+                let own = mods.len();
+                mods.extend(self.target.modules());
                 let mut done = false;
                 for m in &mods {
                     let mut cx = Sel { isel: self, name, args, attrs, result: r };
@@ -506,6 +521,7 @@ impl<'m> Isel<'m> {
                         break;
                     }
                 }
+                mods.truncate(own);
                 self.mods = mods;
                 if !done {
                     return Err(Error::Select(format!("没有扩展包认得 `{name}`")));
@@ -910,6 +926,12 @@ impl<'i, 'm> Sel<'i, 'm> {
         let dst = R::P(n);
         self.isel.emit(MOp::Imm(IOp::Addi, 0), &[dst], &[src]);
         dst
+    }
+
+    /// 这条 op 有没有结果（有 ⇒ 要 [`Self::bind`]）。
+    #[must_use]
+    pub const fn has_result(&self) -> bool {
+        self.result.is_some()
     }
 
     /// 把结果绑到这些寄存器上。⛔ 有结果却不绑 ⇒ 后面读它的地方会报「没有定义」。

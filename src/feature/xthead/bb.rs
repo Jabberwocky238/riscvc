@@ -3,7 +3,7 @@ use super::XtForm;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadbb", feature = "xtheadbb", form = XtForm)]
+#[isa(name = "xtheadbb", form = XtForm)]
 pub enum XTheadBb {
     /// 循环右移
     #[isa("th.srri", Shift, 0x1000_100b, exec = |c, i| c.set(i.rd, c.x(i.rs1).rotate_right(i.imm.cast_unsigned())))]

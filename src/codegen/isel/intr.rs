@@ -3,7 +3,7 @@ use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{BinOp, CastOp, IPred, Intr, Kind, Ty, Types, ValId};
 use crate::feature::{Zmmul, Float, M};
-use crate::isa::{Opcode, Rv32i as IOp, Rm, Table};
+use crate::isa::{Opcode, Rv32i as IOp, Rm};
 
 
 impl Isel<'_> {
@@ -72,7 +72,7 @@ impl Isel<'_> {
     fn fmath(&mut self, i: &Intr, xs: Vec<Vec<R>>) -> Result<Vec<R>, Error> {
         let pf = self.parts(Types::FLOAT)?;
         let args: Vec<(Vec<R>, Vec<Part>)> = xs.iter().map(|x| (x.clone(), pf.clone())).collect();
-        if Float::ENABLED {
+        if self.float() {
             let x: Vec<R> = xs.iter().map(|x| x[0]).collect();
             return Ok(match i {
                 Intr::Fma | Intr::FMulAdd => vec![self.fop(Float::FmaddS, x)],
@@ -601,7 +601,7 @@ impl Isel<'_> {
                 let signed = matches!(i, Intr::SAddOv | Intr::SSubOv | Intr::SMulOv);
                 match self.bits_of(args[0]) {
                     // i64 的乘法溢出要 mulhu：没有 Zmmul 走通用的
-                    64 if !(matches!(i, Intr::SMulOv | Intr::UMulOv) && !Zmmul::Mul.enabled()) => return self.overflow64(i, args),
+                    64 if !(matches!(i, Intr::SMulOv | Intr::UMulOv) && !self.has(&Zmmul::Mul)) => return self.overflow64(i, args),
                     w if w > 32 => return self.wide_overflow(i, args),
                     _ => {}
                 }
@@ -787,7 +787,7 @@ impl Isel<'_> {
                 self.emit(MOp::Store(IOp::Sw.into(), db, i32::try_from(doff).unwrap_or(0)), &[], &uses);
                 Vec::new()
             }
-            Intr::Libm(name) if Float::ENABLED && matches!(self.kind(self.ty(args[0])), Kind::Float) && Self::round_mode(name).is_some() => {
+            Intr::Libm(name) if self.float() && matches!(self.kind(self.ty(args[0])), Kind::Float) && Self::round_mode(name).is_some() => {
                 let x = self.get1(args[0])?;
                 vec![self.fround(x, Self::round_mode(name).unwrap_or(Rm::Dyn))]
             }
@@ -867,7 +867,7 @@ impl Isel<'_> {
 
     /// `is.fpclass`：LLVM 的类别位（0 sNaN 1 qNaN 2 −inf 3 −normal 4 −subnormal 5 −0 6 +0 7 +subnormal 8 +normal 9 +inf）。
     fn fpclass(&mut self, a: ValId, mask: u32) -> Result<R, Error> {
-        if matches!(self.kind(self.ty(a)), Kind::Float) && crate::feature::Float::ENABLED {
+        if matches!(self.kind(self.ty(a)), Kind::Float) && self.float() {
             // RISC-V fclass：0 −inf 1 −normal 2 −subnormal 3 −0 4 +0 5 +subnormal 6 +normal 7 +inf 8 sNaN 9 qNaN
             const MAP: [u32; 10] = [8, 9, 0, 1, 2, 3, 4, 5, 6, 7];
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));

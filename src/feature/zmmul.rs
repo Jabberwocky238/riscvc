@@ -2,7 +2,7 @@
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "zmmul", feature = "zmmul")]
+#[isa(name = "zmmul")]
 pub enum Zmmul {
     #[isa("mul", R, 0x0200_0033, exec = |c, i| c.set(i.rd, c.x(i.rs1).wrapping_mul(c.x(i.rs2))))]
     Mul,

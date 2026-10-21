@@ -137,12 +137,7 @@ fn xfail(path: &Path) -> Fails {
 
 #[test]
 fn llvm_tests() {
-    // 对照的 .o 是按 +m,+f,+zicsr（ilp32f）、⛔ C 编的；开了 C：两边一个压缩一个不压缩，执行到随机缓冲区（间接调用实参）的
-    // 函数随压缩译码变，不可比（C 由 llc_vs_llc 覆盖：那边的 llc 跟着 feature 带 +c）
-    if !cfg!(all(feature = "m", feature = "f")) || cfg!(feature = "c") {
-        eprintln!("SKIP：对照产物按 rv32imf（无 C）编，这次的扩展不同");
-        return;
-    }
+    // 对照的 .o 是按 +m,+f,+zicsr（ilp32f）、⛔ C 编的 = 缺省目标
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lit");
     let lib = Lib::load();
     let mut cases = Vec::new();

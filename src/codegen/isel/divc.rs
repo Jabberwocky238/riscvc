@@ -10,7 +10,7 @@
 use super::{Isel, R};
 use crate::feature::Zmmul;
 use crate::ir::BinOp;
-use crate::isa::{Rv32i as IOp, Table};
+use crate::isa::Rv32i as IOp;
 
 /// 无符号除以 `d` 的魔数（[`Udiv::new`]）。
 struct Udiv {
@@ -111,7 +111,7 @@ impl Isel<'_> {
             1 => Some(x),
             d if d.is_power_of_two() => Some(self.ri(IOp::Srli, x, d.trailing_zeros().cast_signed())),
             // 被除数比除数小（高位已知是 0）⇒ 商是 0 或 1
-            d if !Zmmul::Mulhu.enabled() || d >= 1 << 31 => {
+            d if !self.has(&Zmmul::Mulhu) || d >= 1 << 31 => {
                 let k = self.li(d.cast_signed());
                 let lt = self.rr(IOp::Sltu, x, k);
                 (d >= 1 << 31).then(|| self.ri(IOp::Xori, lt, 1))
@@ -143,7 +143,7 @@ impl Isel<'_> {
                 let q = self.ri(IOp::Srai, biased, k);
                 Some(if d < 0 { self.rr(IOp::Sub, R::ZERO, q) } else { q })
             }
-            _ if !Zmmul::Mulh.enabled() => None,
+            _ if !self.has(&Zmmul::Mulh) => None,
             d => {
                 let Sdiv { magic, shift } = Sdiv::new(d);
                 let m = self.li(magic);
@@ -197,7 +197,7 @@ impl Isel<'_> {
                         self.rr(IOp::And, x, k)
                     });
                 }
-                if !Zmmul::Mul.enabled() {
+                if !self.has(&Zmmul::Mul) {
                     return None;
                 }
                 let q = self.udiv_const(x, d, 32 - w)?;
@@ -217,7 +217,7 @@ impl Isel<'_> {
                     };
                     Some(self.rr(IOp::Sub, x, t))
                 }
-                _ if !Zmmul::Mul.enabled() => None,
+                _ if !self.has(&Zmmul::Mul) => None,
                 d => {
                     let q = self.sdiv_const(x, d)?;
                     Some(self.remainder(x, q, d))

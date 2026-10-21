@@ -334,14 +334,11 @@ impl CInst {
     }
 }
 
-/// ⭐ C 扩展（挂进内置扩展：`crate::feature::builtin`）。
+/// ⭐ C 扩展（模块常量 [`crate::feature::builtin::C`]；挂不挂看 [`crate::feature::Target`]）。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Compressed;
 
 impl Compressed {
-    /// 开没开（cargo feature `c`）。
-    pub const ENABLED: bool = cfg!(feature = "c");
-
     fn half(bytes: &[u8]) -> u16 {
         u16::from_le_bytes([bytes[0], bytes.get(1).copied().unwrap_or(0)])
     }

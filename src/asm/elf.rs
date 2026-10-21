@@ -160,8 +160,8 @@ impl Assembler<'_> {
         w.reserve_shstrtab();
         w.reserve_section_headers();
         // 写
-        // 同 llvm-mc：目标带 Zca（c feature）就置 EF_RISCV_RVC
-        let e_flags = if self.opts.float_abi { elf::EF_RISCV_FLOAT_ABI_SINGLE } else { 0 } | if crate::feature::Compressed::ENABLED { elf::EF_RISCV_RVC } else { 0 };
+        // 同 llvm-mc：目标带 Zca（挂了 C）就置 EF_RISCV_RVC
+        let e_flags = if self.opts.float_abi { elf::EF_RISCV_FLOAT_ABI_SINGLE } else { 0 } | if self.has_rvc() { elf::EF_RISCV_RVC } else { 0 };
         w.write_file_header(&FileHeader { os_abi: 0, abi_version: 0, e_type: elf::ET_REL, e_machine: elf::EM_RISCV, e_entry: 0, e_flags }).map_err(|e| Error::Syntax(e.to_string()))?;
         for s in &self.sections {
             if s.ty != elf::SHT_NOBITS {

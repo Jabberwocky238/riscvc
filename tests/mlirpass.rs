@@ -26,10 +26,6 @@ func.func @sum(%n: index) -> i32 {
 
 #[test]
 fn lowered_by_mlirpass() {
-    if !cfg!(feature = "m") {
-        eprintln!("SKIP：没开 m，乘法要链 compiler-rt");
-        return;
-    }
     let reg = Registry::default();
     let mut m = reg.parse(SRC).unwrap();
     reg.run(&mut m, &riscvc::opt::DEFAULT_PIPELINE).unwrap();

@@ -3,7 +3,7 @@ use super::XtForm;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadfmemidx", feature = "xtheadfmemidx", form = XtForm)]
+#[isa(name = "xtheadfmemidx", form = XtForm)]
 pub enum XTheadFMemIdx {
     #[isa("th.flrw", FRImm2, 0x4000_600b, exec = |c, i| {
         let v = c.load(c.x(i.rs1).wrapping_add(c.x(i.rs2) << i.imm), 4);

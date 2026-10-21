@@ -3,12 +3,12 @@ mod layout;
 
 pub use layout::CsrForm;
 use crate::ext::Exec;
-use crate::isa::{Csr, Inst, Style, Table};
+use crate::isa::{Csr, Inst, Style};
 use crate::macros::Isa;
 use crate::sim::Stop;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "zicsr", feature = "zicsr", form = CsrForm, alias = alias)]
+#[isa(name = "zicsr", form = CsrForm, alias = alias)]
 #[pseudo("csrr $rd:x, $c" => "csrrs $rd, $c, zero")]
 #[pseudo("csrw $c, $rs:x" => "csrrw zero, $c, $rs")]
 #[pseudo("csrs $c, $rs:x" => "csrrs zero, $c, $rs")]
@@ -62,9 +62,9 @@ impl Zicsr {
     }
 }
 
-/// 浮点 CSR 的名字尾巴：`fcsr` ⇒ `csr`、`frm` ⇒ `rm`、`fflags` ⇒ `flags`（F 关着 ⇒ 没有）。
-fn fcsr(csr: u16) -> Option<String> {
-    if !crate::feature::Float::ALL[0].enabled() {
+/// 浮点 CSR 的名字尾巴：`fcsr` ⇒ `csr`、`frm` ⇒ `rm`、`fflags` ⇒ `flags`（目标没有 F ⇒ 没有，见 [`Style::no_float_csr`]）。
+fn fcsr(csr: u16, s: Style) -> Option<String> {
+    if s.no_float_csr {
         return None;
     }
     match csr {
@@ -79,7 +79,7 @@ fn fcsr(csr: u16) -> Option<String> {
 fn alias(i: &Inst<Zicsr>, _pc: u64, s: Style) -> Option<(String, String)> {
     let (rd, rs) = (s.x(i.rd), s.x(i.rs1));
     let (name, ops) = match (i.op, i.rd, i.rs1) {
-        (Zicsr::Csrrs, _, 0) => match (fcsr(i.csr), i.csr) {
+        (Zicsr::Csrrs, _, 0) => match (fcsr(i.csr, s), i.csr) {
             (Some(t), _) => (format!("fr{t}"), rd),
             (None, 0xc00) => (String::from("rdcycle"), rd),
             (None, 0xc01) => (String::from("rdtime"), rd),
@@ -89,7 +89,7 @@ fn alias(i: &Inst<Zicsr>, _pc: u64, s: Style) -> Option<(String, String)> {
             (None, 0xc82) => (String::from("rdinstreth"), rd),
             _ => (String::from("csrr"), format!("{rd}, {}", Csr(i.csr))),
         },
-        (Zicsr::Csrrw, 0, _) if let Some(t) = fcsr(i.csr) => (format!("fs{t}"), rs),
+        (Zicsr::Csrrw, 0, _) if let Some(t) = fcsr(i.csr, s) => (format!("fs{t}"), rs),
         (Zicsr::Csrrw | Zicsr::Csrrs | Zicsr::Csrrc, 0, _) => {
             let n = match i.op {
                 Zicsr::Csrrw => "csrw",
@@ -106,8 +106,8 @@ fn alias(i: &Inst<Zicsr>, _pc: u64, s: Style) -> Option<(String, String)> {
             };
             (String::from(n), format!("{}, {}", Csr(i.csr), s.imm(i32::from(i.rs1))))
         }
-        (Zicsr::Csrrw, _, _) if let Some(t) = fcsr(i.csr) => (format!("fs{t}"), format!("{rd}, {rs}")),
-        (Zicsr::Csrrwi, _, _) if let Some(t) = fcsr(i.csr).filter(|_| i.csr != 0x3) => (format!("fs{t}i"), format!("{rd}, {}", s.imm(i32::from(i.rs1)))),
+        (Zicsr::Csrrw, _, _) if let Some(t) = fcsr(i.csr, s) => (format!("fs{t}"), format!("{rd}, {rs}")),
+        (Zicsr::Csrrwi, _, _) if let Some(t) = fcsr(i.csr, s).filter(|_| i.csr != 0x3) => (format!("fs{t}i"), format!("{rd}, {}", s.imm(i32::from(i.rs1)))),
         _ => return None,
     };
     Some((name, ops))

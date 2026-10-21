@@ -27,11 +27,7 @@ fn ours(path: &Path) -> Result<(Module, Vec<u8>), String> {
 }
 
 fn level(lv: &str) {
-    // 对照的 .o 按 +m,+f,+zicsr（ilp32f）、⛔ C 编
-    if !cfg!(all(feature = "m", feature = "f")) || cfg!(feature = "c") {
-        eprintln!("SKIP：对照产物按 rv32imf（无 C）编，这次的扩展不同");
-        return;
-    }
+    // 对照的 .o 按 +m,+f,+zicsr（ilp32f）、⛔ C 编 = 缺省目标
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rust");
     let file = |crate_: &str, ext: &str| root.join(format!("{crate_}.{lv}.{ext}"));
     let Ok(theirs_probe) = std::fs::read(file("rvprobe", "o")) else {

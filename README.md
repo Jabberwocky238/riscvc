@@ -36,7 +36,7 @@ crt.S        ─ riscvc as  ─▶ crt.o ─────────────
 - [Library usage](#library-usage)
 - [Plugins: dialects and passes](#plugins-dialects-and-passes)
 - [Writing an ISA extension](#writing-an-isa-extension)
-- [Cargo features](#cargo-features)
+- [Cargo features and targets](#cargo-features-and-targets)
 - [Correctness: how it is checked](#correctness-how-it-is-checked)
 - [Status](#status)
 - [Building and testing](#building-and-testing)
@@ -60,7 +60,7 @@ statically linked Rust binary or a library call, so that:
 
 `riscvc` targets **LLVM 22.1.8** (tag `llvmorg-22.1.8`). "Identical" everywhere in this README means identical to
 the tools of that release, run with `--target=riscv32-unknown-elf -march=rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0 -mabi=ilp32f` (or the `-mattr`
-derived from the enabled features):
+derived from the target, `feature::Target::mattr()`):
 
 | riscvc | Replaces (LLVM 22.1.8) |
 | --- | --- |
@@ -77,7 +77,7 @@ tracked. The comparison corpus is the compiler-rt builtins and the MC / lld RISC
 
 | | Supported | Not supported |
 | --- | --- | --- |
-| ISA | RV32I base; M, Zmmul, F, Zicsr; C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a Cargo feature | D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot, Zcb / Zcmp |
+| ISA | RV32I base; M, Zmmul, F, Zicsr; C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a runtime module (see [Cargo features and targets](#cargo-features-and-targets)) | D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot, Zcb / Zcmp |
 | ABI | `ilp32f` (with `f`), `ilp32` + soft-float (without `f`) | `ilp32d`, `lp64*` |
 | Default target | `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`, ABI `ilp32f` | |
 | Compiler input | MLIR `llvm` dialect in **generic form** (`mlir-opt --mlir-print-op-generic`); higher-level dialects (`func`, `arith`, `scf`, `cf`, `memref`, `math`, `index`, `affine`, `ub`) in any form, lowered in-process by [mlirpass](#higher-level-dialects-mlirpass) | C / C++ (this is not a front end); `vector`, `tensor`, `linalg` (bufferize / lower them first) |
@@ -221,7 +221,8 @@ riscvc as [OPTIONS] -o <OUTPUT> <INPUT>
 | `-D NAME[=VALUE]` | preprocessor define for `.S` input (repeatable; value defaults to `1`) |
 | `-I <DIR>` | search directory for `.incbin` (repeatable; the input's own directory is always searched) |
 | `--preprocess` | treat the input as `.S` regardless of its extension (by default only an upper-case `.S` is preprocessed) |
-| `--soft-float` | `-mabi=ilp32`: do not set `EF_RISCV_FLOAT_ABI_SINGLE` (default follows the `f` feature) |
+| `--march <ARCH>` | target: `rv32imf_zicsr`, `rv32i2p1_m2p0_c2p0_zca1p0`, `+m,+f,+xtheadcmo`; default `rv32imf_zicsr_zmmul` |
+| `--soft-float` | `-mabi=ilp32`: do not set `EF_RISCV_FLOAT_ABI_SINGLE` (default follows whether the target has `f`) |
 | `--arch-attribute <ARCH>` | write a `.riscv.attributes` section with this arch string, like `clang -c` does |
 | `--no-relax` | `-mno-relax`: emit no `R_RISCV_RELAX` / `R_RISCV_ALIGN` (default is relaxation on, like `llvm-mc` for riscv32) |
 
@@ -263,6 +264,7 @@ riscvc objdump [OPTIONS] <INPUT>
 | --- | --- |
 | `-M no-aliases` | print canonical instructions instead of pseudo-instructions (`jalr x0, 0(x1)` instead of `ret`) |
 | `-M numeric` | print `x10` instead of `a0` (combine with a comma: `-M no-aliases,numeric`) |
+| `--march <ARCH>` | target whose instructions are decoded (same forms as `riscvc as`) |
 | `--no-print-imm-hex` | print immediates in decimal (default is hexadecimal, like llvm-objdump) |
 
 Undecodable words print as `<unknown>`, again matching llvm-objdump.
@@ -281,6 +283,7 @@ riscvc llc [OPTIONS] -o <OUTPUT> <INPUTS>...
 | `--pass <NAME>` | run a pass on the internal IR before code generation (repeatable, runs in order) |
 | `--lowering <PIPELINE>` | mlirpass pipeline lowering higher-level dialects to `llvm` (default `riscvc::plugin::LOWERING`) |
 | `--list-plugins` | list registered dialects and passes |
+| `--march <ARCH>` | target: decides libcalls for mul / div and soft-float (same forms as `riscvc as`) |
 | `--no-relax` | object output without `R_RISCV_RELAX` / `R_RISCV_ALIGN` (like `llc -mattr=-relax`; default on, like llc) |
 
 Built-in plugins: dialect `llvm`; pass `dce` (removes side-effect-free instructions whose results are unused).
@@ -341,7 +344,7 @@ Main entry points:
 | `riscvc::ext::Disasm` | iterator of disassembled lines over a code buffer, with optional extensions and a print `Style` |
 | `riscvc::sim::Cpu` | RV32 interpreter: `load` an ELF, `run` / `step`, or `run_on` / `step_on` with custom extensions and MMIO `Device`s; registers `x`, `f`, `pc`, `csr`, sparse `mem` |
 | `riscvc::ext::{Extension, Device}` | traits for custom instructions and memory-mapped devices |
-| `riscvc::feature::Target` | the enabled extensions: `march()` (attribute arch string) and `mattr()` (LLVM `-mattr`) |
+| `riscvc::feature::Target` | the target: a list of extension modules (`default`, `rv32i`, `with`, `parse`); `march()` (attribute arch string), `mattr()` (LLVM `-mattr`) |
 | `riscvc::elf::Elf` | ELF32 read (`TryFrom<&[u8]>`) / write (`pack(Layout::Verbatim \| Canonical)`); `Attributes` for `.riscv.attributes`-style sections; the only module without `toolchain` |
 | `riscvc::macros::{Isa, Opcode}` | derive macros for instruction tables (re-exported from `riscvc-macros`) |
 
@@ -396,7 +399,7 @@ real example is the Zmmul extension:
 use riscvc::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "zmmul", feature = "zmmul")]
+#[isa(name = "zmmul")]
 pub enum Zmmul {
     #[isa("mul", R, 0x0200_0033, exec = |c, i| c.set(i.rd, c.x(i.rs1).wrapping_mul(c.x(i.rs2))))]
     Mul,
@@ -421,36 +424,43 @@ pub enum Zmmul {
 - For instructions that do not fit a table at all, implement `Assemble` / `Disassemble` / `Module` by hand.
   Memory-mapped peripherals implement `Device` (`load` / `store`).
 
-## Cargo features
+## Cargo features and targets
 
-`toolchain` *(default)* is the toolchain itself (compiler, assembler, linker, disassembler, simulator, CLI). Every
-other feature is one target extension, exactly like a `-march` component. With `default-features = false` and no
-`toolchain`, only `riscvc::elf` is left: the ELF32 little-endian RISC-V read/write model, `no_std` + `alloc`,
-depending on `thiserror` only.
-
-| Feature | What it is | When disabled |
-| --- | --- | --- |
-| `m` *(default)* | M extension (implies `zmmul`) | assembler rejects `div` / `rem*`, disassembler prints `<unknown>`, simulator traps; codegen calls `__divsi3` & co. |
-| `zmmul` | multiply only | same, for `mul` / `mulh*`; codegen calls `__mulsi3` / `__muldi3` |
-| `f` *(default)* | F extension + `ilp32f` ABI (implies `zicsr`) | no float instructions, `e_flags` without single-float ABI; codegen uses `ilp32` + soft-float (`__addsf3` & co.) |
-| `zicsr` | CSR instructions | `csr*` and `frcsr`-style pseudo-instructions rejected |
-| `c` | C: 16-bit compressed instructions (`-march` gains `c2p0_zca1p0[_zcf1p0]`, objects get `EF_RISCV_RVC`); off by default | assembler / disassembler / simulator reject 16-bit encodings, nothing is compressed |
-| `xthead` | all ten T-Head extensions below | — |
-| `xtheadba`, `xtheadbb`, `xtheadbs`, `xtheadcmo`, `xtheadcondmov`, `xtheadfmemidx` (implies `f`), `xtheadmac`, `xtheadmemidx`, `xtheadmempair`, `xtheadsync` | T-Head vendor extensions (the RV32 scalar parts LLVM supports); off by default | assembler / disassembler do not know them; codegen never uses them |
+`toolchain` *(default)* is the toolchain itself (compiler, assembler, linker, disassembler, simulator, CLI). With
+`default-features = false`, only `riscvc::elf` is left: the ELF32 little-endian RISC-V read/write model, `no_std` +
+`alloc`, depending on `thiserror` only.
 
 ```toml
-# plain rv32i with soft-float
-riscvc = { version = "0.2", default-features = false, features = ["toolchain", "zicsr"] }
-
-# only the ELF model (no_std)
-riscvc = { version = "0.2", default-features = false }
-
-# defaults plus all T-Head extensions
-riscvc = { version = "0.2", features = ["xthead"] }
+riscvc = "0.2"                                              # the toolchain
+riscvc = { version = "0.2", default-features = false }      # only the ELF model (no_std)
 ```
 
-The `.riscv.attributes` arch string (`feature::Target::march()`) and the LLVM `-mattr` string used for comparisons
-(`feature::Target::mattr()`) are derived from the enabled features.
+Target extensions are **not** Cargo features. They are runtime values: every extension is an `ext::Module` (the
+same trait custom extensions implement), and a `feature::Target` is the list of modules a tool runs with, exactly
+like a `-march` string.
+
+| Module (`feature::builtin::…`) | What it is | When absent |
+| --- | --- | --- |
+| `M` *(default)* | M extension (`with` adds `ZMMUL` too) | assembler rejects `div` / `rem*`, disassembler prints `<unknown>`, simulator traps; codegen calls `__divsi3` & co. |
+| `ZMMUL` *(default)* | multiply only | same, for `mul` / `mulh*`; codegen calls `__mulsi3` / `__muldi3` |
+| `F` *(default)* | F extension + `ilp32f` ABI (`with` adds `ZICSR` too) | no float instructions, `e_flags` without single-float ABI; codegen uses `ilp32` + soft-float (`__addsf3` & co.) |
+| `ZICSR` *(default)* | CSR instructions | `csr*` rejected; float CSR aliases (`frcsr` …) printed as plain `csr*` |
+| `C` | 16-bit compressed instructions (`-march` gains `c2p0_zca1p0[_zcf1p0]`, objects get `EF_RISCV_RVC`) | assembler / disassembler / simulator reject 16-bit encodings, nothing is compressed |
+| `XTHEADBA`, `XTHEADBB`, `XTHEADBS`, `XTHEADCMO`, `XTHEADCONDMOV`, `XTHEADFMEMIDX`, `XTHEADMAC`, `XTHEADMEMIDX`, `XTHEADMEMPAIR`, `XTHEADSYNC` | T-Head vendor extensions (the RV32 scalar parts LLVM supports) | assembler / disassembler do not know them; codegen never uses them |
+
+```rust
+use riscvc::feature::{builtin, Target};
+
+let rv32imf = Target::default();                                   // rv32imf_zicsr_zmmul
+let soft = Target::rv32i().with(&builtin::ZICSR);                  // rv32i, soft-float
+let xt = Target::default().with_all(&[&builtin::XTHEADCMO, &builtin::XTHEADSYNC]);
+let parsed = Target::parse("rv32imfc_zicsr")?;                     // or "+m,+f,+xtheadcmo"
+riscvc::asm::Assembler::new().target(xt.clone());                  // also Disassembler::target, codegen Options::target, the Cpu::target field
+```
+
+`Target::march()` gives the `.riscv.attributes` arch string, `mattr()` / `abi()` the LLVM `-mattr` / `-target-abi`
+used for comparisons. On the command line, `as`, `llc` and `objdump` take `--march` (either form; default
+`rv32imf_zicsr_zmmul`).
 
 ## Correctness: how it is checked
 
@@ -508,8 +518,7 @@ checkouts at `../../../mlirformat.rs` and `../../../mlirpass` relative to this d
 ```bash
 cargo build --release
 cargo test --release
-cargo build --release --no-default-features --features toolchain,zicsr   # rv32i, no M, no F (soft-float)
-cargo test  --release --features xthead                        # include the T-Head tests
+cargo build --release --no-default-features                    # only the ELF model (no_std)
 ```
 
 Tests that need the LLVM reference tools or the generated corpus print `SKIP` and pass when those are missing.
@@ -536,7 +545,7 @@ git diff tests/fixtures/lit/xfail.txt
 ## Limitations and non-goals
 
 - Not a C / C++ front end; bring MLIR (or LLVM IR via `mlir-translate --import-llvm`).
-- No double-precision hardware, no vector extension; compressed instructions only behind the `c` feature (no Zcb / Zcmp).
+- No double-precision hardware, no vector extension; compressed instructions only with the `C` module in the target (no Zcb / Zcmp).
 - Static executables only; no shared libraries, PLT/GOT generation or dynamic relocations.
 - The `.S` preprocessor handles only `#if`, `#ifdef` and `#define`.
 - No optimisation pipeline of its own beyond what your MLIR passes and the `dce` pass do; code quality is

@@ -2,7 +2,7 @@
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "m", feature = "m")]
+#[isa(name = "m")]
 pub enum M {
     #[isa("div", R, 0x0200_4033, exec = |c, i| {
         let (a, b) = (c.x(i.rs1).cast_signed(), c.x(i.rs2).cast_signed());

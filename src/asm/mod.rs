@@ -44,7 +44,7 @@ impl Error {
 /// 汇编选项（对应 llvm-mc / clang 的开关）。
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// `-mabi=ilp32f` ⇒ `e_flags` 带 `EF_RISCV_FLOAT_ABI_SINGLE`（缺省跟 `f` feature）。
+    /// `-mabi=ilp32f` ⇒ `e_flags` 带 `EF_RISCV_FLOAT_ABI_SINGLE`（缺省开，同缺省目标带 F；[`Assembler::target`] 按目标改）。
     pub float_abi: bool,
     /// `.S`：先做 C 预处理（只认简单的 `#if` / `#ifdef` / `#define`）。
     pub preprocess: bool,
@@ -61,7 +61,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { float_abi: crate::feature::Float::ENABLED, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None, relax: true }
+        Self { float_abi: true, preprocess: false, defines: HashMap::new(), include: Vec::new(), attributes: None, relax: true }
     }
 }
 
@@ -172,15 +172,19 @@ struct Mode {
     pic: bool,
     /// `relax` / `norelax`：此刻出的指令可不可松弛（缺省跟 `Options::relax`）。
     relax: bool,
-    /// `rvc` / `norvc`：能压的压成 16 位（缺省跟 `c` feature）。
+    /// `rvc` / `norvc`：能压的压成 16 位（缺省跟目标：挂了 C 就开）。
     rvc: bool,
 }
 
 /// 汇编器状态。
 pub struct Assembler<'e> {
     opts: Options,
-    /// 扩展指令（[`crate::ext::Module::assemble`]）：给的在前、内置的（M / Zmmul / F / Zicsr）在后；助记符先问它们，不认再走 RV32I。
+    /// 扩展指令（[`crate::ext::Module::assemble`]）：给的（[`Assembler::modules`]）在前、目标的在后；助记符先问它们，不认再走 RV32I。
     exts: Vec<&'e dyn crate::ext::Module>,
+    /// 给的扩展包（`exts` 的前半）。
+    extra: Vec<&'e dyn crate::ext::Module>,
+    /// ⭐ 目标：挂哪些内置扩展（缺省 `rv32imf_zicsr_zmmul`）。
+    target: crate::feature::Target<'e>,
     pub sections: Vec<Section>,
     cur: usize,
     prev: usize,
@@ -207,18 +211,45 @@ pub struct Assembler<'e> {
     options: Vec<Mode>,
     /// `.reloc 位置, 类型, 目标`（行号报错用）。
     directs: Vec<(Expr, u32, Expr, usize)>,
-    /// 助记符 ⇒ 哪几个扩展可能认它（位掩码，第 k 位对应 `exts[k]`）。⛔ 只看名字，所以缓存得住
-    /// （`Table::enabled` 是 feature 决定的常量）。
+    /// 助记符 ⇒ 哪几个扩展可能认它（位掩码，第 k 位对应 `exts[k]`）。⛔ 只看名字，所以缓存得住；换模块（`relink`）时清掉。
     known: HashMap<String, u32>,
 }
 
 impl<'e> Assembler<'e> {
-    /// 挂上扩展指令（借用），排在内置扩展前面。
+    /// 挂上扩展指令（借用），排在目标的扩展前面。
     #[must_use]
-    pub fn modules(self, exts: &[&'e dyn crate::ext::Module]) -> Self {
-        let mut all = exts.to_vec();
-        all.extend(crate::ext::builtin());
-        Self { exts: all, ..self }
+    pub fn modules(mut self, exts: &[&'e dyn crate::ext::Module]) -> Self {
+        self.extra = exts.to_vec();
+        self.relink()
+    }
+
+    /// ⭐ 换目标（挂哪些内置扩展）：压缩指令开关跟它；浮点调用约定 = 选项要了并且目标有 F
+    /// （⚠ 在 [`Self::options`] 之后、加内容之前调）。
+    #[must_use]
+    pub fn target(mut self, target: crate::feature::Target<'e>) -> Self {
+        self.opts.float_abi &= target.float();
+        self.mode.rvc = target.rvc();
+        self.target = target;
+        self.relink()
+    }
+
+    /// 挂了名叫 `ext` 的扩展（给的扩展包或目标里；RV32I 总在）。
+    fn has_ext(&self, ext: &str) -> bool {
+        ext == "i" || self.exts.iter().any(|m| m.name() == ext)
+    }
+
+    /// 挂了 C。
+    pub(crate) fn has_rvc(&self) -> bool {
+        self.has_ext("c")
+    }
+
+    /// 重拼 `exts`（给的在前、目标的在后），按助记符的缓存作废。
+    fn relink(mut self) -> Self {
+        let mut all = self.extra.clone();
+        all.extend_from_slice(self.target.modules());
+        self.exts = all;
+        self.known.clear();
+        self
     }
 }
 
@@ -260,7 +291,9 @@ impl<'e> Assembler<'e> {
         let relax = opts.relax;
         let mut asm = Self {
             opts,
-            exts: crate::ext::builtin(),
+            exts: crate::feature::Target::default().modules().to_vec(),
+            extra: Vec::new(),
+            target: crate::feature::Target::default(),
             sections: Vec::new(),
             cur: 0,
             prev: 0,
@@ -273,7 +306,7 @@ impl<'e> Assembler<'e> {
             labels: HashSet::new(),
             attributes: Vec::new(),
             line: 0,
-            mode: Mode { exact: false, pic: false, relax, rvc: crate::feature::Compressed::ENABLED },
+            mode: Mode { exact: false, pic: false, relax, rvc: false },
             label_seq: HashMap::new(),
             options: Vec::new(),
             directs: Vec::new(),
@@ -514,10 +547,10 @@ impl<'e> Assembler<'e> {
         Ok(())
     }
 
-    /// 编一条指令（字段已齐）。没开的扩展的指令（含伪指令展开出来的）报错。
+    /// 编一条指令（字段已齐）。目标没挂的扩展的指令（含伪指令展开出来的）报错。
     fn emit(&mut self, i: riscv::Inst) -> Result<(), Error> {
-        if !crate::isa::Table::enabled(&i.op) {
-            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（feature 没开）", i.op, crate::isa::Table::ext(&i.op))));
+        if !self.has_ext(crate::isa::Table::ext(&i.op)) {
+            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（目标没挂）", i.op, crate::isa::Table::ext(&i.op))));
         }
         self.instruction_word(u32::from(i))
     }
@@ -525,8 +558,8 @@ impl<'e> Assembler<'e> {
     /// 编一条指令，⛔ 压缩（同 LLVM：PseudoCALL / PseudoTAIL 在编码器里才展开，不经 compressInst；
     /// 立即数不是字面常数的也不压，见 [`Expr::literal`]）。
     fn emit_wide(&mut self, i: riscv::Inst) -> Result<(), Error> {
-        if !crate::isa::Table::enabled(&i.op) {
-            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（feature 没开）", i.op, crate::isa::Table::ext(&i.op))));
+        if !self.has_ext(crate::isa::Table::ext(&i.op)) {
+            return Err(Error::Syntax(format!("`{}` 要 {} 扩展（目标没挂）", i.op, crate::isa::Table::ext(&i.op))));
         }
         self.bytes(&u32::from(i).to_le_bytes())
     }

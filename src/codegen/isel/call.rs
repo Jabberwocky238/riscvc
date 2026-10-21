@@ -196,7 +196,7 @@ impl Isel<'_> {
     /// 16 位浮点（half / bfloat）开了 F 时按 LLVM 的约定过调用边界（参数、返回值）：NaN-box（高 16 位全 1）进 fa 寄存器。
     /// 平时它是整数寄存器里零扩展的 16 位。
     pub(super) fn boxed(&self, t: Ty) -> bool {
-        crate::feature::Float::ENABLED && matches!(self.kind(t), Kind::Half | Kind::BFloat)
+        self.float() && matches!(self.kind(t), Kind::Half | Kind::BFloat)
     }
 
     /// 整数寄存器里的 16 位 ⇒ NaN-box 的浮点寄存器。
@@ -396,7 +396,7 @@ impl Isel<'_> {
                 self.select_parts(IOp::Bne, keep_old, R::ZERO, &old, &val)
             }
             RmwOp::FAdd | RmwOp::FSub => self.farith(if op == RmwOp::FAdd { crate::ir::BinOp::FAdd } else { crate::ir::BinOp::FSub }, t, old.clone(), val.clone())?,
-            RmwOp::FMax | RmwOp::FMin if matches!(self.kind(t), Kind::Float) && Float::ENABLED => {
+            RmwOp::FMax | RmwOp::FMin if matches!(self.kind(t), Kind::Float) && self.float() => {
                 let d = self.fr();
                 let fop = if op == RmwOp::FMax { Float::FmaxS } else { Float::FminS };
                 self.emit(MOp::Reg(fop.into(), 7), &[d], &[old[0], val[0]]);

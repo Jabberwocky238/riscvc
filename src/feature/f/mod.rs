@@ -9,7 +9,7 @@ use crate::macros::Isa;
 use core::fmt::Write;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "f", feature = "f", form = FForm, alias = alias)]
+#[isa(name = "f", form = FForm, alias = alias)]
 #[pseudo("fmv.s $rd:f, $rs:f" => "fsgnj.s $rd, $rs, $rs")]
 #[pseudo("fabs.s $rd:f, $rs:f" => "fsgnjx.s $rd, $rs, $rs")]
 #[pseudo("fneg.s $rd:f, $rs:f" => "fsgnjn.s $rd, $rs, $rs")]

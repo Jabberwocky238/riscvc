@@ -6,7 +6,7 @@ use crate::isa::Inst;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadmemidx", feature = "xtheadmemidx", form = XtForm)]
+#[isa(name = "xtheadmemidx", form = XtForm)]
 pub enum XTheadMemIdx {
     #[isa("th.lbia", MemUpd, 0x1800400b, exec = |c, i| XTheadMemIdx::load_upd(c, i, 1, true, false))]
     Lbia,

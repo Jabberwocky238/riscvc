@@ -43,6 +43,9 @@ pub struct Llc {
     /// `-mattr=-relax`：出目标文件时 ⛔ 出 `R_RISCV_RELAX` / `R_RISCV_ALIGN`（缺省同 llc 开着松弛）。
     #[arg(long)]
     no_relax: bool,
+    /// 目标（`-march` / `--mattr` 写法，同 `riscvc as`）：决定乘除走不走 libcall、浮点走不走软浮点；缺省 `rv32imf_zicsr_zmmul`。
+    #[arg(long)]
+    march: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -77,9 +80,15 @@ impl Llc {
         let modules = jobs.map(&self.inputs, |input| self.parse(input)).into_iter().collect::<Result<Vec<_>, _>>()?;
         let per = jobs.0.get().div_ceil(modules.len()).max(1);
         let shards: Vec<Shard> = modules.into_iter().enumerate().flat_map(|(input, m)| Self::split(m, per).into_iter().map(move |module| Shard { input, module })).collect();
-        let asm = jobs.map(&shards, |s| s.module.compile().map_err(|e| format!("{}：{e}", self.inputs[s.input].display())));
+        // 目标（模块引用不跨线程 ⇒ 各线程自己按 `--march` 再取一份）
+        super::target(self.march.as_deref())?;
+        let compile = |m: &Module| -> Result<String, String> {
+            let target = super::target(self.march.as_deref())?;
+            m.compile_with(&crate::codegen::Options { target, ..Default::default() }).map_err(|e| e.to_string())
+        };
+        let asm = jobs.map(&shards, |s| compile(&s.module).map_err(|e| format!("{}：{e}", self.inputs[s.input].display())));
         // 拼：每个输入的各段按次序接起来，第一段之后去掉段头（空模块编出来的那几行属性）
-        let head = Module::default().compile().map_err(|e| e.to_string())?;
+        let head = compile(&Module::default())?;
         let mut texts = vec![String::new(); self.inputs.len()];
         for (s, text) in shards.iter().zip(asm) {
             let text = text?;
@@ -163,6 +172,6 @@ impl Llc {
 
     /// 生成的汇编 ⇒ 目标文件。
     fn object(&self, asm: &str) -> Result<Vec<u8>, String> {
-        crate::asm::Assembler::new().options(crate::asm::Options { attributes: None, relax: !self.no_relax, ..Default::default() }).assemble(asm).map_err(|e| e.to_string())
+        crate::asm::Assembler::new().options(crate::asm::Options { attributes: None, relax: !self.no_relax, ..Default::default() }).target(super::target(self.march.as_deref())?).assemble(asm).map_err(|e| e.to_string())
     }
 }

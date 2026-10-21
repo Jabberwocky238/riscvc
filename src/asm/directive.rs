@@ -250,7 +250,7 @@ impl Assembler<'_> {
                 if tag == 5
                     && let Err(arch) = &value
                 {
-                    self.mode.rvc = crate::feature::Compressed::ENABLED && (crate::feature::Target::lists(arch, "c") || crate::feature::Target::lists(arch, "zca"));
+                    self.mode.rvc = self.has_rvc() && (crate::feature::Target::lists(arch, "c") || crate::feature::Target::lists(arch, "zca"));
                 }
                 self.attributes.retain(|(t, _)| *t != tag);
                 self.attributes.push((tag, value));
@@ -265,8 +265,8 @@ impl Assembler<'_> {
                 Some("noexact") => (self.mode.exact, self.mode.relax) = (false, true),
                 Some("pic") => self.mode.pic = true,
                 Some("nopic") => self.mode.pic = false,
-                Some("rvc") if crate::feature::Compressed::ENABLED => self.mode.rvc = true,
-                Some("rvc") => return Err(Error::Syntax(String::from("压缩指令要 c feature（.option rvc）"))),
+                Some("rvc") if self.has_rvc() => self.mode.rvc = true,
+                Some("rvc") => return Err(Error::Syntax(String::from("压缩指令要目标挂 C（.option rvc）"))),
                 Some("norvc") => self.mode.rvc = false,
                 // arch 与认不出的：llvm-mc 也只是告警
                 _ => {}

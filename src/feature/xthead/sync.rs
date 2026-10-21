@@ -3,7 +3,7 @@ use super::XtForm;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadsync", feature = "xtheadsync", form = XtForm)]
+#[isa(name = "xtheadsync", form = XtForm)]
 pub enum XTheadSync {
     #[isa("th.sfence.vmas", Sfence, 0x0400_000b, exec = |_c, _i| ())]
     SfenceVmas,

@@ -407,7 +407,7 @@ impl Assembler<'_> {
                 let [a, b, Opnd::E(t)] = ops.as_slice() else { return Err(Error::Syntax(String::from(".insn b 的操作数"))) };
                 let w = opcode | f3 << 12 | reg(a)? << 15 | reg(b)? << 20;
                 let t = t.clone();
-                self.note(Fix::Branch, Self::target(t));
+                self.note(Fix::Branch, Self::jump_target(t));
                 self.word(w)
             }
             "u" | "j" | "uj" => {
@@ -421,7 +421,7 @@ impl Assembler<'_> {
                     // ⚠ 同 llvm-mc：常数目标把 `k >> 1` 不打散、直接放进 31:12（`.insn j JAL, a0, 0x100` 跳到 0x80000）
                     self.word(w | (u32::try_from((k >> 1) & 0xf_ffff).unwrap_or_default() << 12))
                 } else {
-                    self.note(Fix::Jal, Self::target(e));
+                    self.note(Fix::Jal, Self::jump_target(e));
                     self.word(w)
                 }
             }
@@ -430,7 +430,7 @@ impl Assembler<'_> {
     }
 
     /// `.insn` 的跳转目标：常数 = 偏移（RV32 下按 32 位补码）。
-    fn target(e: Expr) -> Expr {
+    fn jump_target(e: Expr) -> Expr {
         match e {
             Expr::Num(k) if k >= 1 << 31 && k < 1 << 32 => Expr::Num(k - (1 << 32)),
             e => e,

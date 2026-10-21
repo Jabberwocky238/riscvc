@@ -306,14 +306,10 @@ impl<T: Semantics> Disassemble for Std<T> {
 
 impl<T: Semantics> Assemble for Std<T> {
     fn knows(&self, mnemonic: &str) -> bool {
-        T::ALL.first().is_some_and(Table::enabled)
-            && (mnemonic.parse::<T>().is_ok() || T::PSEUDOS.iter().any(|(pat, _)| pat.split([' ', '\t']).next() == Some(mnemonic)))
+        mnemonic.parse::<T>().is_ok() || T::PSEUDOS.iter().any(|(pat, _)| pat.split([' ', '\t']).next() == Some(mnemonic))
     }
 
     fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
-        if !T::ALL.first().is_some_and(Table::enabled) {
-            return None;
-        }
         if let Some(text) = T::PSEUDOS.iter().find_map(|(pat, exp)| Template::expand(pat, exp, mnemonic, args)) {
             return Some(Ok(Emit::Text(text)));
         }
@@ -334,6 +330,25 @@ impl<T: Semantics> Module for Std<T> {
     fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
         let i = Self::inst(bytes).ok_or(Stop::Trap(Self::word(bytes)))?;
         i.op.execute(cx, &i)
+    }
+
+    /// ⭐ `<扩展名>.<助记符>`（`xtheadsync.th.sync.i`、`xtheadcmo.th.dcache.cipa %a`）⇒ 这一条：
+    /// 结果（有的话）是 rd，操作数依次是 rs1、rs2 …，全是整数寄存器、交给分配器。
+    /// ⚠ 只管纯寄存器的格式：带立即数 / 浮点寄存器的发出来汇编器会报错（⛔ 静默编错）。
+    fn select(&self, cx: &mut Sel<'_, '_>) -> Option<Result<(), String>> {
+        let m = cx.name().strip_prefix(self.name())?.strip_prefix('.')?;
+        let op: T = m.parse().ok()?;
+        let template = op.name().to_owned();
+        Some((|| {
+            let uses = (0..cx.arity()).map(|n| cx.reg(n)).collect::<Result<Vec<_>, _>>()?;
+            let def = cx.has_result().then(|| cx.temp(false));
+            let slots = vec!["x{}"; def.iter().count() + uses.len()].join(", ");
+            cx.emit(&if slots.is_empty() { template } else { format!("{template}\t{slots}") }, 4, def.as_slice(), &uses);
+            if def.is_some() {
+                cx.bind(def.as_slice());
+            }
+            Ok(())
+        })())
     }
 }
 
@@ -377,12 +392,6 @@ impl Template {
     }
 }
 
-/// ⭐ 这次编译开了的内置扩展（`src/feature/`，按 cargo feature）。
-#[must_use]
-pub fn builtin<'a>() -> Vec<&'a dyn Module> {
-    crate::feature::builtin()
-}
-
 /// 一段代码里的一条：地址、字节、文本。
 pub struct Line<'b> {
     pub pc: u64,
@@ -392,11 +401,12 @@ pub struct Line<'b> {
 
 /// ⭐ 反汇编器：挂上模块与打印风格，[`Self::lines`] 反汇编一段。
 ///
-/// 认的次序：给的模块先认，再内置的（M / Zmmul / F / Zicsr），最后 RV32I；
+/// 认的次序：给的模块先认，再目标里的（缺省 [`crate::feature::Target::default`]：M / Zmmul / F / Zicsr），最后 RV32I；
 /// 都不认 ⇒ 4 字节 `<unknown>`（同 llvm-objdump）。
 #[derive(Default)]
 pub struct Disassembler<'m> {
     mods: Vec<&'m dyn Module>,
+    target: crate::feature::Target<'m>,
     style: Style,
 }
 
@@ -413,6 +423,13 @@ impl<'m> Disassembler<'m> {
         self
     }
 
+    /// ⭐ 目标（挂哪些内置扩展；缺省 `rv32imf_zicsr_zmmul`）。
+    #[must_use]
+    pub fn target(mut self, target: crate::feature::Target<'m>) -> Self {
+        self.target = target;
+        self
+    }
+
     /// 打印风格（同 llvm-objdump 的 `-M`）。
     #[must_use]
     pub const fn style(mut self, style: Style) -> Self {
@@ -424,8 +441,10 @@ impl<'m> Disassembler<'m> {
     #[must_use]
     pub fn lines<'b>(&self, data: &'b [u8], base: u64) -> Lines<'b, 'm> {
         let mut all = self.mods.clone();
-        all.extend(builtin());
-        Lines { data, base, at: 0, mods: all, style: self.style }
+        all.extend_from_slice(self.target.modules());
+        let rvc = all.iter().any(|m| m.name() == "c");
+        let style = Style { no_float_csr: self.style.no_float_csr || !all.iter().any(|m| m.name() == "f"), ..self.style };
+        Lines { data, base, at: 0, mods: all, style, rvc }
     }
 
     /// pc 处起的 8 个字节（越过末尾补 0）。
@@ -451,6 +470,8 @@ pub struct Lines<'b, 'm> {
     at: usize,
     mods: Vec<&'m dyn Module>,
     style: Style,
+    /// 挂了 C：认不出的 16 位也只占 2 字节。
+    rvc: bool,
 }
 
 impl<'b> Iterator for Lines<'b, '_> {
@@ -465,7 +486,7 @@ impl<'b> Iterator for Lines<'b, '_> {
         let (n, text) = match Disassembler::claim(&self.mods, &window) {
             Some((e, n)) if self.at + n <= self.data.len() => (n, e.print(&self.data[self.at..self.at + n], pc, self.style)),
             // 开了 C：低两位不是 11 的是 16 位（认不出也只占 2 字节，同 llvm-objdump）
-            _ if crate::feature::Compressed::ENABLED && window[0] & 3 != 3 => (2, String::from("<unknown>")),
+            _ if self.rvc && window[0] & 3 != 3 => (2, String::from("<unknown>")),
             _ => {
                 let w = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
                 (4, Inst::<crate::isa::Rv32i>::try_from(w).map_or_else(|()| String::from("<unknown>"), |i| i.print(pc, self.style)))

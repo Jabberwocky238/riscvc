@@ -17,9 +17,12 @@ pub struct As {
     /// 当 `.S` 处理（缺省按扩展名：大写 S 才预处理）。
     #[arg(long)]
     preprocess: bool,
-    /// `-mabi=ilp32`（缺省：开了 `f` feature 是 ilp32f）。
+    /// `-mabi=ilp32`（缺省：目标有 F 是 ilp32f）。
     #[arg(long)]
     soft_float: bool,
+    /// 目标（`-march`）：`rv32imf_zicsr`、`rv32i2p1_m2p0_c2p0_zca1p0`、`+m,+f,+xtheadcmo`；缺省 `rv32imf_zicsr_zmmul`。
+    #[arg(long)]
+    march: Option<String>,
     /// 写 `.riscv.attributes`（同 clang -c；值是架构串）。
     #[arg(long)]
     arch_attribute: Option<String>,
@@ -39,14 +42,14 @@ impl As {
         let mut include = self.include.clone();
         include.extend(self.input.parent().map(PathBuf::from));
         let opts = crate::asm::Options {
-            float_abi: crate::feature::Float::ENABLED && !self.soft_float,
+            float_abi: !self.soft_float,
             preprocess: self.preprocess || self.input.extension().is_some_and(|e| e == "S"),
             defines,
             include,
             attributes: self.arch_attribute.clone(),
             relax: !self.no_relax,
         };
-        let bytes = crate::asm::Assembler::new().options(opts).assemble(&text).map_err(|e| format!("{}：{e}", self.input.display()))?;
+        let bytes = crate::asm::Assembler::new().options(opts).target(super::target(self.march.as_deref())?).assemble(&text).map_err(|e| format!("{}：{e}", self.input.display()))?;
         super::write(&self.output, &bytes)
     }
 }

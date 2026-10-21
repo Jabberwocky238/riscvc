@@ -41,6 +41,8 @@ pub struct Shape<'a> {
 pub struct Options<'a> {
     /// 挂上的扩展包：`ir::Op::Custom` 由它们选成机器指令（见 [`crate::ext::Module::select`]）。
     pub modules: &'a [&'a dyn crate::ext::Module],
+    /// ⭐ 目标：挂哪些内置扩展（缺省 `rv32imf_zicsr_zmmul`）。没有 M / Zmmul 的乘除调 compiler-rt，没有 F 走 ilp32 软浮点。
+    pub target: crate::feature::Target<'a>,
     /// 可分配的寄存器。宿主要独占某几个（比如扩展包把常量钉在 `x5…x10`）就写
     /// `Allocatable::default().without_int(&[5, 6, 7, 8, 9, 10])`。
     pub registers: Allocatable,
@@ -82,12 +84,12 @@ impl Module {
     }
 
     fn compile_all(&self, obs: &mut impl Observer, opts: &Options<'_>) -> Result<String, Error> {
-        let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", crate::feature::Target::march());
+        let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", opts.target.march());
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
                 continue;
             }
-            let mut sel = isel::Isel::select(self, f, opts.modules)?;
+            let mut sel = isel::Isel::select(self, f, opts.modules, &opts.target)?;
             sel.optimize();
             let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs);
             if !mf.well_formed() {

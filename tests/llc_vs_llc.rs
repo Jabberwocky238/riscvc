@@ -27,8 +27,9 @@ fn level(name: &str) {
         let ours = riscvc::asm::Assembler::new().assemble(&asm).unwrap_or_else(|e| panic!("{stem}: 汇编 {e}"));
         let out = tmp.join(format!("{stem}.o"));
         let ll = root.join("ll").join(format!("{stem}.ll"));
-        // 目标跟着 feature 走（开了 C 两边都压缩）
-        let (mattr, abi) = (format!("-mattr={},-relax", riscvc::feature::Target::mattr()), format!("-target-abi={}", riscvc::feature::Target::abi()));
+        // 目标 = 缺省
+        let target = riscvc::feature::Target::default();
+        let (mattr, abi) = (format!("-mattr={},-relax", target.mattr()), format!("-target-abi={}", target.abi()));
         let (_, err) = llvm.run("llc", &["-mtriple=riscv32", &mattr, &abi, "-filetype=obj", ll.to_str().unwrap(), "-o", out.to_str().unwrap()], "");
         assert!(!err.contains("error"), "llc {stem}: {err}");
         let theirs = std::fs::read(&out).unwrap();

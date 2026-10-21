@@ -12,6 +12,9 @@ pub struct Objdump {
     /// 立即数印十进制（缺省十六进制，同 llvm-objdump）。
     #[arg(long)]
     no_print_imm_hex: bool,
+    /// 目标（`-march` / `--mattr` 写法，同 `riscvc as`）；缺省 `rv32imf_zicsr_zmmul`。
+    #[arg(long)]
+    march: Option<String>,
 }
 
 impl Objdump {
@@ -28,7 +31,9 @@ impl Objdump {
             numeric: self.options.iter().any(|o| o == "numeric"),
             hex: !self.no_print_imm_hex,
             address: true,
+            no_float_csr: false,
         };
+        let target = super::target(self.march.as_deref())?;
         println!("\n{}:\tfile format elf32-littleriscv\n", self.input.display());
         for section in file.sections().filter(|s| s.kind() == object::SectionKind::Text) {
             let data = section.data().map_err(|e| e.to_string())?;
@@ -40,7 +45,7 @@ impl Objdump {
                 .map(|s| (s.address(), s.name().unwrap_or("")))
                 .collect();
             labels.sort_unstable();
-            for line in crate::ext::Disassembler::new().style(style).lines(data, base) {
+            for line in crate::ext::Disassembler::new().target(target.clone()).style(style).lines(data, base) {
                 for (_, name) in labels.iter().filter(|(a, _)| *a == line.pc) {
                     println!("\n{:08x} <{name}>:", line.pc);
                 }

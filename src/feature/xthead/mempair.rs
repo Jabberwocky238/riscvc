@@ -5,7 +5,7 @@ use crate::isa::Inst;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadmempair", feature = "xtheadmempair", form = XtForm)]
+#[isa(name = "xtheadmempair", form = XtForm)]
 pub enum XTheadMemPair {
     #[isa("th.lwd", Pair, 0xe000_400b, exec = |c, i| XTheadMemPair::load(c, i))]
     Lwd,

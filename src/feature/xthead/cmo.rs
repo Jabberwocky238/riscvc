@@ -3,7 +3,7 @@ use super::XtForm;
 use crate::macros::Isa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Isa)]
-#[isa(name = "xtheadcmo", feature = "xtheadcmo", form = XtForm)]
+#[isa(name = "xtheadcmo", form = XtForm)]
 pub enum XTheadCmo {
     #[isa("th.dcache.csw", Rs1, 0x0210000b, exec = |_c, _i| ())]
     DcacheCsw,

@@ -8,11 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 fn level(lv: &str) {
-    // 产物按 rv32imf（无 C）编
-    if !cfg!(all(feature = "m", feature = "f")) || cfg!(feature = "c") {
-        eprintln!("SKIP：rust-build.sh 按 rv32imf（无 C）编，这次的扩展不同");
-        return;
-    }
+    // 产物按 rv32imf（无 C）编 = 缺省目标
     let Some(llvm) = llvm::Llvm::locate() else { return };
     let rustc = Command::new("rustc").args(["+stable", "--version"]).output();
     if !rustc.as_ref().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("1.98.1")) {

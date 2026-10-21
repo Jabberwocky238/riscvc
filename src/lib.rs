@@ -1,4 +1,4 @@
-//! riscvc：纯 Rust 的 RV32IMF 工具链（见 README）。feature `toolchain`（默认开）是工具链本体，其余 feature 只管目标扩展
+//! riscvc：纯 Rust 的 RV32IMF 工具链（见 README）。feature `toolchain`（默认开）是工具链本体；目标扩展是运行时的 `feature::Target`，不是 feature
 //! （见 Cargo.toml 与 [`isa::Ext`]）；关掉 `toolchain` 只剩 [`elf`]（`no_std` + `alloc`）。
 #![cfg_attr(not(feature = "toolchain"), no_std)]
 extern crate alloc;

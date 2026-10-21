@@ -50,6 +50,11 @@ fn finish(result: Result<(), String>) -> ExitCode {
 }
 
 /// 读文件，错误带上路径。
+/// `--march`：架构串（`rv32imf_zicsr`、`rv32i2p1_m2p0_c2p0`）或 `-mattr` 写法（`+m,+f,+xtheadcmo`）；不给 ⇒ 缺省目标。
+fn target(spec: Option<&str>) -> Result<crate::feature::Target<'static>, String> {
+    spec.map_or_else(|| Ok(crate::feature::Target::default()), crate::feature::Target::parse)
+}
+
 fn read(path: &std::path::Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("{}：{e}", path.display()))
 }

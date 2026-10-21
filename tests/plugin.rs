@@ -42,14 +42,6 @@ const SRC: &str = r#"
 }) : () -> ()
 "#;
 
-/// 乘除要 M（没开就调 `__mulsi3` / `__udivsi3`，这里只链了被测的目标文件）。
-fn needs_m() -> bool {
-    if !cfg!(feature = "m") {
-        eprintln!("SKIP：没开 m，乘除要链 compiler-rt");
-    }
-    cfg!(feature = "m")
-}
-
 /// 编译、链接，在解释器里调 0x10000 处的函数。
 fn run(m: &riscvc::ir::Module, args: &[u32]) -> u32 {
     let asm = m.compile().unwrap();
@@ -67,9 +59,6 @@ fn run(m: &riscvc::ir::Module, args: &[u32]) -> u32 {
 /// 多结果 op：`%qr:2` 定义两个值，`%qr#0` / `%qr#1` 各取一个。
 #[test]
 fn multiple_results() {
-    if !needs_m() {
-        return;
-    }
     const SRC: &str = r#"
 "llvm.func"() <{function_type = !llvm.func<i32 (i32, i32)>, linkage = #llvm.linkage<external>, sym_name = "f"}> ({
 ^bb0(%a: i32, %b: i32):
@@ -90,9 +79,6 @@ fn multiple_results() {
 
 #[test]
 fn dialect_and_pass() {
-    if !needs_m() {
-        return;
-    }
     let mut reg = Registry::default();
     reg.dialect(&Demo);
     assert!(Registry::default().parse(SRC).is_err(), "没注册 demo 方言就不认");
@@ -382,9 +368,6 @@ fn the_host_can_reserve_registers() {
   "llvm.return"(%6) : (i32) -> ()
 }) : () -> ()
 "#;
-    if !needs_m() {
-        return;
-    }
     /// 一行里有没有用到这个寄存器（⛔ 只看操作数，不看助记符）。
     fn uses(asm: &str, name: &str) -> bool {
         asm.lines()

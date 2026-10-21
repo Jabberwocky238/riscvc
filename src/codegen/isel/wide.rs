@@ -13,7 +13,7 @@ use super::{Error, Isel, Part, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::feature::Zmmul;
 use crate::ir::{BinOp, IPred, ValId};
-use crate::isa::{Rv32i as IOp, Table};
+use crate::isa::Rv32i as IOp;
 use crate::regalloc::VReg;
 
 impl Isel<'_> {
@@ -112,7 +112,7 @@ impl Isel<'_> {
     /// 低 n 字的积：逐行竖式，`a[i] · b[j]` 的低半加到第 `i + j` 字、高半随进位进下一字。
     pub(super) fn wide_mul(&mut self, a: &[R], b: &[R]) -> Result<Vec<R>, Error> {
         let n = a.len();
-        if n == 2 && !Zmmul::Mul.enabled() {
+        if n == 2 && !self.has(&Zmmul::Mul) {
             let pair = vec![Part::Lo, Part::Hi];
             return self.libcall("__muldi3", &[(a.to_vec(), pair.clone()), (b.to_vec(), pair.clone())], &pair);
         }

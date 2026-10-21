@@ -14,33 +14,11 @@ exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 # 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 开标准的 m、f。没开的扩展：汇编器不认、译码不认、
 # 解释器陷入，代码生成改走 compiler-rt（乘除 libcall、软浮点）。组件（汇编器、链接器、代码生成 …）总在，不是 feature。
 [features]
-default = ["toolchain", "m", "f"]
+default = ["toolchain"]
 # ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
 # ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
 toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:mlirpass", "dep:object", "dep:allocator-api2", "dep:bumpalo", "dep:hashbrown", "dep:log", "dep:rustc-hash", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
-# C：16 位压缩指令（汇编器、反汇编、解释器认 `c.*` 与 16 位编码；`-march` 带 c2p0_zca1p0[_zcf1p0]），默认不开
-c = []
-# M：乘除（蕴含 zmmul）；没开 ⇒ 除法 / 取余调 __divsi3 一类
-m = ["zmmul"]
-# Zmmul：只有乘法；没开 ⇒ 乘法调 __mulsi3
-zmmul = []
-# F：单精度浮点 + ilp32f 调用约定（蕴含 zicsr）；没开 ⇒ ilp32 + 软浮点
-f = ["zicsr"]
-# Zicsr：CSR 指令
-zicsr = []
-# 玄铁（T-Head）厂商扩展，默认不开（src/feature/xthead/）
-xtheadba = []
-xtheadbb = []
-xtheadbs = []
-xtheadcmo = []
-xtheadcondmov = []
-xtheadfmemidx = ["f"]
-xtheadmac = []
-xtheadmemidx = []
-xtheadmempair = []
-xtheadsync = []
-# 玄铁的全部
-xthead = ["xtheadba", "xtheadbb", "xtheadbs", "xtheadcmo", "xtheadcondmov", "xtheadfmemidx", "xtheadmac", "xtheadmemidx", "xtheadmempair", "xtheadsync"]
+# 目标扩展（M / F / C / XThead* …）⛔ 是 cargo feature：运行时的 `feature::Target`（一组 `ext::Module`）决定
 
 [lints.rust]
 # src/alloc（内化的 regalloc2）里这三个 feature 是上游的，riscvc 不开也不声明；
@@ -75,7 +53,3 @@ name = "riscvc"
 path = "src/main.rs"
 required-features = ["toolchain"]
 
-# 实参按 ilp32f 放（float 进 fa 寄存器）
-[[test]]
-name = "llc_vs_llc"
-required-features = ["f"]

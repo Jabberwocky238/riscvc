@@ -69,6 +69,8 @@ pub struct Cpu {
     pub mem: Memory,
     pub csr: HashMap<u16, u32>,
     pub steps: u64,
+    /// ⭐ 目标：执行时认哪些内置扩展（缺省 `rv32imf_zicsr_zmmul`）。外部扩展包另由 [`Self::step_on`] 给。
+    pub target: crate::feature::Target<'static>,
 }
 
 impl Cpu {
@@ -109,7 +111,7 @@ impl Cpu {
         }
     }
 
-    /// 执行一条指令（只挂内置扩展）。
+    /// 执行一条指令（只用 [`Self::target`] 的内置扩展）。
     pub fn step(&mut self) -> Result<(), Stop> {
         self.step_on(&mut [], &mut [])
     }
@@ -118,7 +120,7 @@ impl Cpu {
     pub fn step_on(&mut self, exts: &mut [&mut dyn Module], devs: &mut [&mut dyn Device]) -> Result<(), Stop> {
         let mut window = [0; 8];
         self.mem.read(self.pc, &mut window);
-        // 给的扩展先认，再内置的（src/feature）
+        // 给的扩展先认，再目标里的内置扩展（src/feature）
         let n = match exts.iter_mut().find(|e| e.decode(&window).is_some()) {
             Some(e) => {
                 let n = e.decode(&window).unwrap_or(4);
@@ -126,10 +128,10 @@ impl Cpu {
                 e.execute(&mut cx, &window[..n.min(8)])?;
                 Some((n, cx.next))
             }
-            None => match crate::feature::decode(&window) {
-                Some(n) => {
+            None => match self.target.claim(&window) {
+                Some((m, n)) => {
                     let mut cx = Exec::new(self, devs);
-                    crate::feature::execute(&mut cx, &window[..n.min(8)])?;
+                    crate::feature::Target::run(m, &mut cx, &window[..n.min(8)])?;
                     Some((n, cx.next))
                 }
                 None => None,
@@ -152,9 +154,9 @@ impl Cpu {
     pub(crate) fn exec(&mut self, devs: &mut [&mut dyn Device], w: u32, len: u32) -> Result<u32, Stop> {
         // 内置扩展（M、F、Zicsr …）的 32 位指令
         let window = { let mut b = [0u8; 8]; b[..4].copy_from_slice(&w.to_le_bytes()); b };
-        if crate::feature::decode(&window) == Some(4) {
+        if let Some((m, 4)) = self.target.claim(&window) {
             let mut cx = Exec::new(self, devs);
-            crate::feature::execute(&mut cx, &window[..4])?;
+            crate::feature::Target::run(m, &mut cx, &window[..4])?;
             let next = cx.next;
             return Ok(next.unwrap_or_else(|| self.pc.wrapping_add(len)));
         }

@@ -112,7 +112,7 @@ impl Isel<'_> {
         let pf = self.parts(Types::FLOAT)?;
         if bf {
             let w = self.ri(IOp::Slli, x, 16);
-            if !Float::ENABLED {
+            if !self.float() {
                 return Ok(vec![w]);
             }
             let f = self.fr();
@@ -120,7 +120,7 @@ impl Isel<'_> {
             return Ok(vec![f]);
         }
         // 同 llc：开了 F 时 16 位原样放进 fa0（`fmv.w.x`，⛔ NaN-box —— 只有参数 / 返回值才 box）
-        let arg = if Float::ENABLED {
+        let arg = if self.float() {
             let f = self.fr();
             self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[f], &[x]);
             (vec![f], vec![Part::F])
@@ -134,7 +134,7 @@ impl Isel<'_> {
     pub(super) fn trunc16(&mut self, from: Ty, x: Vec<R>, bf: bool) -> Result<R, Error> {
         let name = format!("__trunc{}{}2", self.fsuffix(from), if bf { "bf" } else { "hf" });
         let pf = self.parts(from)?;
-        if Float::ENABLED {
+        if self.float() {
             let r = self.libcall(&name, &[(x, pf)], &[Part::F])?;
             return Ok(self.unbox(r[0]));
         }

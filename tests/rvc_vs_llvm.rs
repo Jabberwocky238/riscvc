@@ -1,9 +1,13 @@
 //! C（16 位压缩指令）的译码 + 打印 vs `llvm-objdump --mattr=…,+c`：低两位不是 11 的半字一个不落（49,152 个），
 //! 别名、no-aliases、numeric 三种风格。别名风格印的是还原出的 32 位指令 ⇒ 「压缩 ⇔ 32 位」的对照表也在这里对过。
-//! 只在开了 `c` feature 时编；没有 LLVM ⇒ SKIP。
-#![cfg(feature = "c")]
+//! 目标 = 缺省 + C；没有 LLVM ⇒ SKIP。
 mod llvm;
 use riscvc::ext::Disassembler;
+use riscvc::feature::{builtin, Target};
+
+fn target() -> Target<'static> {
+    Target::default().with(&builtin::C)
+}
 use riscvc::isa::Style;
 
 fn compare(style: Style, args: &[&str]) {
@@ -15,7 +19,7 @@ fn compare(style: Style, args: &[&str]) {
     obj.append_section_data(text, &halves.iter().flat_map(|h| h.to_le_bytes()).collect::<Vec<u8>>(), 2);
     let path = std::env::temp_dir().join(format!("riscvc-rvc-{}-{}", std::process::id(), args.join("")));
     std::fs::write(&path, obj.write().unwrap()).unwrap();
-    let mattr = format!("--mattr={}", riscvc::feature::Target::mattr());
+    let mattr = format!("--mattr={}", target().mattr());
     let mut cmd = vec!["-d", "--no-show-raw-insn", mattr.as_str()];
     cmd.extend(args);
     cmd.push(path.to_str().unwrap());
@@ -35,7 +39,7 @@ fn compare(style: Style, args: &[&str]) {
     for (i, &h) in halves.iter().enumerate() {
         let pc = 2 * i as u64;
         let bytes = h.to_le_bytes();
-        let ours = Disassembler::new().style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
+        let ours = Disassembler::new().target(target()).style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
         let expect = theirs.get(&pc).cloned().unwrap_or_default();
         if ours != expect {
             bad += 1;

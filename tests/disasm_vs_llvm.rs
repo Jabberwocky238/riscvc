@@ -5,8 +5,8 @@ use riscvc::ext::Disassembler;
 use riscvc::isa::Style;
 
 fn words(n: usize) -> Vec<u32> {
-    // 开了的全部指令（RV32I + 按 feature 注册的扩展，含 --features xthead 的玄铁）
-    let pats = riscvc::feature::patterns();
+    // 目标里的全部指令（RV32I + 缺省目标的扩展）
+    let pats = riscvc::feature::Target::default().patterns();
     let mut rng = llvm::Rng(0x1234_5678_9abc_def1);
     (0..n)
         .map(|i| {
@@ -30,7 +30,7 @@ fn compare(style: Style, args: &[&str]) {
     obj.append_section_data(text, &words.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>(), 4);
     let dir = std::env::temp_dir().join(format!("riscvc-disasm-{}-{}", std::process::id(), args.join("")));
     std::fs::write(&dir, obj.write().unwrap()).unwrap();
-    let mattr = format!("--mattr={}", riscvc::feature::Target::mattr());
+    let mattr = format!("--mattr={}", riscvc::feature::Target::default().mattr());
     let mut cmd = vec!["-d", "--no-show-raw-insn", mattr.as_str()];
     cmd.extend(args);
     cmd.push(dir.to_str().unwrap());
