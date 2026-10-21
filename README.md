@@ -347,7 +347,7 @@ Main entry points:
 | `riscvc::sim::Cpu` | RV32 interpreter: `load` an ELF, `run` / `step`, or `run_on` / `step_on` with custom extensions and MMIO `Device`s; registers `x`, `f`, `pc`, `csr`, sparse `mem` |
 | `riscvc::ext::{Extension, Device}` | traits for custom instructions and memory-mapped devices |
 | `riscvc::feature::Target` | the target: a list of extension modules (`default`, `rv32i`, `with`, `parse`); `march()` (attribute arch string), `mattr()` (LLVM `-mattr`) |
-| `riscvc::elf::Elf` | ELF32 read (`TryFrom<&[u8]>`) / write (`pack(Layout::Verbatim \| Canonical)`); `Attributes` for `.riscv.attributes`-style sections; the only module without `toolchain` |
+| `riscvc::elf::Elf` | ELF32 read (`TryFrom<&[u8]>`) / write (`pack(Layout::Verbatim \| Canonical)`); `Attributes` for `.riscv.attributes`-style sections; the only module in the `no_std` flavour (`default-features = false`) |
 | `riscvc::macros::{Isa, Opcode}` | derive macros for instruction tables (re-exported from `riscvc-macros`) |
 
 `riscvc::sim::Stop` tells why execution stopped: `Returned` (reached the return address), `Trap(word)`
@@ -428,13 +428,14 @@ pub enum Zmmul {
 
 ## Cargo features and targets
 
-`toolchain` *(default)* is the toolchain itself (compiler, assembler, linker, disassembler, simulator, CLI). With
-`default-features = false`, only `riscvc::elf` is left: the ELF32 little-endian RISC-V read/write model, `no_std` +
-`alloc`, depending on `thiserror` only.
+Two flavours. `std` *(default)* is the toolchain itself (compiler, assembler, linker, disassembler, simulator, CLI).
+With `default-features = false` you get the `no_std` flavour: only `riscvc::elf`, the ELF32 little-endian RISC-V
+read/write model, `no_std` + `alloc`, depending on `thiserror` only. (Up to 0.2.3 the `std` feature was called
+`toolchain`.)
 
 ```toml
-riscvc = "0.2"                                              # the toolchain
-riscvc = { version = "0.2", default-features = false }      # only the ELF model (no_std)
+riscvc = "0.2"                                              # std: the toolchain
+riscvc = { version = "0.2", default-features = false }      # no_std: only the ELF model
 ```
 
 Target extensions are **not** Cargo features. They are runtime values: every extension is an `ext::Module` (the
@@ -510,8 +511,9 @@ dominator-scoped CSE, branch-condition folding, tail calls), post-allocation bra
 selection-time rewrites (small constant-length `memcpy` / `memmove` / `memset` inline, `ctpop(x) == 1` as
 `(x - 1) <u (x ^ (x - 1))`, `floor` / `ceil` / `round` … inline and fused into `fcvt` with a rounding mode) are in;
 still missing against llc are loop-invariant code motion, loop strength reduction, shrink-wrapping and
-copy coalescing, plus llc's lowering of `cttz` (de Bruijn table). The register allocator is a vendored copy of
-[regalloc2](https://github.com/bytecodealliance/regalloc2) v0.15.2 in `src/alloc` (see `src/alloc/VENDOR.md`): it has
+copy coalescing, plus llc's lowering of `cttz` (de Bruijn table). The register allocator is
+[regalloc2](https://github.com/bytecodealliance/regalloc2) from crates.io, pinned at `=0.15.2` (re-exported as
+`riscvc::regalloc`; up to 0.2.3 it was a vendored copy with extra counters only): it has
 no move hints, no rematerialization and coalesces only two-address operands and block parameters, which is where the
 remaining code-size gap against llc mostly comes from.
 
@@ -558,6 +560,4 @@ git diff tests/fixtures/lit/xfail.txt
 
 ## License
 
-[MIT](LICENSE), except `src/alloc` — a vendored copy of
-[regalloc2](https://github.com/bytecodealliance/regalloc2), which is Apache-2.0 WITH LLVM-exception
-(see `src/alloc/LICENSE` and `src/alloc/VENDOR.md`).
+[MIT](LICENSE). Dependencies keep their own licenses (regalloc2: Apache-2.0 WITH LLVM-exception).

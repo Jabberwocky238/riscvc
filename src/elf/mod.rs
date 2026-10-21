@@ -1,4 +1,4 @@
-//! ELF32 小端 RISC-V 的**读写模型**：字节 ⇄ 有名字的节与段，⭐ 不依赖 `toolchain`（`no_std` + `alloc`）。
+//! ELF32 小端 RISC-V 的**读写模型**：字节 ⇄ 有名字的节与段，⭐ 不依赖 `std` feature（no_std 档：`no_std` + `alloc`）。
 //!
 //! ```text
 //!   raw      线格式：`#[repr(C)]` 的 Ehdr / Phdr / Shdr / Sym / Rela / Rel（布局编译期逐字段钉死）

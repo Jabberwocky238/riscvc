@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT AND Apache-2.0 WITH LLVM-exception"
@@ -14,16 +14,13 @@ exclude = ["tests/fixtures/", "tests/support/", "tools/", "target/"]
 # 一个 feature = 一个编译选项 = 一个目标扩展（同 -march），default 开标准的 m、f。没开的扩展：汇编器不认、译码不认、
 # 解释器陷入，代码生成改走 compiler-rt（乘除 libcall、软浮点）。组件（汇编器、链接器、代码生成 …）总在，不是 feature。
 [features]
-default = ["toolchain"]
-# ⭐ 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）。关掉（`default-features = false`）只剩 `riscvc::elf`：
-# ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
-toolchain = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:mlirpass", "dep:object", "dep:allocator-api2", "dep:bumpalo", "dep:hashbrown", "dep:log", "dep:rustc-hash", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
+default = ["std"]
+# ⭐ 两档：`std`（缺省）= 工具链本体（编译器、汇编器、链接器、反汇编、模拟器、命令行）；关掉（`default-features = false`）
+# = no_std 档，只剩 `riscvc::elf`：ELF32 小端 RISC-V 的读写模型，`no_std` + `alloc`，只依赖 thiserror。
+std = ["dep:riscvc-macros", "dep:clap", "dep:mlirformat", "dep:mlirpass", "dep:object", "dep:regalloc2", "dep:smallvec", "dep:xxhash-rust", "thiserror/std"]
 # 目标扩展（M / F / C / XThead* …）⛔ 是 cargo feature：运行时的 `feature::Target`（一组 `ext::Module`）决定
 
 [lints.rust]
-# src/alloc（内化的 regalloc2）里这三个 feature 是上游的，riscvc 不开也不声明；
-# 在这里登记一下，省得它们刷出几百条 unexpected_cfgs。
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("enable-serde", "trace-log", "fuzzing"))'] }
 
 [workspace]
 members = [".", "macros"]
@@ -36,13 +33,9 @@ mlirformat = { version = "0.4.0", default-features = false, optional = true }
 # 高层方言（func / arith / scf / cf / memref / math / index / affine …）下降成 llvm 方言
 mlirpass = { version = "0.1.0", default-features = false, features = ["std"], optional = true }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
-# ⭐ src/alloc（内化的 regalloc2）的依赖，版本照上游 Cargo.toml，⛔ 别擅自升
-allocator-api2 = { version = "0.2.18", default-features = false, features = ["alloc"], optional = true }
-bumpalo = { version = "3.16.0", features = ["allocator-api2"], optional = true }
-hashbrown = { version = "0.17", default-features = false, optional = true }
-log = { version = "0.4.8", default-features = false, optional = true }
-rustc-hash = { version = "2.0.0", default-features = false, optional = true }
-# 机器指令的寄存器表内联存放（src/alloc 也用它）
+# 寄存器分配（Ion）。⚠ 钉死版本：分配结果决定出的每一条 mv，换版本 = 换代码生成的输出，要重新对拍
+regalloc2 = { version = "=0.15.2", optional = true }
+# 机器指令的寄存器表内联存放
 smallvec = { version = "1.6.1", features = ["union"], optional = true }
 thiserror = { version = "2", default-features = false }
 # SHF_MERGE 去重的分片哈希（同 lld：llvm::xxh3_64bits）
@@ -51,5 +44,5 @@ xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
 [[bin]]
 name = "riscvc"
 path = "src/main.rs"
-required-features = ["toolchain"]
+required-features = ["std"]
 

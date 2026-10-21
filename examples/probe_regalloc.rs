@@ -1,10 +1,8 @@
 //! 探针：寄存器分配器到底为什么要插那么多搬运。
 //!
 //! 走 [`riscvc::codegen::Observer`] 注入（⛔ 不是环境变量、不是 feature），把每个函数的
-//! `Output::stats` 汇总起来。两组数:
-//!
-//! * **按原因分的搬运**（`moves_by_prio`，riscvc 给 Ion 加的）——「这条 mv 为什么存在」
-//! * **拆分的来由**（`splits_*`，上游自带）——活跃区间为什么会被切开
+//! `Output::stats`（regalloc2 0.15.2 自带的计数：搬运、拆分、bundle）汇总起来，外加分配前机器 IR 的「多固定寄存器」。
+//! ⚠ 「这条 mv 为什么存在」的按原因计数是从前内化 regalloc2 时加的，改回 crates.io 的 regalloc2 之后没有了。
 //!
 //! ```bash
 //! cargo run --example probe_regalloc -- tests/fixtures/rust/core.O2.mlir
@@ -13,27 +11,11 @@ use riscvc::codegen::Observer;
 use riscvc::opt::DEFAULT_PIPELINE;
 use riscvc::plugin::Registry;
 
-/// `InsertMovePrio` 的六个取值，下标对齐 `moves_by_prio`。
-const WHY: [&str; 6] = [
-    "入边（前驱跳转处）",
-    "段间接缝（同一个值被拆成多段，段与段分到不同寄存器）",
-    "多固定寄存器·首轮（同一个值在一条指令上被要求待在两个不同的 ABI 寄存器里）",
-    "多固定寄存器·次轮",
-    "双地址（目的寄存器必须复用某个源）",
-    "出边（后继块开头）",
-];
-
 #[derive(Default)]
 struct Tally {
     funcs: usize,
-    by_prio: [usize; 6],
     edits: usize,
     splits: usize,
-    sconf: usize,
-    spress: usize,
-    smin: usize,
-    remat: usize,
-    bpm: [usize; 6],
     bundles: usize,
     spill_bundles: usize,
     merged: usize,
@@ -59,18 +41,8 @@ impl Observer for Tally {
             }
         }
         self.funcs += 1;
-        for (a, b) in self.by_prio.iter_mut().zip(s.moves_by_prio) {
-            *a += b;
-        }
         self.edits += s.edits_count;
         self.splits += s.splits;
-        self.sconf += s.split_conflict;
-        self.spress += s.split_pressure;
-        self.smin += s.split_minimal;
-        self.remat += s.seam_rematerializable;
-        for (a, b) in self.bpm.iter_mut().zip(s.bparam_merge) {
-            *a += b;
-        }
         self.bundles += s.final_bundle_count;
         self.spill_bundles += s.spill_bundle_count;
         self.merged += s.merged_bundle_count;
@@ -87,25 +59,11 @@ fn main() {
         reg.run(&mut m, &DEFAULT_PIPELINE.to_vec()).expect("跑流水线");
         let mut t = Tally::default();
         m.compile_observed(&mut t).expect("编译");
-        let total: usize = t.by_prio.iter().sum();
-        println!("\n=== {path} ===\n{} 个函数，插入搬运 {total} 条（最终 edits {}）", t.funcs, t.edits);
-        let mut rows: Vec<(usize, &str)> = t.by_prio.iter().copied().zip(WHY).collect();
-        rows.sort_by(|a, b| b.0.cmp(&a.0));
-        for (n, why) in rows {
-            if n > 0 {
-                println!("  {n:7}  {:3}%  {why}", n * 100 / total.max(1));
-            }
-        }
+        println!("\n=== {path} ===\n{} 个函数，最终 edits {}", t.funcs, t.edits);
         t.multi.sort_by_key(|x| core::cmp::Reverse(x.1 + x.2));
         let (dup, clob): (usize, usize) = t.multi.iter().fold((0, 0), |a, x| (a.0 + x.1, a.1 + x.2));
         println!("「多固定寄存器」合计 {}：同一个值传了两次 {dup}，实参在调用后还活着 {clob}；按指令种类：{}",
                  dup + clob, t.multi.iter().map(|(k, d, c)| format!("{k} {}+{}", d, c)).collect::<Vec<_>>().join("，"));
-        const WHY_M: [&str; 6] = ["合上了", "寄存器类不同", "bundle 已被钉死", "区间条数超上限", "活跃区间重叠", "需求冲突（固定寄存器等）"];
-        let tries: usize = t.bpm.iter().sum();
-        println!("块参数与实参合并：尝试 {tries} 次 —— {}",
-                 t.bpm.iter().zip(WHY_M).filter(|(n, _)| **n > 0).map(|(n, w)| format!("{w} {n}（{}%）", n * 100 / tries.max(1))).collect::<Vec<_>>().join("，"));
-        println!("段间接缝里「本可重算而非搬运」的：{}", t.remat);
-        println!("拆分起因：约束冲突 {}，寄存器压力 {}，切到最小 {}", t.sconf, t.spress, t.smin);
         println!("机器指令 {}；拆分 {} 次；最终 bundle {}，其中溢出 bundle {}；合并 {}，驱逐 {}；块参数进出 {}",
                  t.insts, t.splits, t.bundles, t.spill_bundles, t.merged, t.evicted, t.bparam);
         // ⚠ 上游的 splits_clobbers / splits_hot / splits_conflicts / splits_defs / splits_all
