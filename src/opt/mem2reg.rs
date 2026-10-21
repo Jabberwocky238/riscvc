@@ -47,21 +47,26 @@ impl Mem2RegImpl {
         }
         // 块参数不可能是 alloca 的结果，但跳转实参里出现就是逃逸。
         let mut bad = vec![false; f.vals.len()];
-        let note = |v: ValId, t: crate::ir::Ty, ty: &mut Vec<Option<crate::ir::Ty>>| {
+        // ⛔ 提升「按一种类型存、按另一种类型取」的槽位（转换走内存：存 i64 取 double）：
+        // 改名时会把存进去的值原样交给 load，类型就错了。volatile / 原子访问也不碰。
+        let note = |v: ValId, t: crate::ir::Ty, plain: bool, ty: &mut Vec<Option<crate::ir::Ty>>, bad: &mut Vec<bool>| {
             if slot[v.0 as usize] {
+                if !plain || ty[v.0 as usize].is_some_and(|old| old != t) {
+                    bad[v.0 as usize] = true;
+                }
                 ty[v.0 as usize] = Some(t);
             }
         };
         for b in &f.blocks {
             for i in &b.insts {
                 match &i.op {
-                    Op::Load { ptr, .. } => {
+                    Op::Load { ptr, volatile, atomic, .. } => {
                         if let Some(r) = i.result {
-                            note(*ptr, f.vals[r.0 as usize], &mut ty);
+                            note(*ptr, f.vals[r.0 as usize], !volatile && atomic.is_none(), &mut ty, &mut bad);
                         }
                     }
-                    Op::Store { val, ptr, .. } => {
-                        note(*ptr, f.vals[val.0 as usize], &mut ty);
+                    Op::Store { val, ptr, volatile, atomic, .. } => {
+                        note(*ptr, f.vals[val.0 as usize], !volatile && atomic.is_none(), &mut ty, &mut bad);
                         bad[val.0 as usize] = true;
                     }
                     Op::Alloca { .. } => {}
