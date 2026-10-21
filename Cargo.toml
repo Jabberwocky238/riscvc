@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT AND Apache-2.0 WITH LLVM-exception"
@@ -31,10 +31,10 @@ members = [".", "macros"]
 [dependencies]
 riscvc-macros = { path = "macros", version = "0.1.2", optional = true }
 clap = { version = "4.6.7", features = ["derive"], optional = true }
-# ⭐ mlirformat 与 mlirpass 必须是同一份 mlirformat（Body ⇄ Module 在两边直接传），所以都走 path
-mlirformat = { path = "../../../mlirformat.rs", version = "0.4.0", default-features = false, optional = true }
+# ⭐ mlirformat 与 mlirpass 必须是同一份 mlirformat（Body ⇄ Module 在两边直接传）：都从 crates.io 取，mlirpass 0.1 依赖的就是 mlirformat ^0.4
+mlirformat = { version = "0.4.0", default-features = false, optional = true }
 # 高层方言（func / arith / scf / cf / memref / math / index / affine …）下降成 llvm 方言
-mlirpass = { path = "../../../mlirpass", version = "0.1.0", default-features = false, features = ["std"], optional = true }
+mlirpass = { version = "0.1.0", default-features = false, features = ["std"], optional = true }
 object = { version = "0.37", default-features = false, features = ["write_std", "read_core", "elf", "std"], optional = true }
 # ⭐ src/alloc（内化的 regalloc2）的依赖，版本照上游 Cargo.toml，⛔ 别擅自升
 allocator-api2 = { version = "0.2.18", default-features = false, features = ["alloc"], optional = true }

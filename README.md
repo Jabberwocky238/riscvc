@@ -512,8 +512,8 @@ remaining code-size gap against llc mostly comes from.
 
 ## Building and testing
 
-mlirformat and mlirpass are path dependencies (one mlirformat for both, since modules pass between them in memory):
-checkouts at `../../../mlirformat.rs` and `../../../mlirpass` relative to this directory (sibling checkouts).
+mlirformat 0.4 and mlirpass 0.1 come from crates.io (mlirpass depends on mlirformat ^0.4, so both resolve to one
+mlirformat — modules pass between them in memory). No sibling checkouts are needed.
 
 ```bash
 cargo build --release
