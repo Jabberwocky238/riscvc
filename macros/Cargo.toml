@@ -1,6 +1,6 @@
 [package]
 name = "riscvc-macros"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Procedural macros for riscvc: instruction tables (#[derive(Isa)]) and the opcode union (#[derive(Opcode)])"
 license = "MIT"

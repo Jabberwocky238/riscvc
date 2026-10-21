@@ -1,6 +1,6 @@
 [package]
 name = "riscvc"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Pure-Rust RV32IMF toolchain: MLIR llvm dialect => RV32 codegen, GNU assembler, linker, objdump, simulator; dialect / pass plugins"
 license = "MIT AND Apache-2.0 WITH LLVM-exception"
@@ -29,7 +29,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("enable-se
 members = [".", "macros"]
 
 [dependencies]
-riscvc-macros = { path = "macros", version = "0.1.1", optional = true }
+riscvc-macros = { path = "macros", version = "0.1.2", optional = true }
 clap = { version = "4.6.7", features = ["derive"], optional = true }
 # ⭐ mlirformat 与 mlirpass 必须是同一份 mlirformat（Body ⇄ Module 在两边直接传），所以都走 path
 mlirformat = { path = "../../../mlirformat.rs", version = "0.4.0", default-features = false, optional = true }
