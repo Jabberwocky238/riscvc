@@ -14,6 +14,7 @@
 //! call.rs  调用、返回、库函数调用
 //! intr.rs  llvm.intr.*
 //! ```
+mod amo;
 mod call;
 mod divc;
 mod float;
@@ -26,7 +27,7 @@ use super::abi::{Assign, Loc, Part};
 use super::mir::{Base, MBlock, MInst, MOp, R, Rule};
 use super::Error;
 use crate::ir::{Block as IBlock, CastOp, Const, Function, IPred, Inst, Intr, Kind, Module, Op, Target, Ty, Types, ValId};
-use crate::feature::{Float, M, Zmmul};
+use crate::feature::{Double, Float, M, Zmmul};
 use crate::isa::{Opcode, Rm, Rv32i as IOp};
 use crate::regalloc::{Block, RegClass, VReg};
 use std::collections::HashMap;
@@ -55,6 +56,8 @@ pub struct Selected {
     pub varargs: Option<u8>,
     /// 动态改过 `sp`（动态 alloca / stacksave）⇒ 要帧指针。
     pub dynamic_sp: bool,
+    /// 目标有 D：浮点寄存器 64 位（搬运 `fmv.d`、溢出 / 保存 8 字节）。
+    pub double: bool,
 }
 
 pub struct Isel<'m> {
@@ -172,6 +175,7 @@ impl<'m> Isel<'m> {
             }
         }
         s.layout = core::mem::take(&mut s.groups).concat();
+        let double = s.double();
         Ok(Selected {
             blocks: s.blocks,
             layout: s.layout,
@@ -182,6 +186,7 @@ impl<'m> Isel<'m> {
             calls: s.calls,
             varargs: s.varargs,
             dynamic_sp: s.dynamic_sp,
+            double,
         })
     }
 
@@ -251,10 +256,10 @@ impl<'m> Isel<'m> {
 
     // ---- 小工具 -------------------------------------------------------------------------
 
-    /// 软浮点类型：compiler-rt 函数名的后缀（`df` = double，`tf` = fp128，F 没开时 `sf` = float）；硬件做的 ⇒ `None`。
+    /// 软浮点类型：compiler-rt 函数名的后缀（D 没开时 `df` = double，`tf` = fp128，F 没开时 `sf` = float）；硬件做的 ⇒ `None`。
     fn soft(&self, t: Ty) -> Option<&'static str> {
         match self.kind(t) {
-            Kind::Double => Some("df"),
+            Kind::Double if !self.double() => Some("df"),
             Kind::Fp128 => Some("tf"),
             Kind::Float if !self.float() => Some("sf"),
             _ => None,
@@ -303,6 +308,8 @@ impl<'m> Isel<'m> {
             Kind::Float if self.float() => vec![Part::F],
             // 没有 F（ilp32）：float 是一个整数部件
             Kind::Float => vec![Part::X],
+            // 有 D：一个 64 位浮点寄存器；没有：一对整数（软浮点）
+            Kind::Double if self.double() => vec![Part::D],
             Kind::Double => vec![Part::Lo, Part::Hi],
             Kind::Fp128 => vec![Part::X; 4],
             Kind::Array(n, e) => self.parts(*e)?.repeat(usize::try_from(*n).unwrap_or(0)),
@@ -336,6 +343,36 @@ impl<'m> Isel<'m> {
     /// 目标有硬件单精度浮点（F）⇒ ilp32f；否则软浮点。
     fn float(&self) -> bool {
         self.target.float()
+    }
+
+    /// 目标有硬件双精度浮点（D）⇒ ilp32d、double 在 64 位浮点寄存器里。
+    fn double(&self) -> bool {
+        self.target.double()
+    }
+
+    /// ⭐ 单精度指令按值的类型换成双精度那条（`t` 是 double 且开了 D：`fadd.s` ⇒ `fadd.d`），否则原样。
+    pub(super) fn fp(&self, t: Ty, op: Float) -> Opcode {
+        if self.double() && matches!(self.kind(t), Kind::Double) { Double::try_from(op).map_or(op.into(), Opcode::from) } else { op.into() }
+    }
+
+    /// 64 位浮点寄存器 ⇒（低字, 高字）：RV32 没有 `fmv.x.d`，经栈（同 llc：`fsd` 再两个 `lw`）。
+    pub(super) fn d_split(&mut self, d: R) -> (R, R) {
+        let obj = self.stack_slot(8, 8);
+        self.emit(MOp::Store(Double::Fsd.into(), Base::Frame(obj), 0), &[], &[d]);
+        let (lo, hi) = (self.xr(), self.xr());
+        self.emit(MOp::Load(IOp::Lw.into(), Base::Frame(obj), 0), &[lo], &[]);
+        self.emit(MOp::Load(IOp::Lw.into(), Base::Frame(obj), 4), &[hi], &[]);
+        (lo, hi)
+    }
+
+    /// （低字, 高字）⇒ 64 位浮点寄存器（两个 `sw` 再 `fld`）。
+    pub(super) fn d_join(&mut self, lo: R, hi: R) -> R {
+        let obj = self.stack_slot(8, 8);
+        self.emit(MOp::Store(IOp::Sw.into(), Base::Frame(obj), 0), &[], &[lo]);
+        self.emit(MOp::Store(IOp::Sw.into(), Base::Frame(obj), 4), &[], &[hi]);
+        let d = self.fr();
+        self.emit(MOp::Load(Double::Fld.into(), Base::Frame(obj), 0), &[d], &[]);
+        d
     }
 
     fn emit(&mut self, op: MOp, defs: &[R], uses: &[R]) {
@@ -456,6 +493,12 @@ impl<'m> Isel<'m> {
                         self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[R::ZERO]);
                         d
                     }
+                    // +0.0：`fcvt.d.w fd, zero`（同 llc）
+                    Part::D => {
+                        let d = self.fr();
+                        self.emit(MOp::Reg(Double::FcvtDW.into(), Rm::Rne as u8), &[d], &[R::ZERO]);
+                        d
+                    }
                     _ => R::ZERO,
                 })
                 .collect(),
@@ -467,6 +510,15 @@ impl<'m> Isel<'m> {
                 let d = self.fr();
                 self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[x]);
                 vec![d]
+            }
+            (Const::Float(0), Kind::Double) if self.double() => {
+                let d = self.fr();
+                self.emit(MOp::Reg(Double::FcvtDW.into(), Rm::Rne as u8), &[d], &[R::ZERO]);
+                vec![d]
+            }
+            (Const::Float(bits), Kind::Double) if self.double() => {
+                let (lo, hi) = (self.li(*bits as u32 as i32), self.li((*bits >> 32) as u32 as i32));
+                vec![self.d_join(lo, hi)]
             }
             (Const::Float(bits), Kind::Double) => vec![self.li(*bits as u32 as i32), self.li((*bits >> 32) as u32 as i32)],
             (Const::Float(bits), Kind::Half | Kind::BFloat) => vec![self.li(*bits as u32 as i32)],
@@ -614,7 +666,8 @@ impl<'m> Isel<'m> {
                 let parts = self.cmpxchg(*p, *c, *v, (*success, *failure))?;
                 self.set(r, parts);
             }
-            Op::Fence => self.emit(MOp::Fence, &[], &[]),
+            Op::Fence(Some(order)) => self.emit(MOp::Fence(Self::fence_bits(*order)), &[], &[]),
+            Op::Fence(None) => {}
         }
         Ok(())
     }
@@ -803,15 +856,33 @@ impl<'m> Isel<'m> {
             self.sret = Some(d);
         }
         // ⚠ 先推 `Args`（定义寄存器上的参数）、再读栈上的、再做零扩展：⛔ 先用后定义
-        let (mut params, mut moves) = (Vec::new(), Vec::new());
+        let (mut params, mut moves, mut joins) = (Vec::new(), Vec::new(), Vec::new());
         for &p in &blk.params {
             let t = self.ty(p);
             // 按引用传的（宽整数）：一个指针
             let parts = if self.boxed(t) { vec![Part::F] } else if self.indirect(t) { vec![Part::X] } else { self.parts(t)? };
-            let locs = assign.parts(&parts, false);
+            let locs = assign.split(&parts, false);
             let mut regs = Vec::new();
-            for (part, loc) in parts.iter().zip(locs) {
+            for (part, locs) in parts.iter().zip(locs) {
+                // fa 用完了的 double：落在一对整数位置上（寄存器 / 栈），整数接住、之后经栈合成（先占个位）
+                if let [lo, hi] = locs[..] {
+                    let pair: Vec<R> = [lo, hi]
+                        .into_iter()
+                        .map(|loc| {
+                            let x = self.xr();
+                            match loc {
+                                Loc::Reg(preg) => args.def_on(x, Rule::Fixed(preg)),
+                                Loc::Stack(off) => loads.push((x, Part::X, off)),
+                            }
+                            x
+                        })
+                        .collect();
+                    joins.push((params.len(), regs.len(), pair[0], pair[1]));
+                    regs.push(R::ZERO);
+                    continue;
+                }
                 let d = R::V(self.vreg(part.class()));
+                let loc = locs[0];
                 match loc {
                     // fa 用完了、落在 a 寄存器上的 float：先在整数寄存器上接住，再搬进浮点
                     Loc::Reg(preg) if preg.class() != part.class() => {
@@ -833,6 +904,9 @@ impl<'m> Isel<'m> {
         for (d, part, off) in loads {
             let op = if part == Part::F { Opcode::from(Float::Flw) } else { Opcode::from(IOp::Lw) };
             self.emit(MOp::Load(op, Base::Incoming, off), &[d], &[]);
+        }
+        for (pi, k, lo, hi) in joins {
+            params[pi][k] = self.d_join(lo, hi);
         }
         for (i, (&p, regs)) in blk.params.iter().zip(params).enumerate() {
             let t = self.ty(p);

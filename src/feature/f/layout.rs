@@ -27,15 +27,34 @@ pub enum FForm {
     FCvtFX,
     /// `fd, fs1, fs2, fs3[, rm]`
     R4,
+    /// `fd, fs1[, rm]`，精确的转换（`fcvt.d.s`）：舍入模式缺省 `rne`、是 `rne` 就不印（同 LLVM 的 frmarglegacy）
+    FR1Exact,
+    /// `fd, rs1[, rm]`，精确的转换（`fcvt.d.w` / `fcvt.d.wu`），舍入模式同 [`Self::FR1Exact`]
+    FCvtFXExact,
 }
 
 impl FForm {
     /// 末尾可选的舍入模式（缺省 `dyn`）。
     fn rm(rest: &[Operand]) -> Result<u8, String> {
+        Self::rm_or(rest, Rm::Dyn)
+    }
+
+    /// 末尾可选的舍入模式（缺省 `default`）。
+    fn rm_or(rest: &[Operand], default: Rm) -> Result<u8, String> {
         match rest {
-            [] => Ok(Rm::Dyn as u8),
+            [] => Ok(default as u8),
             [Operand::Sym(s)] => s.parse::<Rm>().map(|r| r as u8).map_err(|()| format!("不认识的舍入模式 `{s}`")),
             _ => Err(format!("舍入模式写错：{rest:?}")),
+        }
+    }
+}
+
+impl FForm {
+    /// 精确转换的舍入模式后缀：`rne` 不印，别的（含 `dyn`）都印（同 LLVM 的 printFRMArgLegacy，两种风格一样）。
+    fn exact_rm(rm: u8) -> String {
+        match Rm::try_from(u32::from(rm)) {
+            Ok(Rm::Rne) | Err(()) => String::new(),
+            Ok(r) => format!(", {r}"),
         }
     }
 }
@@ -46,7 +65,7 @@ impl Layout for FForm {
             Self::FLoad | Self::FStore => 0x707f,
             Self::FR | Self::FCmp => 0xfe00_707f,
             Self::FRrm => 0xfe00_007f,
-            Self::FR1rm | Self::FCvtXF | Self::FCvtFX => 0xfff0_007f,
+            Self::FR1rm | Self::FCvtXF | Self::FCvtFX | Self::FR1Exact | Self::FCvtFXExact => 0xfff0_007f,
             Self::FToX | Self::XToF => 0xfff0_707f,
             Self::R4 => 0x0600_007f,
         }
@@ -60,7 +79,7 @@ impl Layout for FForm {
             Self::FStore => rs1 << 15 | rs2 << 20 | Base::Store.scatter(f.imm),
             Self::FR | Self::FCmp => rd << 7 | rs1 << 15 | rs2 << 20,
             Self::FRrm => rd << 7 | rs1 << 15 | rs2 << 20 | rm,
-            Self::FR1rm | Self::FCvtXF | Self::FCvtFX => rd << 7 | rs1 << 15 | rm,
+            Self::FR1rm | Self::FCvtXF | Self::FCvtFX | Self::FR1Exact | Self::FCvtFXExact => rd << 7 | rs1 << 15 | rm,
             Self::FToX | Self::XToF => rd << 7 | rs1 << 15,
             Self::R4 => rd << 7 | rs1 << 15 | rs2 << 20 | rs3 << 27 | rm,
         }
@@ -97,6 +116,8 @@ impl Layout for FForm {
             Self::FCvtXF => format!("{}, {}{}", x(rd), f(rs1), i.rm_suffix(s)),
             Self::FCvtFX => format!("{}, {}{}", f(rd), x(rs1), i.rm_suffix(s)),
             Self::R4 => format!("{}, {}, {}, {}{}", f(rd), f(rs1), f(rs2), f(i.rs3), i.rm_suffix(s)),
+            Self::FR1Exact => format!("{}, {}{}", f(rd), f(rs1), Self::exact_rm(i.rm)),
+            Self::FCvtFXExact => format!("{}, {}{}", f(rd), x(rs1), Self::exact_rm(i.rm)),
         }
     }
 
@@ -122,11 +143,12 @@ impl Layout for FForm {
             (Self::FR1rm, [Fr(d), Fr(a), rest @ ..]) | (Self::FCvtXF, [Xr(d), Fr(a), rest @ ..]) | (Self::FCvtFX, [Fr(d), Xr(a), rest @ ..]) => plain(Fields { rm: Self::rm(rest)?, ..z.x(*d, *a, 0) }),
             (Self::FToX, [Xr(d), Fr(a)]) | (Self::XToF, [Fr(d), Xr(a)]) => plain(z.x(*d, *a, 0)),
             (Self::R4, [Fr(d), Fr(a), Fr(b), Fr(c), rest @ ..]) => plain(Fields { rs3: *c, rm: Self::rm(rest)?, ..z.x(*d, *a, *b) }),
+            (Self::FR1Exact, [Fr(d), Fr(a), rest @ ..]) | (Self::FCvtFXExact, [Fr(d), Xr(a), rest @ ..]) => plain(Fields { rm: Self::rm_or(rest, Rm::Rne)?, ..z.x(*d, *a, 0) }),
             _ => Err(bad()),
         }
     }
 
     fn has_rm(self) -> bool {
-        matches!(self, Self::FRrm | Self::FR1rm | Self::FCvtXF | Self::FCvtFX | Self::R4)
+        matches!(self, Self::FRrm | Self::FR1rm | Self::FCvtXF | Self::FCvtFX | Self::R4 | Self::FR1Exact | Self::FCvtFXExact)
     }
 }

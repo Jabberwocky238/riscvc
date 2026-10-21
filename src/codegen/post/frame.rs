@@ -2,7 +2,7 @@
 //!
 //! 地址从低到高，`sp` 在最低处，总大小 16 对齐：
 //! ```text
-//! sp →  出参区 | 溢出槽（4 字节一个）| 栈帧对象 | 被调方保存的寄存器（ra、s*、fs*）| 可变参数存放区 | ← 进入时的 sp：入参区
+//! sp →  出参区 | 溢出槽（4 字节一个；有 D 时浮点的 8 字节）| 栈帧对象 | 被调方保存的寄存器（ra、s*、fs*；有 D 时 fs* 8 字节）| 可变参数存放区 | ← 进入时的 sp：入参区
 //! ```
 //! 动态改过 `sp`（动态 alloca、stackrestore）的函数用 `s0` 当帧指针：帧里的东西都相对 `s0` 寻址。
 use super::super::abi::Abi;
@@ -59,7 +59,7 @@ impl Frame {
         }
         used.sort_by_key(|p| (p.class() as u8, p.hw_enc()));
         save_regs.extend(used);
-        let spill_base = Self::up(sel.out_args, 4);
+        let spill_base = Self::up(sel.out_args, if sel.double { 8 } else { 4 });
         let mut at = spill_base + 4 * i32::try_from(out.num_spillslots).unwrap_or(0);
         let mut objects = Vec::new();
         for o in &sel.frame {
@@ -68,8 +68,20 @@ impl Frame {
             at += i32::try_from(o.size).unwrap_or(0);
         }
         let varargs = sel.varargs.map_or(0, |first| 4 * (18 - i32::from(first)).max(0));
-        let size = Self::up(at + 4 * i32::try_from(save_regs.len()).unwrap_or(0) + varargs, 16);
-        let saves = save_regs.into_iter().enumerate().map(|(i, p)| (p, size - varargs - 4 * (i32::try_from(i).unwrap_or(0) + 1))).collect();
+        // 保存区：整数 4 字节，有 D 时浮点 8 字节（按自己的大小对齐）；从上往下排
+        let width = |p: &PReg| if sel.double && p.class() == RegClass::Float { 8 } else { 4 };
+        let area = save_regs.iter().fold(0, |a, p| Self::up(a + width(p), width(p)));
+        // 从上往下排时顶上未必 8 对齐（可变参数区 4 的倍数）：有 D 时多留 8 字节的余量给对齐
+        let slack = if save_regs.iter().any(|p| width(p) == 8) { 8 } else { 0 };
+        let size = Self::up(Self::up(at, if sel.double { 8 } else { 4 }) + area + slack + varargs, 16);
+        let mut top = size - varargs;
+        let saves = save_regs
+            .into_iter()
+            .map(|p| {
+                top = (top - width(&p)) / width(&p) * width(&p);
+                (p, top)
+            })
+            .collect();
         Self { size, spill_base, objects, saves, fp, varargs: sel.varargs.map(|first| (first, size - varargs)) }
     }
 

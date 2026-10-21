@@ -38,16 +38,31 @@ prog() {
     mlir "$OUT/programs/$b.$o.ll" "$OUT/programs/$b.$o.mlir"
   done
 }
-export -f unit builtin prog mlir; export BIN OUT BASE
+# 扩展的程序：tests/programs-<扩展>/*.c ⇒ tests/fixtures/programs-<扩展>/，按那个扩展的目标编（对拍见 tests/ext_vs_llvm.rs）
+#   a：rv32imaf（ilp32f）；d：rv32imfd（ilp32d）
+ext() {
+  f=$1; d=$2; march=$3; abi=$4; b=$(basename "$f" .c)
+  EXT="--target=riscv32-unknown-elf -march=$march -mabi=$abi -ffreestanding -fno-math-errno -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax"
+  for o in O0 O2; do
+    "$BIN/clang" $EXT -fno-builtin -isystem tests/support/include -$o -S -emit-llvm "$f" -o "$OUT/$d/$b.$o.ll"
+    mlir "$OUT/$d/$b.$o.ll" "$OUT/$d/$b.$o.mlir"
+  done
+}
+export -f unit builtin prog ext mlir; export BIN OUT BASE
 rm -rf "$OUT/programs" && mkdir -p "$OUT/programs"
 ls tests/programs/*.c | xargs -P 4 -I{} bash -c 'prog {}'
+for v in "a rv32i2p1_m2p0_a2p1_f2p2_zicsr2p0_zmmul1p0 ilp32f" "d rv32i2p1_m2p0_f2p2_d2p2_zicsr2p0_zmmul1p0 ilp32d"; do
+  set -- $v
+  rm -rf "$OUT/programs-$1" && mkdir -p "$OUT/programs-$1"
+  ls tests/programs-$1/*.c | xargs -P 4 -I{} bash -c "ext {} programs-$1 $2 $3"
+done
 if [ "${ONLY:-}" = programs ]; then echo "programs: $(ls $OUT/programs/*.mlir | wc -l)"; exit 0; fi
 rm -rf "$OUT/unit" "$OUT/builtins"
 mkdir -p "$OUT/unit" "$OUT/builtins"
 ls $CRT/test/builtins/Unit/*_test.c | xargs -P "$(nproc)" -I{} bash -c 'unit {}'
 ls $CRT/lib/builtins/*.c | xargs -P "$(nproc)" -I{} bash -c 'builtin {}'
 rm -rf "$OUT/support" "$OUT/support.o"
-for v in "ilp32f rv32if_zicsr" "ilp32 rv32i_zicsr"; do
+for v in "ilp32f rv32if_zicsr" "ilp32 rv32i_zicsr" "ilp32d rv32ifd_zicsr"; do
   set -- $v
   mkdir -p "$OUT/support/$1"
   SUP="--target=riscv32-unknown-elf -march=$2 -mabi=$1 -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-relax -O2"

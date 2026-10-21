@@ -2,11 +2,12 @@
 //! 我们这边走 [`Disasm`]（内置扩展 + RV32I），同 `riscvc objdump`。
 mod llvm;
 use riscvc::ext::Disassembler;
+use riscvc::feature::{builtin, Target};
 use riscvc::isa::Style;
 
-fn words(n: usize) -> Vec<u32> {
-    // 目标里的全部指令（RV32I + 缺省目标的扩展）
-    let pats = riscvc::feature::Target::default().patterns();
+fn words(n: usize, target: &Target<'static>) -> Vec<u32> {
+    // 目标里的全部指令（RV32I + 目标的扩展）
+    let pats = target.patterns();
     let mut rng = llvm::Rng(0x1234_5678_9abc_def1);
     (0..n)
         .map(|i| {
@@ -21,16 +22,16 @@ fn words(n: usize) -> Vec<u32> {
         .collect()
 }
 
-fn compare(style: Style, args: &[&str]) {
+fn compare(style: Style, args: &[&str], target: &Target<'static>) {
     use object::write::{Object, StandardSection};
     let Some(llvm) = llvm::Llvm::locate() else { return };
-    let words = words(200_000);
+    let words = words(200_000, target);
     let mut obj = Object::new(object::BinaryFormat::Elf, object::Architecture::Riscv32, object::Endianness::Little);
     let text = obj.section_id(StandardSection::Text);
     obj.append_section_data(text, &words.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>(), 4);
-    let dir = std::env::temp_dir().join(format!("riscvc-disasm-{}-{}", std::process::id(), args.join("")));
+    let dir = std::env::temp_dir().join(format!("riscvc-disasm-{}-{}-{}", std::process::id(), args.join(""), target.march()));
     std::fs::write(&dir, obj.write().unwrap()).unwrap();
-    let mattr = format!("--mattr={}", riscvc::feature::Target::default().mattr());
+    let mattr = format!("--mattr={}", target.mattr());
     let mut cmd = vec!["-d", "--no-show-raw-insn", mattr.as_str()];
     cmd.extend(args);
     cmd.push(dir.to_str().unwrap());
@@ -52,7 +53,7 @@ fn compare(style: Style, args: &[&str]) {
         let pc = 4 * i as u64;
         // 一个字的反汇编：内置扩展先认，再 RV32I（同 objdump）
         let bytes = w.to_le_bytes();
-        let ours = Disassembler::new().style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
+        let ours = Disassembler::new().target(target.clone()).style(style).lines(&bytes, pc).next().map_or_else(String::new, |l| l.text.replace('\t', " "));
         let expect = theirs.get(&pc).cloned().unwrap_or_default();
         if ours != expect {
             bad += 1;
@@ -67,15 +68,37 @@ fn compare(style: Style, args: &[&str]) {
 
 #[test]
 fn aliases() {
-    compare(Style { hex: true, address: true, ..Style::default() }, &[]);
+    compare(Style { hex: true, address: true, ..Style::default() }, &[], &Target::default());
 }
 
 #[test]
 fn no_aliases() {
-    compare(Style { no_aliases: true, hex: true, address: true, ..Style::default() }, &["-M", "no-aliases"]);
+    compare(Style { no_aliases: true, hex: true, address: true, ..Style::default() }, &["-M", "no-aliases"], &Target::default());
 }
 
 #[test]
 fn numeric_hex() {
-    compare(Style { numeric: true, hex: true, address: true, ..Style::default() }, &["-M", "numeric"]);
+    compare(Style { numeric: true, hex: true, address: true, ..Style::default() }, &["-M", "numeric"], &Target::default());
+}
+
+/// A：随机字取自缺省 + A 的指令（amo / lr / sc 的各种序，以及保留的 funct5、lr 的 rs2 ≠ 0 要被拒收）。
+#[test]
+fn a_aliases() {
+    compare(Style { hex: true, address: true, ..Style::default() }, &[], &Target::default().with(&builtin::A));
+}
+
+#[test]
+fn a_no_aliases() {
+    compare(Style { no_aliases: true, hex: true, address: true, ..Style::default() }, &["-M", "no-aliases"], &Target::default().with(&builtin::A));
+}
+
+/// D：随机字取自缺省 + D 的指令（fmt = 01 的双精度、精确转换的舍入模式、保留的 rm 要被拒收）。
+#[test]
+fn d_aliases() {
+    compare(Style { hex: true, address: true, ..Style::default() }, &[], &Target::default().with(&builtin::D));
+}
+
+#[test]
+fn d_no_aliases() {
+    compare(Style { no_aliases: true, hex: true, address: true, ..Style::default() }, &["-M", "no-aliases"], &Target::default().with(&builtin::D));
 }

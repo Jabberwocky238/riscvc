@@ -9,7 +9,7 @@ cargo install riscvc             # the `riscvc` command-line tool
 [![docs.rs](https://img.shields.io/docsrs/riscvc)](https://docs.rs/riscvc)
 [![license](https://img.shields.io/crates/l/riscvc.svg)](LICENSE)
 
-A pure-Rust RV32IMF toolchain — **no LLVM, no MLIR, no C++ at build time or run time**. It replaces the
+A pure-Rust RV32IMAFDC toolchain — **no LLVM, no MLIR, no C++ at build time or run time**. It replaces the
 downstream half of an MLIR flow (`mlir-translate` + `llc` + `ld.lld`): it takes the MLIR `llvm` dialect, emits
 RV32 assembly or object files, and links them into a loadable ELF. Alongside the compiler it ships a GNU-style
 assembler, a linker, a disassembler and an instruction-level simulator, all cross-checked byte-for-byte against
@@ -18,7 +18,7 @@ their LLVM counterparts.
 ```text
 forward.mlir ─ riscvc llc ─▶ forward.s / forward.o ─ riscvc ld -T link.ld ─▶ app.elf
 crt.S        ─ riscvc as  ─▶ crt.o ──────────────────┘
-                                riscvc objdump ◀── any RV32IMF ELF
+                                riscvc objdump ◀── any RV32IMAFDC ELF
                                 riscvc::sim     ◀── run it in-process
 ```
 
@@ -77,8 +77,8 @@ tracked. The comparison corpus is the compiler-rt builtins and the MC / lld RISC
 
 | | Supported | Not supported |
 | --- | --- | --- |
-| ISA | RV32I base; M, Zmmul, F, Zicsr; C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a runtime module (see [Cargo features and targets](#cargo-features-and-targets)) | D (double precision; `double` is lowered to soft-float calls), V / XTheadVdot, Zcb / Zcmp |
-| ABI | `ilp32f` (with `f`), `ilp32` + soft-float (without `f`) | `ilp32d`, `lp64*` |
+| ISA | RV32I base; M, Zmmul, F, Zicsr; A (Zaamo + Zalrsc: `amo*.w`, `lr.w` / `sc.w`, all four orderings; off by default); D (double precision, FLEN = 64; off by default); C (compressed, incl. `c.flw` / `c.fsw` / `c.flwsp` / `c.fswsp`, and with D the Zcd `c.fld` / `c.fsd` / `c.fldsp` / `c.fsdsp`; off by default); ten T-Head (XuanTie) `XThead*` scalar extensions — each one a runtime module (see [Cargo features and targets](#cargo-features-and-targets)) | V / XTheadVdot, Zcb / Zcmp, Zacas / Zabha |
+| ABI | `ilp32d` (with `d`), `ilp32f` (with `f`), `ilp32` + soft-float (without `f`) | `lp64*` |
 | Default target | `rv32i2p1_m2p0_f2p2_zicsr2p0_zmmul1p0`, ABI `ilp32f` | |
 | Compiler input | MLIR `llvm` dialect in **generic form** (`mlir-opt --mlir-print-op-generic`); higher-level dialects (`func`, `arith`, `scf`, `cf`, `memref`, `math`, `index`, `affine`, `ub`) in any form, lowered in-process by [mlirpass](#higher-level-dialects-mlirpass) | C / C++ (this is not a front end); `vector`, `tensor`, `linalg` (bufferize / lower them first) |
 | Assembler input | GNU assembly (`.s`); `.S` with a simple preprocessor (`#if`, `#ifdef`, `#define`) | full C preprocessor, macros beyond that |
@@ -116,7 +116,8 @@ mlir-translate --import-llvm x.ll | mlir-opt --mlir-print-op-generic > x.mlir
 
 `rustc` (stable **1.98.1**, whose LLVM is 22.1.8) emits LLVM IR; `riscvc` does the rest. `tools/rust-build.sh` builds
 a `no_std`, `panic = "abort"` Cargo project for `riscv32imafc-unknown-none-elf` minus `a` / `c` (= riscvc's default
-rv32imf + zicsr, `ilp32f`) with `-Zbuild-std=core`, converts every crate's IR to generic-form MLIR, compiles them with
+rv32imf + zicsr, `ilp32f`) with `-Zbuild-std=core` — or, with `MARCH=rv32imaf_zicsr`, keeping `a` (core's atomics become
+`amo*` / LR-SC), or with `MARCH=rv32imafd_zicsr` a derived target JSON with `+d` and `ilp32d` (doubles in `fa*`) — converts every crate's IR to generic-form MLIR, compiles them with
 `riscvc llc -j`, and links them with a start-up stub (set `sp`, call the entry, `ebreak`) into an ELF:
 
 ```bash
@@ -124,7 +125,8 @@ tools/rust-build.sh path/to/Cargo.toml <entry function> app.elf [O0|O2]
 ```
 
 - `core` and the runtime `tests/rust/rt` are compiled by riscvc too. The runtime provides the single-core
-  `__atomic_*` functions that `core` calls when there is no A extension (plain loads and stores; not for multi-core
+  `__atomic_*` functions that `core` calls when there is no A extension (without A, rustc's own LLVM cannot select
+  sub-word atomics, so Rust code using `AtomicU8` & co. needs `MARCH` with `a`) (plain loads and stores; not for multi-core
   or interrupt handlers).
 - `compiler_builtins` (soft-float, `f128`, `memcpy` …) is compiled by riscvc as well; `RISCVC_BUILTINS=llc`
   compiles that one crate with `llc` instead (for bisecting).
@@ -445,6 +447,8 @@ like a `-march` string.
 | `ZMMUL` *(default)* | multiply only | same, for `mul` / `mulh*`; codegen calls `__mulsi3` / `__muldi3` |
 | `F` *(default)* | F extension + `ilp32f` ABI (`with` adds `ZICSR` too) | no float instructions, `e_flags` without single-float ABI; codegen uses `ilp32` + soft-float (`__addsf3` & co.) |
 | `ZICSR` *(default)* | CSR instructions | `csr*` rejected; float CSR aliases (`frcsr` …) printed as plain `csr*` |
+| `A` | atomics (`-march` gains `a2p1` … `_zaamo1p0_zalrsc1p0`, same as LLVM 22): ≤ 32-bit `atomicrmw` / `cmpxchg` become `amo*.w` / LR-SC loops (sub-word ones masked, expanded after register allocation so nothing spills between `lr` and `sc`), atomic loads / stores get the A.6 fences | `amo*` / `lr` / `sc` rejected; codegen calls `__atomic_*` |
+| `D` | double precision + `ilp32d` ABI (`with` adds `F` and `ZICSR`; with `C` also `ZCD`): FPRs are 64-bit, single-precision values NaN-boxed; `double` lives in one FPR (spills / callee-saved `fs*` 8 bytes, `ft11` reserved for move cycles), and is split into an integer pair through the stack where the ABI wants GPRs (FPRs exhausted, variadic), like llc; `e_flags` gets the double-float ABI | `double` is soft-float in integer register pairs (`__adddf3` & co.) |
 | `C` | 16-bit compressed instructions (`-march` gains `c2p0_zca1p0[_zcf1p0]`, objects get `EF_RISCV_RVC`) | assembler / disassembler / simulator reject 16-bit encodings, nothing is compressed |
 | `XTHEADBA`, `XTHEADBB`, `XTHEADBS`, `XTHEADCMO`, `XTHEADCONDMOV`, `XTHEADFMEMIDX`, `XTHEADMAC`, `XTHEADMEMIDX`, `XTHEADMEMPAIR`, `XTHEADSYNC` | T-Head vendor extensions (the RV32 scalar parts LLVM supports) | assembler / disassembler do not know them; codegen never uses them |
 
@@ -484,7 +488,8 @@ As of 2026-10-15:
 
 | Area | Result |
 | --- | --- |
-| Decode / print | 200,000 random words × 3 print styles: identical to llvm-objdump; with `c`, all 49,152 16-bit halfwords × 3 styles identical too |
+| Decode / print | 200,000 random words × 3 print styles: identical to llvm-objdump; with `c`, all 49,152 16-bit halfwords × 3 styles identical too; with `a` and with `d`, another 200,000 words each (incl. reserved encodings that must be `<unknown>`); with `c` + `d` all halfwords again (Zcd) |
+| A / D extensions | MC fixtures `tests/fixtures/mc-a`, `mc-d`, `mc-dc` (LLVM's Zaamo / Zalrsc / D / DC tests re-run through llvm-mc with the extension on) identical to llvm-mc; end-to-end `tests/programs-a` (every atomic op, width and ordering) and `tests/programs-d` (double arithmetic, NaN compares, conversions, FPR-exhausted / variadic / struct calling convention, register pressure, unaligned doubles) identical to LLVM at O0 and O2, plus the whole builtins + programs set re-run on `rv32imfd` / `ilp32d` (177 programs) and with `+c`; Rust `selfcheck` (core atomics, f64 arithmetic and formatting) passes on rv32imf, rv32imaf and rv32imafd |
 | Compressed (`--features c`) | assembler compresses like llvm-mc (`compressInst` order, literal immediates and bare symbols only, `.option rvc` / `norvc` / `exact`, `.attribute arch`), relaxes `c.j` / `c.beqz` → `jal` / `b<cc>` → long form at layout time, `.insn c*` formats: 285 of 287 MC fixtures (`tests/fixtures/mc-c`) and 334 compiler-rt files identical to llvm-mc `+c`; linker applies `RVC_BRANCH` / `RVC_JUMP` and relaxes calls to `c.j` / `c.jal`: identical to ld.lld; all end-to-end programs built with `+c` match LLVM in the simulator |
 | Assembler | 334 compiler-rt files (O0 / O2), both `-mno-relax` and `+relax` (`R_RISCV_RELAX` / `R_RISCV_ALIGN`, `.option relax` / `norelax`): section bytes, relocations, global symbols identical to llvm-mc |
 | Linker | 167 compiler-rt objects × 2 linker scripts: identical to ld.lld (loadable sections incl. empty ones, program headers incl. `PT_GNU_RELRO` / `PT_RISCV_ATTRIBUTES`, entry, globals); llvm-mc `+relax` objects (535 `R_RISCV_RELAX`, 8 `R_RISCV_ALIGN`, merge string sections) identical to ld.lld both with and without `--no-relax` |
@@ -545,7 +550,7 @@ git diff tests/fixtures/lit/xfail.txt
 ## Limitations and non-goals
 
 - Not a C / C++ front end; bring MLIR (or LLVM IR via `mlir-translate --import-llvm`).
-- No double-precision hardware, no vector extension; compressed instructions only with the `C` module in the target (no Zcb / Zcmp).
+- No vector extension; compressed instructions only with the `C` module in the target (no Zcb / Zcmp); no 64-bit atomics on RV32 (`__atomic_*_8`, as llc).
 - Static executables only; no shared libraries, PLT/GOT generation or dynamic relocations.
 - The `.S` preprocessor handles only `#if`, `#ifdef` and `#define`.
 - No optimisation pipeline of its own beyond what your MLIR passes and the `dce` pass do; code quality is

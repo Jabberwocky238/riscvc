@@ -1,9 +1,11 @@
-//! ilp32f 调用约定（同 LLVM 的 `CC_RISCV`，FLEN = 32、XLEN = 32）。
+//! ilp32f / ilp32d 调用约定（同 LLVM 的 `CC_RISCV`，XLEN = 32，FLEN = 32 / 64）。
 //!
-//! 值先拆成部件（[`Part`]）：32 位整数 / 指针一个 `X`；`float` 一个 `F`；i64 / double 是 `Lo` + `Hi` 一对；
+//! 值先拆成部件（[`Part`]）：32 位整数 / 指针一个 `X`；`float` 一个 `F`；有 D 时 `double` 一个 `D`（64 位浮点寄存器）；
+//! i64（没有 D 时 double 也是）是 `Lo` + `Hi` 一对；
 //! 结构体 / 数组按字段拆平。每个部件独立分配：
 //! - `X`：下一个 a 寄存器，没有就上栈（4 字节）。
 //! - `F`：下一个 fa 寄存器（可变参数不用），没有就当 `X`。
+//! - `D`：下一个 fa 寄存器（可变参数不用）；没有 ⇒ 当 `Lo`+`Hi` 一对（调用方 / 被调方经栈拆合，见 [`Assign::split`]）。
 //! - `Lo`+`Hi`：两个 a 寄存器都有就用两个（可变参数要从偶数号开始）；只剩 a7 就低半 a7、高半上栈；都没了整对上栈（8 字节对齐）。
 use crate::isa::{F, X};
 use crate::regalloc::{PReg, PRegSet, RegClass};
@@ -13,6 +15,8 @@ use crate::regalloc::{PReg, PRegSet, RegClass};
 pub enum Part {
     X,
     F,
+    /// 64 位浮点寄存器里的 double（D 扩展）。
+    D,
     /// 64 位值的低半（紧跟着 `Hi`）。
     Lo,
     Hi,
@@ -22,7 +26,7 @@ impl Part {
     #[must_use]
     pub const fn class(self) -> RegClass {
         match self {
-            Self::F => RegClass::Float,
+            Self::F | Self::D => RegClass::Float,
             _ => RegClass::Int,
         }
     }
@@ -116,6 +120,30 @@ impl Assign {
         out
     }
 
+    /// ⭐ 同 [`Self::parts`]，另外处理 `D`：fa 寄存器还有（且不是可变参数）⇒ 一个 fa；否则当 `Lo`+`Hi` 一对分 ⇒ 两个位置。
+    /// 回：每个部件的位置（`D` 是一个或两个，其余一个）。
+    pub fn split(&mut self, parts: &[Part], variadic: bool) -> Vec<Vec<Loc>> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < parts.len() {
+            match parts[i] {
+                Part::D if !variadic && self.f <= 17 => {
+                    self.f += 1;
+                    out.push(vec![Loc::Reg(F(self.f - 1).preg())]);
+                }
+                Part::D => out.push(self.parts(&[Part::Lo, Part::Hi], variadic)),
+                Part::Lo => {
+                    let l = self.parts(&parts[i..i + 2], variadic);
+                    out.extend(l.into_iter().map(|l| vec![l]));
+                    i += 1;
+                }
+                p => out.push(self.parts(&[p], variadic)),
+            }
+            i += 1;
+        }
+        out
+    }
+
     /// 用到的第一个没被具名参数占的 a 寄存器号（可变参数函数在序言里把它到 a7 存到栈上）。
     #[must_use]
     pub const fn next_x(&self) -> u8 {
@@ -173,11 +201,11 @@ pub fn returns(parts: &[Part]) -> Option<Vec<PReg>> {
     let mut out = Vec::new();
     for p in parts {
         match p {
-            Part::F if f <= 11 => {
+            Part::F | Part::D if f <= 11 => {
                 out.push(F(f).preg());
                 f += 1;
             }
-            Part::F => return None,
+            Part::F | Part::D => return None,
             _ if x <= 11 => {
                 out.push(X(x).preg());
                 x += 1;
@@ -213,8 +241,9 @@ pub const fn callee_saved_f(r: u8) -> bool {
 }
 
 /// regalloc2 的机器环境。`frame`：`s0` 当帧指针（动态改 `sp` 的函数）⇒ ⛔ 分配 `s0`。
+/// `double`：有 D ⇒ `ft11`（f31）留给成环的浮点搬运（t6 只有 32 位，搬不动 double），⛔ 分配。
 #[must_use]
-pub fn machine_env(frame: bool, regs: &Allocatable) -> crate::regalloc::MachineEnv {
+pub fn machine_env(frame: bool, double: bool, regs: &Allocatable) -> crate::regalloc::MachineEnv {
     let set = |rs: &[u8], class: RegClass| {
         let mut s = PRegSet::empty();
         for &r in rs {
@@ -223,8 +252,9 @@ pub fn machine_env(frame: bool, regs: &Allocatable) -> crate::regalloc::MachineE
         s
     };
     let xn: Vec<u8> = regs.int_then.iter().copied().filter(|&r| !(frame && r == 8)).collect();
+    let ff: Vec<u8> = regs.float_first.iter().copied().filter(|&r| !(double && r == 31)).collect();
     crate::regalloc::MachineEnv {
-        preferred_regs_by_class: [set(&regs.int_first, RegClass::Int), set(&regs.float_first, RegClass::Float), PRegSet::empty()],
+        preferred_regs_by_class: [set(&regs.int_first, RegClass::Int), set(&ff, RegClass::Float), PRegSet::empty()],
         non_preferred_regs_by_class: [set(&xn, RegClass::Int), set(&regs.float_then, RegClass::Float), PRegSet::empty()],
         scratch_by_class: [None, None, None],
         fixed_stack_slots: Vec::new(),

@@ -698,26 +698,31 @@ impl Isel<'_> {
                     }
                 }
             }
+            // 以下是 F 扩展上的 float、D 扩展上的 double（软浮点的在 [`Self::soft_fmath`]）：按类型换成双精度那条
             Intr::Fabs => {
                 let x = self.get1(args[0])?;
-                vec![self.fop(Float::FsgnjxS, vec![x, x])]
+                let op = self.fp(self.ty(args[0]), Float::FsgnjxS);
+                vec![self.fop(op, vec![x, x])]
             }
             Intr::Copysign => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
-                vec![self.fop(Float::FsgnjS, vec![a, b])]
+                let op = self.fp(self.ty(args[0]), Float::FsgnjS);
+                vec![self.fop(op, vec![a, b])]
             }
-            // 以下是 F 扩展上的 float（软浮点的在 [`Self::soft_fmath`]）
             Intr::Fma | Intr::FMulAdd => {
                 let (a, b, c) = (self.get1(args[0])?, self.get1(args[1])?, self.get1(args[2])?);
-                vec![self.fop(Float::FmaddS, vec![a, b, c])]
+                let op = self.fp(self.ty(args[0]), Float::FmaddS);
+                vec![self.fop(op, vec![a, b, c])]
             }
             Intr::Sqrt => {
                 let x = self.get1(args[0])?;
-                vec![self.fop(Float::FsqrtS, vec![x])]
+                let op = self.fp(self.ty(args[0]), Float::FsqrtS);
+                vec![self.fop(op, vec![x])]
             }
             Intr::MinNum | Intr::MaxNum => {
                 let (a, b) = (self.get1(args[0])?, self.get1(args[1])?);
-                vec![self.fop(if *i == Intr::MinNum { Float::FminS } else { Float::FmaxS }, vec![a, b])]
+                let op = self.fp(self.ty(args[0]), if *i == Intr::MinNum { Float::FminS } else { Float::FmaxS });
+                vec![self.fop(op, vec![a, b])]
             }
             Intr::IsFpClass(mask) => vec![self.fpclass(args[0], *mask)?],
             // 对齐（`dst` / `src`）前端带来了，mem_inline 还没用（照帧对象推）
@@ -867,13 +872,19 @@ impl Isel<'_> {
 
     /// `is.fpclass`：LLVM 的类别位（0 sNaN 1 qNaN 2 −inf 3 −normal 4 −subnormal 5 −0 6 +0 7 +subnormal 8 +normal 9 +inf）。
     fn fpclass(&mut self, a: ValId, mask: u32) -> Result<R, Error> {
-        if matches!(self.kind(self.ty(a)), Kind::Float) && self.float() {
+        let hard = match self.kind(self.ty(a)) {
+            Kind::Float => self.float(),
+            Kind::Double => self.double(),
+            _ => false,
+        };
+        if hard {
             // RISC-V fclass：0 −inf 1 −normal 2 −subnormal 3 −0 4 +0 5 +subnormal 6 +normal 7 +inf 8 sNaN 9 qNaN
             const MAP: [u32; 10] = [8, 9, 0, 1, 2, 3, 4, 5, 6, 7];
             let m = (0..10).filter(|b| mask & (1 << b) != 0).fold(0, |acc, b| acc | (1 << MAP[b as usize]));
             let x = self.get1(a)?;
             let c = self.xr();
-            self.emit(MOp::Reg(Float::FclassS.into(), 7), &[c], &[x]);
+            let op = self.fp(self.ty(a), Float::FclassS);
+            self.emit(MOp::Reg(op, 7), &[c], &[x]);
             let t = self.ri(IOp::Andi, c, m);
             return Ok(self.rr(IOp::Sltu, R::ZERO, t));
         }

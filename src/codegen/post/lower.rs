@@ -2,14 +2,17 @@
 //! 帧里的地址落成 `sp` / `s0` 加偏移，`select` 切成「条件跳转 + 搬运块」。
 use super::frame::Frame;
 use super::{PBlock, PFunc, PInst, Selected, Term};
-use crate::codegen::mir::{Base, MFunc, MInst, MOp, R};
-use crate::feature::Float;
+use crate::codegen::mir::{Base, Loop, MFunc, MInst, MOp, R};
+use crate::feature::{Atomic, Double, Float};
+use crate::ir::RmwOp;
 use crate::isa::{Inst, Opcode, Rv32i as IOp, X};
 use crate::regalloc::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
 use smallvec::SmallVec;
 
 /// `t6`：不参与分配，大偏移、成环的搬运、栈到栈的搬运借它。
 const SCRATCH: u8 = 31;
+/// `ft11`：有 D 时不参与分配，成环的浮点搬运借它（t6 装不下 double）。
+const FSCRATCH: u8 = 31;
 
 
 /// 一次寄存器搬运（`src = None` ⇒ 从 [`SCRATCH`] 搬）。
@@ -87,11 +90,12 @@ impl<'a> Lower<'a> {
         self.real(Inst::new(op).x(rd, rs1, rs2));
     }
 
-    /// `rd = rs`（同一个就不出）。
+    /// `rd = rs`（同一个就不出）。浮点：有 D 用 `fmv.d`（单精度的值 NaN-box 着，原样搬也对）。
     fn mov(&mut self, dst: u8, src: u8, float: bool) {
         match (dst == src, float) {
             (true, _) => {}
             (false, false) => self.rri(IOp::Addi, dst, src, 0),
+            (false, true) if self.sel.double => self.rrr(Double::FsgnjD, dst, src, src),
             (false, true) => self.rrr(Float::FsgnjS, dst, src, src),
         }
     }
@@ -137,9 +141,13 @@ impl<'a> Lower<'a> {
         }
     }
 
-    /// 一个寄存器按类的（读, 写）。
-    fn word_ops(class: RegClass) -> (Opcode, Opcode) {
-        if class == RegClass::Int { (IOp::Lw.into(), IOp::Sw.into()) } else { (Float::Flw.into(), Float::Fsw.into()) }
+    /// 一个寄存器按类的（读, 写）：有 D 时浮点寄存器整个 64 位存取。
+    fn word_ops(&self, class: RegClass) -> (Opcode, Opcode) {
+        match (class, self.sel.double) {
+            (RegClass::Int, _) => (IOp::Lw.into(), IOp::Sw.into()),
+            (_, true) => (Double::Fld.into(), Double::Fsd.into()),
+            _ => (Float::Flw.into(), Float::Fsw.into()),
+        }
     }
 
     fn hw(p: PReg) -> u8 {
@@ -151,7 +159,7 @@ impl<'a> Lower<'a> {
     fn prologue(&mut self) {
         self.adjust_sp(-self.frame.size);
         for (p, off) in self.frame.saves.clone() {
-            self.store(Self::word_ops(p.class()).1, Self::hw(p), X::SP.0, off);
+            self.store(self.word_ops(p.class()).1, Self::hw(p), X::SP.0, off);
         }
         if let Some((first, base)) = self.frame.varargs {
             for (k, r) in (first..=17).enumerate() {
@@ -168,7 +176,7 @@ impl<'a> Lower<'a> {
             self.addr(X::SP.0, X::S0.0, -self.frame.size);
         }
         for (p, off) in self.frame.saves.clone() {
-            self.load(Self::word_ops(p.class()).0, Self::hw(p), X::SP.0, off);
+            self.load(self.word_ops(p.class()).0, Self::hw(p), X::SP.0, off);
         }
         self.adjust_sp(self.frame.size);
     }
@@ -182,11 +190,11 @@ impl<'a> Lower<'a> {
             (Some(a), Some(b), ..) => self.mov(Self::hw(b), Self::hw(a), float),
             (None, Some(b), Some(s), _) => {
                 let (base, off) = self.frame.spill(s.index());
-                self.load(Self::word_ops(b.class()).0, Self::hw(b), base, off);
+                self.load(self.word_ops(b.class()).0, Self::hw(b), base, off);
             }
             (Some(a), None, _, Some(s)) => {
                 let (base, off) = self.frame.spill(s.index());
-                self.store(Self::word_ops(a.class()).1, Self::hw(a), base, off);
+                self.store(self.word_ops(a.class()).1, Self::hw(a), base, off);
             }
             // 栈到栈：4 字节原样经 t6
             (None, None, Some(s), Some(t)) => {
@@ -209,12 +217,17 @@ impl<'a> Lower<'a> {
                     match (m.src, m.float) {
                         (Some(s), float) => self.mov(m.dst, s, float),
                         (None, false) => self.mov(m.dst, SCRATCH, false),
+                        (None, true) if self.sel.double => self.mov(m.dst, FSCRATCH, true),
                         (None, true) => self.rrr(Float::FmvWX, m.dst, SCRATCH, 0),
                     }
                 }
                 None => {
                     let (src, float) = (moves[0].src.expect("成环的搬运都还读着寄存器"), moves[0].float);
-                    if float { self.rrr(Float::FmvXW, SCRATCH, src, 0) } else { self.mov(SCRATCH, src, false) }
+                    match (float, self.sel.double) {
+                        (true, true) => self.mov(FSCRATCH, src, true),
+                        (true, false) => self.rrr(Float::FmvXW, SCRATCH, src, 0),
+                        _ => self.mov(SCRATCH, src, false),
+                    }
                     for o in moves.iter_mut().filter(|o| o.float == float && o.src == Some(src)) {
                         o.src = None;
                     }
@@ -310,8 +323,8 @@ impl<'a> Lower<'a> {
             MOp::Unreachable => self.blocks[self.cur].term = Term::Unreachable,
             MOp::Trap => self.push(PInst::Trap),
             MOp::Break => self.real(Inst::new(IOp::Ebreak)),
-            // `fence rw, rw`
-            MOp::Fence => self.real(Inst::new(IOp::Fence).with_imm(0x33)),
+            MOp::Fence(0x833) => self.real(Inst::new(IOp::FenceTso)),
+            MOp::Fence(imm) => self.real(Inst::new(IOp::Fence).with_imm(*imm)),
             // ⭐ 扩展包的指令：把分配到的寄存器按 defs → uses 的次序填进 `{}`，出一行文本。
             // ⛔ 这里不编任何一个机器字 —— 编码是同一个 Module 的 `Assemble` 的事。
             MOp::Ext { template, bytes } => {
@@ -332,6 +345,102 @@ impl<'a> Lower<'a> {
             }
             MOp::SpSave => self.mov(d[0], X::SP.0, false),
             MOp::SpRestore => self.mov(X::SP.0, u[0], false),
+            MOp::LrSc(l, lr, sc) => self.lrsc(*l, *lr, *sc, &d, &u),
+        }
+    }
+
+    /// ⭐ LR/SC 循环（[`MOp::LrSc`]）展开：`head` 里 `lr`、算新字、`sc`，`sc` 失败回 `head`；之后接着本块剩下的指令。
+    /// ```text
+    /// Word(nand)   head: lr old; and t, old, v; not t; sc t, t; bnez t, head
+    /// Masked(op)   head: lr old; t = op(old, v); t = old ^ ((old ^ t) & mask); sc t, t; bnez t, head
+    /// Masked(max…) head: lr old; cur = old & mask（有符号：sll / sra shamt）; mv t, old; 不用换 ⇒ tail
+    ///              swap: t = old ^ ((old ^ v) & mask)
+    ///              tail: sc t, t; bnez t, head
+    /// Cas          head: lr old; bne old, c, done   sc: sc t, v; bnez t, head
+    /// MaskedCas    head: lr old; t = old & mask; bne t, c, done   sc: t = old ^ ((old ^ v) & mask); sc t, t; bnez t, head
+    /// ```
+    fn lrsc(&mut self, l: Loop, lr: Atomic, sc: Atomic, d: &[u8], u: &[u8]) {
+        let (old, t, p) = (d[0], d[1], u[0]);
+        let head = self.fresh();
+        self.blocks[self.cur].term = Term::Jump(head);
+        self.layout.push(head);
+        self.cur = head;
+        self.rrr(lr, old, p, 0);
+        // 把字段换成 `new`：t = old ^ ((old ^ new) & mask)
+        let merge = |s: &mut Self, new: u8, mask: u8| {
+            s.rrr(IOp::Xor, t, old, new);
+            s.rrr(IOp::And, t, t, mask);
+            s.rrr(IOp::Xor, t, old, t);
+        };
+        // sc 与回跳：`sc t, val, (p)`，失败（t ≠ 0）回 head
+        let close = |s: &mut Self, val: u8| {
+            s.rrr(sc, t, p, val);
+            let rest = s.fresh();
+            s.blocks[s.cur].term = Term::Branch { op: IOp::Bne, a: t, b: 0, t: head, f: rest, long: false };
+            s.layout.push(rest);
+            s.cur = rest;
+        };
+        let body = |s: &mut Self, op: RmwOp, v: u8| match op {
+            RmwOp::Xchg => s.mov(t, v, false),
+            RmwOp::Add => s.rrr(IOp::Add, t, old, v),
+            RmwOp::Sub => s.rrr(IOp::Sub, t, old, v),
+            _ => {
+                s.rrr(IOp::And, t, old, v);
+                s.rri(IOp::Xori, t, t, -1);
+            }
+        };
+        match l {
+            Loop::Word(op) => {
+                body(self, op, u[1]);
+                close(self, t);
+            }
+            Loop::Masked(op @ (RmwOp::Max | RmwOp::Min | RmwOp::UMax | RmwOp::UMin)) => {
+                let (v, mask, cur) = (u[1], u[2], d[2]);
+                self.rrr(IOp::And, cur, old, mask);
+                if let Some(&shamt) = u.get(3) {
+                    self.rrr(IOp::Sll, cur, cur, shamt);
+                    self.rrr(IOp::Sra, cur, cur, shamt);
+                }
+                self.mov(t, old, false);
+                let ge = if matches!(op, RmwOp::Max | RmwOp::Min) { IOp::Bge } else { IOp::Bgeu };
+                // max：cur ≥ v ⇒ 不换；min：v ≥ cur ⇒ 不换
+                let (a, b) = if matches!(op, RmwOp::Max | RmwOp::UMax) { (cur, v) } else { (v, cur) };
+                let (swap, tail) = (self.fresh(), self.fresh());
+                self.blocks[self.cur].term = Term::Branch { op: ge, a, b, t: tail, f: swap, long: false };
+                self.layout.extend([swap, tail]);
+                self.cur = swap;
+                merge(self, v, mask);
+                self.blocks[swap].term = Term::Jump(tail);
+                self.cur = tail;
+                close(self, t);
+            }
+            Loop::Masked(op) => {
+                body(self, op, u[1]);
+                merge(self, t, u[2]);
+                close(self, t);
+            }
+            Loop::Cas | Loop::MaskedCas => {
+                let (c, v) = (u[1], u[2]);
+                let got = if l == Loop::Cas {
+                    old
+                } else {
+                    self.rrr(IOp::And, t, old, u[3]);
+                    t
+                };
+                let (store, done) = (self.fresh(), self.fresh());
+                self.blocks[self.cur].term = Term::Branch { op: IOp::Bne, a: got, b: c, t: done, f: store, long: false };
+                self.layout.push(store);
+                self.cur = store;
+                if l == Loop::Cas {
+                    self.rrr(sc, t, p, v);
+                } else {
+                    merge(self, v, u[3]);
+                    self.rrr(sc, t, p, t);
+                }
+                self.blocks[store].term = Term::Branch { op: IOp::Bne, a: t, b: 0, t: head, f: done, long: false };
+                self.layout.push(done);
+                self.cur = done;
+            }
         }
     }
 

@@ -183,7 +183,8 @@ pub enum Op {
     AtomicRmw(RmwOp, ValId, ValId, u8),
     /// 指针、期望值、新值、成功 / 失败时的 C 内存序（编码同 `AtomicRmw`）。
     CmpXchg(ValId, ValId, ValId, u8, u8),
-    Fence,
+    /// C 内存序（编码同 `AtomicRmw`）；`singlethread` 作用域 ⇒ `None`（只是编译器屏障，不出指令，同 llc）。
+    Fence(Option<u8>),
 }
 
 impl Op {
@@ -204,7 +205,7 @@ impl Op {
                 args = a;
             }
             Self::Intr(_, a) | Self::Custom { args: a, .. } => list = a,
-            Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
+            Self::Const(_) | Self::Unreachable | Self::Fence(_) | Self::Br(_) => {}
         }
         self.targets()
             .flat_map(|t| t.args.iter().copied())
@@ -285,7 +286,7 @@ impl Op {
                     *v = to(*v);
                 }
             }
-            Self::Const(_) | Self::Unreachable | Self::Fence | Self::Br(_) => {}
+            Self::Const(_) | Self::Unreachable | Self::Fence(_) | Self::Br(_) => {}
         }
     }
 }

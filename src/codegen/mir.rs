@@ -1,5 +1,7 @@
 //! 机器 IR：一条 = 一条（或一小段固定的）RV32IMF 指令，寄存器是虚拟寄存器或固定的物理寄存器；
 //! 实现 regalloc2 的 `Function`。
+use crate::feature::Atomic;
+use crate::ir::RmwOp;
 use crate::isa::{Opcode, Rv32i as IOp};
 use crate::regalloc::{Block, Function, Inst as RInst, InstRange, Operand, PReg, PRegSet, RegClass, VReg};
 use smallvec::SmallVec;
@@ -79,8 +81,8 @@ pub enum MOp {
     Trap,
     /// `ebreak`（`llvm.debugtrap`，同 llc）。
     Break,
-    /// `fence`
-    Fence,
+    /// `fence pred, succ`（`fm << 8 | pred << 4 | succ`，同指令的 imm 字段；`fence.tso` 是 0x833）。
+    Fence(i32),
     /// ⭐ 扩展包的指令：`template` 里的 `{}` 由分配到的寄存器按 `defs` → `uses` 的次序填，
     /// 出一行汇编文本，交给**同一个** [`crate::ext::Module`] 的 `Assemble` 编成字节。
     ///
@@ -94,6 +96,25 @@ pub enum MOp {
     /// `stacksave`：`rd = sp`；`stackrestore`：`sp = rs`。
     SpSave,
     SpRestore,
+    /// ⭐ LR/SC 循环（A 扩展）：分配之后在 lower 里展开成「`lr` … `sc` … `bnez`」——⛔ 中间不许有溢出 / 搬运
+    /// （一次访存就可能弄丢保留，同 LLVM 的 RISCVExpandAtomicPseudo）。`lr` / `sc` 已带上序位。
+    /// 定义全是早定义（[`Rule::Early`]）：循环里一直要读使用，⛔ 与它们共用寄存器。
+    LrSc(Loop, Atomic, Atomic),
+}
+
+/// [`MOp::LrSc`] 的循环体。`old` 是 `lr` 读到的整字，`t` 是要写回的整字。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Loop {
+    /// 整字 `t = op(old, v)`（只有 nand：其余整字的都是一条 `amo`）。defs `[old, t]`，uses `[p, v]`。
+    Word(RmwOp),
+    /// 子字（i8 / i16 落在对齐的字里）：新字段 = op(字段, v)，`t = old ^ ((old ^ 新) & mask)`。
+    /// defs `[old, t]`（min / max 另加 `[cur]`），uses `[p, v, mask]`（有符号 min / max 另加 `[shamt]`：
+    /// 把字段左移到最高位再算术右移回来 = 原位符号扩展）。`v` 已移到字段位置。
+    Masked(RmwOp),
+    /// `old != c` ⇒ 不写；否则写 `v`。defs `[old, t]`，uses `[p, c, v]`。
+    Cas,
+    /// 子字的 CAS：`(old & mask) != c` ⇒ 不写；否则写回换了字段的整字。defs `[old, t]`，uses `[p, c, v, mask]`（c、v 已移到字段位置）。
+    MaskedCas,
 }
 
 /// 一个寄存器操作数的分配约束。
@@ -104,6 +125,8 @@ pub enum Rule {
     Fixed(PReg),
     /// 定义与第几个使用分到同一个寄存器（`select` 的目的寄存器绑定真值）。只用在定义上。
     Reuse(usize),
+    /// 早定义：从指令开始就占着寄存器，⛔ 与任何使用共用（[`MOp::LrSc`] 的临时寄存器）。只用在定义上。
+    Early,
 }
 
 /// 一条机器指令与它的寄存器。
@@ -168,6 +191,7 @@ impl MInst {
                     Rule::Any => Operand::reg_def(v),
                     Rule::Fixed(p) => Operand::reg_fixed_def(v, p),
                     Rule::Reuse(j) => Operand::reg_reuse_def(v, self.operand_of_use(j)),
+                    Rule::Early => Operand::reg_def_at_start(v),
                 });
             }
         }
@@ -186,7 +210,8 @@ impl MInst {
     #[must_use]
     /// ⚠ 没有定义的（`csrw` / `fsflags` 一类只写状态的）不算。
     pub fn pure(&self) -> bool {
-        !self.defs.is_empty() && matches!(self.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..) | MOp::Select(_))
+        // ⚠ 原子指令（`amo*`）也是 `Reg`，但它写内存
+        !self.defs.is_empty() && matches!(self.op, MOp::Reg(..) | MOp::Imm(..) | MOp::Li(_) | MOp::La(..) | MOp::Addr(..) | MOp::Select(_)) && !matches!(self.op, MOp::Reg(Opcode::A(_), _))
     }
 
     /// 定义的唯一一个虚拟寄存器（没有固定约束）：pass 能改名、能顶替的那种。
@@ -220,11 +245,12 @@ impl MInst {
             MOp::Unreachable => "Unreachable",
             MOp::Trap => "Trap",
             MOp::Break => "Break",
-            MOp::Fence => "Fence",
+            MOp::Fence(_) => "Fence",
             MOp::Ext { .. } => "Ext",
             MOp::SpAlloc => "SpAlloc",
             MOp::SpSave => "SpSave",
             MOp::SpRestore => "SpRestore",
+            MOp::LrSc(..) => "LrSc",
         }
     }
 
@@ -276,12 +302,14 @@ pub struct MFunc {
     pub insts: Vec<MInst>,
     pub ranges: Vec<InstRange>,
     pub vregs: usize,
+    /// 目标有 D：浮点的溢出槽 8 字节。
+    pub double: bool,
 }
 
 impl MFunc {
     /// 从各块组装（pass 已跑完，见 [`super::opt`]）：补前驱、平铺指令、算操作数。
     #[must_use]
-    pub fn new(mut blocks: Vec<MBlock>, vregs: usize) -> Self {
+    pub fn new(mut blocks: Vec<MBlock>, vregs: usize, double: bool) -> Self {
         for b in &mut blocks {
             b.preds.clear();
         }
@@ -300,7 +328,7 @@ impl MFunc {
             }
             ranges.push(InstRange::new(RInst::new(start), RInst::new(insts.len())));
         }
-        Self { blocks, insts, ranges, vregs }
+        Self { blocks, insts, ranges, vregs, double }
     }
 }
 
@@ -367,8 +395,9 @@ impl Function for MFunc {
         })
     }
 
-    fn spillslot_size(&self, _: RegClass) -> usize {
-        1
+    /// 一个槽 4 字节；有 D 时浮点的占两个（8 字节，regalloc2 按大小对齐）。
+    fn spillslot_size(&self, class: RegClass) -> usize {
+        if self.double && class == RegClass::Float { 2 } else { 1 }
     }
 }
 

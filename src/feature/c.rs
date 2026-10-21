@@ -1,4 +1,5 @@
-//! C：16 位压缩指令（RV32C + 单精度的 c.flw / c.fsw / c.flwsp / c.fswsp）。一张「压缩 ⇔ 32 位」的对照表（同 LLVM 的
+//! C：16 位压缩指令（RV32C + 单精度的 c.flw / c.fsw / c.flwsp / c.fswsp）；另有 [`CompressedD`]（Zcd：C 与 D 都挂上时的
+//! c.fld / c.fsd / c.fldsp / c.fsdsp，单独一个模块 ⇒ 没有 D 的目标照样认不出它们，同 llvm-objdump）。一张「压缩 ⇔ 32 位」的对照表（同 LLVM 的
 //! CompressPat），四处共用：
 //!
 //! ```text
@@ -10,7 +11,7 @@
 //!
 //! 保留编码（`c.addi4spn` 立即数 0、`c.lwsp` rd = 0、RV32 上移位量第 5 位为 1 …）不成行 ⇒ `<unknown>`、执行陷入。
 use crate::ext::{Args, Assemble, Disassemble, Emit, Exec, Module, Operand};
-use crate::feature::Float;
+use crate::feature::{Double, Float};
 use crate::isa::{Inst, Opcode, Rv32i as IOp, Style};
 use crate::sim::Stop;
 
@@ -80,6 +81,10 @@ const JUMP: Imm = Imm { bits: &[(12, 11), (11, 4), (10, 9), (9, 8), (8, 10), (7,
 const BRANCH: Imm = Imm { bits: &[(12, 8), (11, 4), (10, 3), (6, 7), (5, 6), (4, 2), (3, 1), (2, 5)], signed: true };
 const LWSP: Imm = Imm { bits: &[(12, 5), (6, 4), (5, 3), (4, 2), (3, 7), (2, 6)], signed: false };
 const SWSP: Imm = Imm { bits: &[(12, 5), (11, 4), (10, 3), (9, 2), (8, 7), (7, 6)], signed: false };
+// Zcd：8 字节对齐的偏移
+const UIMM_LD: Imm = Imm { bits: &[(12, 5), (11, 4), (10, 3), (6, 7), (5, 6)], signed: false };
+const LDSP: Imm = Imm { bits: &[(12, 5), (6, 4), (5, 3), (4, 8), (3, 7), (2, 6)], signed: false };
+const SDSP: Imm = Imm { bits: &[(12, 5), (11, 4), (10, 3), (9, 8), (8, 7), (7, 6)], signed: false };
 
 /// 一行的约束（不成立 ⇒ 这一行不是它，接着找下一行）。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,6 +256,14 @@ macro_rules! pat {
     };
 }
 
+/// Zcd（RV32：C 与 D 都挂上时）的四行。
+const ROWS_D: [Row; 4] = [
+    row!("c.fld", 0x2000, 0xe003, Some(P2), Some(P7), None, Some(&UIMM_LD), true, [], RdMem, Some((Opcode::D(Double::Fld), Rd, Rs1, X(0)))),
+    row!("c.fsd", 0xa000, 0xe003, None, Some(P7), Some(P2), Some(&UIMM_LD), true, [], Rs2Mem, Some((Opcode::D(Double::Fsd), X(0), Rs1, Rs2))),
+    row!("c.fldsp", 0x2002, 0xe003, Some(Hi), None, None, Some(&LDSP), true, [], RdMem, Some((Opcode::D(Double::Fld), Rd, X(2), X(0)))),
+    row!("c.fsdsp", 0xa002, 0xe003, None, None, Some(Lo), Some(&SDSP), true, [], Rs2Mem, Some((Opcode::D(Double::Fsd), X(0), X(2), Rs2))),
+];
+
 /// ⭐ 压缩方向（同 LLVM RISCVInstrInfoC.td 的 CompressPat，⚠ 次序即优先级：c.lw 先于 c.lwsp、c.addi 先于 c.addi16sp …）。
 /// 一个 32 位形式有几种写法的（`add rd, x0, rs` / `add rd, rs, x0` / `addi rd, rs, 0` 都是 c.mv；可交换的两种次序）各占一行。
 const PATS: [Pat; 39] = [
@@ -293,6 +306,14 @@ const PATS: [Pat; 39] = [
     pat!("c.fswsp", Opcode::F(Float::Fsw), _, 2, rs2),
     pat!("c.beqz", Opcode::I(IOp::Beq), _, 0, rs1),
     pat!("c.bnez", Opcode::I(IOp::Bne), _, 0, rs1),
+];
+
+/// Zcd 的压缩方向（同 LLVM：c.fld 先于 c.fldsp）。
+const PATS_D: [Pat; 4] = [
+    pat!("c.fld", Opcode::D(Double::Fld), rd, rs1, _),
+    pat!("c.fsd", Opcode::D(Double::Fsd), _, rs1, rs2),
+    pat!("c.fldsp", Opcode::D(Double::Fld), rd, 2, _),
+    pat!("c.fsdsp", Opcode::D(Double::Fsd), _, 2, rs2),
 ];
 
 /// 一条译好的压缩指令。
@@ -424,9 +445,14 @@ impl Compressed {
         if w == 0xc000_1073 {
             return Some(0);
         }
-        // 压缩表只涉及 RV32I 与 F：分表译（各自按主操作码分桶），⛔ 走整个操作码并集
-        let i = Inst::<IOp>::try_from(w).map(|i| i.with_op(Opcode::I(i.op))).or_else(|()| Inst::<Float>::try_from(w).map(|i| i.with_op(Opcode::F(i.op)))).ok()?;
-        PATS.iter().filter(|p| p.op == i.op).find_map(|p| {
+        // 压缩表只涉及 RV32I、F 与 D（`fld` / `fsd` 只在挂了 D 时汇编得出来 ⇒ 这里不必再问目标）：分表译，⛔ 走整个操作码并集
+        let i = Inst::<IOp>::try_from(w)
+            .map(|i| i.with_op(Opcode::I(i.op)))
+            .or_else(|()| Inst::<Float>::try_from(w).map(|i| i.with_op(Opcode::F(i.op))))
+            .or_else(|()| Inst::<Double>::try_from(w).map(|i| i.with_op(Opcode::D(i.op))))
+            .ok()?;
+        let (pats, rows): (&[Pat], &[Row]) = if matches!(i.op, Opcode::D(_)) { (&PATS_D, &ROWS_D) } else { (&PATS, &ROWS) };
+        pats.iter().filter(|p| p.op == i.op).find_map(|p| {
             let mut c = CInst { row: 0, rd: 0, rs1: 0, rs2: 0, imm: i.imm };
             let mut set = [None::<u8>; 3];
             for (b, v) in [(p.rd, i.rd), (p.rs1, i.rs1), (p.rs2, i.rs2)] {
@@ -446,8 +472,8 @@ impl Compressed {
             if i.op == Opcode::I(IOp::Lui) {
                 c.imm = i.imm & 0xf_ffff;
             }
-            let k = ROWS.iter().position(|r| r.name == p.c && r.wide.is_some())?;
-            Self::pack(&ROWS, k, &c)
+            let k = rows.iter().position(|r| r.name == p.c && r.wide.is_some())?;
+            Self::pack(rows, k, &c)
         })
     }
 
@@ -493,47 +519,58 @@ impl Compressed {
     }
 }
 
-impl Disassemble for Compressed {
-    fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
-        Self::decode16(&ROWS, Self::half(bytes)).map(|_| 2)
-    }
+/// ⭐ Zcd（模块常量 [`crate::feature::builtin::ZCD`]）：C 与 D 都挂上时由 [`crate::feature::Target::with`] 带上。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompressedD;
 
-    fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String {
-        let Some(c) = Self::decode16(&ROWS, Self::half(bytes)) else { return String::from("<unknown>") };
-        if !style.no_aliases {
-            if ROWS[c.row].name == "c.unimp" {
-                return String::from("unimp");
+/// 一个压缩模块的三面（反汇编、汇编、执行）：`模块, 名字, 表`。
+macro_rules! compressed {
+    ($($ty:ident $name:literal $rows:ident),*) => {$(
+        impl Disassemble for $ty {
+            fn decode(&self, bytes: &[u8; 8]) -> Option<usize> {
+                Compressed::decode16(&$rows, Compressed::half(bytes)).map(|_| 2)
             }
-            if let Some(i) = c.wide(&ROWS) {
-                return i.print(pc, style);
+
+            fn print(&self, bytes: &[u8], pc: u64, style: Style) -> String {
+                let Some(c) = Compressed::decode16(&$rows, Compressed::half(bytes)) else { return String::from("<unknown>") };
+                if !style.no_aliases {
+                    if $rows[c.row].name == "c.unimp" {
+                        return String::from("unimp");
+                    }
+                    if let Some(i) = c.wide(&$rows) {
+                        return i.print(pc, style);
+                    }
+                }
+                Compressed::print_c(&$rows, &c, pc, style)
             }
         }
-        Self::print_c(&ROWS, &c, pc, style)
-    }
-}
 
-impl Assemble for Compressed {
-    fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
-        if !mnemonic.starts_with("c.") {
-            return None;
+        impl Assemble for $ty {
+            fn assemble(&self, mnemonic: &str, args: &Args<'_>) -> Option<Result<Emit, String>> {
+                if !mnemonic.starts_with("c.") {
+                    return None;
+                }
+                $rows.iter().any(|r| r.name == mnemonic).then(|| Compressed::encode(&$rows, mnemonic, args.ops).map(|h| Emit::Bytes(h.to_le_bytes().to_vec())))
+            }
         }
-        ROWS.iter().any(|r| r.name == mnemonic).then(|| Self::encode(&ROWS, mnemonic, args.ops).map(|h| Emit::Bytes(h.to_le_bytes().to_vec())))
-    }
-}
 
-impl Module for Compressed {
-    fn name(&self) -> &str {
-        "c"
-    }
+        impl Module for $ty {
+            fn name(&self) -> &str {
+                $name
+            }
 
-    fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
-        let h = Self::half(bytes);
-        let c = Self::decode16(&ROWS, h).ok_or(Stop::Trap(u32::from(h)))?;
-        match (c.wide(&ROWS), ROWS[c.row].name) {
-            (Some(i), _) => cx.word(u32::from(i), 2),
-            (None, "c.unimp") => Err(Stop::Trap(u32::from(h))),
-            // hint：什么都不做
-            (None, _) => Ok(()),
+            fn execute(&mut self, cx: &mut Exec<'_, '_>, bytes: &[u8]) -> Result<(), Stop> {
+                let h = Compressed::half(bytes);
+                let c = Compressed::decode16(&$rows, h).ok_or(Stop::Trap(u32::from(h)))?;
+                match (c.wide(&$rows), $rows[c.row].name) {
+                    (Some(i), _) => cx.word(u32::from(i), 2),
+                    (None, "c.unimp") => Err(Stop::Trap(u32::from(h))),
+                    // hint：什么都不做
+                    (None, _) => Ok(()),
+                }
+            }
         }
-    }
+    )*};
 }
+
+compressed!(Compressed "c" ROWS, CompressedD "zcd" ROWS_D);

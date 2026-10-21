@@ -754,7 +754,7 @@ impl Module {
                 Op::AtomicRmw(*OPS.get(k).ok_or_else(|| Error::Parse(format!("bin_op {k}")))?, arg(0)?, arg(1)?, Self::order(op, "ordering").unwrap_or(5))
             }
             "llvm.cmpxchg" => Op::CmpXchg(arg(0)?, arg(1)?, arg(2)?, Self::order(op, "success_ordering").unwrap_or(5), Self::order(op, "failure_ordering").unwrap_or(5)),
-            "llvm.fence" => Op::Fence,
+            "llvm.fence" => Op::Fence((prop(op, "syncscope").and_then(Attr::lit) != Some("singlethread")).then(|| Self::order(op, "ordering").unwrap_or(5))),
             "llvm.va_arg" => return Err(Error::Parse(String::from("va_arg 指令还没做（clang 自己展开 va_arg，不会出这条）"))),
             n => return Err(Error::Parse(format!("不支持的 op `{n}`"))),
         })

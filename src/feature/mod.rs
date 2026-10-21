@@ -7,11 +7,15 @@
 //! | --- | --- | --- |
 //! | `zmmul/` | `ZMMUL` | `mul` / `mulh*` |
 //! | `m/` | `M`（带上 `ZMMUL`） | `div*` / `rem*` |
+//! | `a/` | `A` | `lr.w` / `sc.w` / `amo*.w`（Zalrsc + Zaamo） |
 //! | `f/` | `F`（带上 `ZICSR`） | 单精度浮点、`fcsr` 一类伪指令 |
+//! | `d/` | `D`（带上 `F`） | 双精度浮点（FLEN = 64，ilp32d） |
 //! | `zicsr/` | `ZICSR` | `csrr*`、`csrr` / `csrw` / `rdcycle` 一类伪指令 |
 //! | `xthead/<名>/` | `XTHEAD<名>` | 玄铁厂商扩展 |
 //! | `c.rs` | `C` | 16 位压缩指令（一张「压缩 ⇔ 32 位」对照表，⛔ 不走 `#[derive(Isa)]`） |
+mod a;
 mod c;
+mod d;
 mod f;
 mod m;
 pub mod xthead;
@@ -21,7 +25,9 @@ mod zmmul;
 use crate::ext::{Exec, Module, Std};
 use crate::isa::Table;
 use crate::sim::Stop;
-pub use c::Compressed;
+pub use a::{AForm, Atomic, Order};
+pub use c::{Compressed, CompressedD};
+pub use d::Double;
 pub use f::{FForm, Float};
 pub use m::M;
 pub use zicsr::Zicsr;
@@ -40,6 +46,8 @@ macro_rules! tables {
             )*
             /// 16 位压缩指令。
             pub const C: Compressed = Compressed;
+            /// Zcd：C 与 D 都挂上时的压缩双精度访存（由 [`Target::with`] 带上，⛔ 单独列在 `ALL` 里）。
+            pub const ZCD: CompressedD = CompressedD;
             /// 全部内置模块与版本（`-march` 的规范次序；C 另算，见 [`Target::march`]）。
             pub const ALL: &[(&dyn Module, &str)] = &[$((&$k, $ver),)* (&C, "2p0")];
         }
@@ -64,6 +72,9 @@ macro_rules! tables {
                 if name == "c" {
                     return Compressed.execute(cx, bytes);
                 }
+                if name == "zcd" {
+                    return CompressedD.execute(cx, bytes);
+                }
                 let mut w = [0; 4];
                 w[..bytes.len().min(4)].copy_from_slice(&bytes[..bytes.len().min(4)]);
                 Err(Stop::Trap(u32::from_le_bytes(w)))
@@ -73,7 +84,7 @@ macro_rules! tables {
 }
 
 tables!(
-    M M "2p0", Float F "2p2", Zicsr ZICSR "2p0", Zmmul ZMMUL "1p0",
+    M M "2p0", Atomic A "2p1", Float F "2p2", Double D "2p2", Zicsr ZICSR "2p0", Zmmul ZMMUL "1p0",
     XTheadBa XTHEADBA "1p0", XTheadBb XTHEADBB "1p0", XTheadBs XTHEADBS "1p0", XTheadCmo XTHEADCMO "1p0", XTheadCondMov XTHEADCONDMOV "1p0",
     XTheadFMemIdx XTHEADFMEMIDX "1p0", XTheadMac XTHEADMAC "1p0", XTheadMemIdx XTHEADMEMIDX "1p0", XTheadMemPair XTHEADMEMPAIR "1p0", XTheadSync XTHEADSYNC "1p0",
 );
@@ -105,12 +116,17 @@ impl<'m> Target<'m> {
         let implied: &[&'m dyn Module] = match module.name() {
             "m" => &[&builtin::ZMMUL],
             "f" => &[&builtin::ZICSR],
+            "d" => &[&builtin::F, &builtin::ZICSR],
             _ => &[],
         };
         for m in core::iter::once(module).chain(implied.iter().copied()) {
             if !self.has(m.name()) {
                 self.mods.push(m);
             }
+        }
+        // C 与 D 都在 ⇒ Zcd（c.fld / c.fsd …）
+        if self.has("c") && self.has("d") && !self.has("zcd") {
+            self.mods.push(&builtin::ZCD);
         }
         self
     }
@@ -139,6 +155,12 @@ impl<'m> Target<'m> {
         self.has("f")
     }
 
+    /// 有硬件双精度浮点（D，FLEN = 64）。
+    #[must_use]
+    pub fn double(&self) -> bool {
+        self.has("d")
+    }
+
     /// 有 16 位压缩指令（C）。
     #[must_use]
     pub fn rvc(&self) -> bool {
@@ -150,9 +172,17 @@ impl<'m> Target<'m> {
     #[must_use]
     pub fn march(&self) -> String {
         let mut exts: Vec<(&str, &str)> = builtin::ALL.iter().filter(|(m, _)| m.name() != "c" && self.has(m.name())).map(|(m, v)| (m.name(), *v)).collect();
+        // A 在 LLVM 22 里是 Zaamo + Zalrsc
+        if self.has("a") {
+            exts.push(("zaamo", "1p0"));
+            exts.push(("zalrsc", "1p0"));
+        }
         if self.rvc() {
             exts.push(("c", "2p0"));
             exts.push(("zca", "1p0"));
+            if self.double() {
+                exts.push(("zcd", "1p0"));
+            }
             if self.float() {
                 exts.push(("zcf", "1p0"));
             }
@@ -167,10 +197,10 @@ impl<'m> Target<'m> {
         builtin::ALL.iter().map(|(m, _)| format!("{}{}", if self.has(m.name()) { '+' } else { '-' }, m.name())).collect::<Vec<_>>().join(",")
     }
 
-    /// 浮点调用约定：有 F 用 ilp32f，否则 ilp32（软浮点）。
+    /// 浮点调用约定：有 D 用 ilp32d，有 F 用 ilp32f，否则 ilp32（软浮点）。
     #[must_use]
     pub fn abi(&self) -> String {
-        String::from(if self.float() { "ilp32f" } else { "ilp32" })
+        String::from(if self.double() { "ilp32d" } else if self.float() { "ilp32f" } else { "ilp32" })
     }
 
     /// 挂了的模块里谁认 pc 处的字节、几字节。
@@ -233,7 +263,7 @@ impl Target<'static> {
         let mut parts = rest.split('_');
         let letters: String = parts.next().unwrap_or_default().chars().filter(|c| c.is_ascii_alphabetic() && *c != 'p').collect();
         let names = letters.chars().map(String::from).chain(parts.map(|p| p.trim_end_matches(|c: char| c.is_ascii_digit() || c == 'p').to_owned()));
-        for name in names.filter(|n| !matches!(n.as_str(), "i" | "e" | "zca" | "zcf" | "")) {
+        for name in names.filter(|n| !matches!(n.as_str(), "i" | "e" | "zca" | "zcf" | "zcd" | "zaamo" | "zalrsc" | "")) {
             let name = if name == "g" { String::from("m") } else { name };
             let found = builtin::ALL.iter().find(|(m, _)| m.name() == name).ok_or_else(|| format!("不认识的扩展 `{name}`"))?;
             target = target.with(found.0);

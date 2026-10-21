@@ -396,3 +396,112 @@ pub extern "C" fn index(p: *const u32, n: usize, i: usize) -> u32 {
 pub extern "C" fn divide(a: i32, b: i32) -> i32 {
     a / b
 }
+
+// ---- double：多个 double 实参（ilp32d 放进 fa*）、比较、与整数 / float 的转换、取整 ----------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dmix(a: f64, b: f64, k: i32, c: f64, d: f64) -> f64 {
+    let m = if a < b { core::intrinsics::fmaf64(a, c, d) } else { (b - c) / (d.abs() + 1.0) };
+    m + f64::from(k) * 0.25 + if a.is_nan() || b.is_nan() { 1.0 } else { 0.0 }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dcmp(a: f64, b: f64) -> u32 {
+    u32::from(a < b) | u32::from(a <= b) << 1 | u32::from(a == b) << 2 | u32::from(a != b) << 3 | u32::from(a > b) << 4 | u32::from(a >= b) << 5 | u32::from(a.partial_cmp(&b).is_none()) << 6 | u32::from(a.total_cmp(&b).is_lt()) << 7
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dconv(x: i64, y: u32, f: f32) -> f64 {
+    x as f64 * 0.5 + f64::from(y) - f64::from(f) + (x as u64 as f64).sqrt_approx()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dtrunc(x: f64) -> i32 {
+    (x as i32).wrapping_add(x as u32 as i32).wrapping_add((x * 1e-3) as i16 as i32).wrapping_add(x.to_bits() as i32)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dsum(p: *const f64, n: usize, scale: f64) -> f64 {
+    // 缓冲区按 8 对齐（框架给 4 对齐的起点 ⇒ 往上取整）
+    let p = ((p as usize + 7) & !7) as *const f64;
+    slice(p, n % 32).iter().filter(|x| x.is_finite()).map(|x| x * scale).sum()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dret(a: f32, b: f64, c: f64) -> f32 {
+    (f64::from(a) * b - c) as f32
+}
+
+/// 牛顿法开方（core 没有 sqrt）：给 `dconv` 用，⛔ 内联。
+trait SqrtApprox {
+    fn sqrt_approx(self) -> Self;
+}
+
+impl SqrtApprox for f64 {
+    #[inline(never)]
+    fn sqrt_approx(self) -> f64 {
+        if !(self > 0.0) || self.is_infinite() {
+            return 0.0;
+        }
+        (0..8).fold(self.max(1.0), |x, _| 0.5 * (x + self / x))
+    }
+}
+
+// ---- 原子操作（只在开了 A 时编：没有 A 时 rustc 自己的 LLVM 选不了子字原子）---------------------------------
+
+#[cfg(target_feature = "a")]
+mod atomics {
+    use core::sync::atomic::{AtomicI16, AtomicI8, AtomicPtr, AtomicU16, AtomicU32, AtomicU8, Ordering::*};
+
+    /// 缓冲区里按 4 对齐的一处。
+    fn at<T>(p: *mut u8, off: usize) -> &'static T {
+        unsafe { &*(((p as usize + 3) & !3) as *const u8).add(off % 64).cast::<T>() }
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn amo32(p: *mut u8, v: u32, w: u32) -> u32 {
+        let a: &AtomicU32 = at(p, 0);
+        let mut h = a.fetch_add(v, SeqCst) ^ a.fetch_sub(w, Acquire).rotate_left(3);
+        h ^= a.fetch_and(v | 0x0f0f, Release) ^ a.fetch_or(w, Relaxed) ^ a.fetch_xor(v, AcqRel) ^ a.fetch_nand(w, SeqCst);
+        h ^= a.fetch_max(v, SeqCst) ^ a.fetch_min(w, SeqCst) ^ a.swap(v ^ w, SeqCst);
+        h ^ match a.compare_exchange(v ^ w, h, AcqRel, Acquire) {
+            Ok(x) => x,
+            Err(x) => !x,
+        } ^ a.load(SeqCst)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn amo8(p: *mut u8, k: usize, v: u8) -> u32 {
+        let a: &AtomicU8 = at(p, k % 4);
+        let s: &AtomicI8 = at(p, 8 + k % 4);
+        let mut h = u32::from(a.fetch_add(v, SeqCst)) | u32::from(a.fetch_nand(v, Relaxed)) << 8 | u32::from(a.fetch_xor(v, Acquire)) << 16;
+        h ^= u32::from(a.fetch_and(v | 1, Release)) ^ u32::from(a.fetch_or(v >> 1, SeqCst)) << 4 ^ u32::from(a.fetch_max(v, SeqCst)) << 12;
+        h ^= u32::from(a.fetch_min(v, SeqCst)) << 20 ^ s.fetch_max(v as i8, SeqCst) as u32 ^ (s.fetch_min(-(v as i8 >> 1), AcqRel) as u32) << 7;
+        h ^ match a.compare_exchange(v, !v, SeqCst, Relaxed) {
+            Ok(x) => u32::from(x),
+            Err(x) => u32::from(x) << 24,
+        } ^ u32::from(a.swap(v, Release)) ^ u32::from(a.load(Acquire)) << 9
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn amo16(p: *mut u8, k: usize, v: u16) -> u32 {
+        let a: &AtomicU16 = at(p, 2 * (k % 2));
+        let s: &AtomicI16 = at(p, 12 + 2 * (k % 2));
+        let mut h = u32::from(a.fetch_sub(v, SeqCst)) ^ u32::from(a.fetch_max(v, Acquire)) << 16 ^ u32::from(a.fetch_min(v >> 3, Release)) << 3;
+        h ^= s.fetch_max(v as i16, SeqCst) as u32 ^ (s.fetch_min(v as i16 ^ -1, SeqCst) as u32) << 5;
+        h ^ match a.compare_exchange_weak(v, v.wrapping_mul(3), SeqCst, SeqCst) {
+            Ok(x) | Err(x) => u32::from(x),
+        } ^ u32::from(a.fetch_nand(v, AcqRel)) << 1
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn amoptr(p: *mut u8, k: usize) -> u32 {
+        let slot: &AtomicPtr<u8> = at(p, 16);
+        let base = ((p as usize + 3) & !3) as *mut u8;
+        slot.store(base, Release);
+        let want = unsafe { base.add(k % 32) };
+        let swapped = slot.compare_exchange(base, want, SeqCst, SeqCst).is_ok();
+        let got = slot.fetch_update(SeqCst, SeqCst, |q| Some(unsafe { q.add(1) })).unwrap_or(base);
+        u32::from(swapped) | ((got as usize - base as usize) as u32) << 1 | ((slot.load(Acquire) as usize - base as usize) as u32) << 8
+    }
+}

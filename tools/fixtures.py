@@ -19,6 +19,13 @@ STD = '+m,+f,+zicsr,-relax'
 # 玄铁：文件名带 thead 的那批，另开全部 XThead 扩展过一遍 ⇒ tests/fixtures/mc-xthead（cargo test --features xthead）
 XTHEAD = STD + ',' + ','.join('+xthead' + x for x in ['ba', 'bb', 'bs', 'cmo', 'condmov', 'fmemidx', 'mac', 'memidx', 'mempair', 'sync'])
 C = STD + ',+c'
+# 扩展：文件名属于这个扩展的那批，另开它过一遍 ⇒ tests/fixtures/mc-<扩展>（tests/as_vs_llvm.rs 按缺省 + 那个扩展比）
+EXTS = {
+    'a': (STD + ',+a', re.compile(r'zaamo|zalrsc|rva-|rv32a|rv64a|atomic|amo')),
+    'd': (STD + ',+d', re.compile(r'rvd-|rv32d|rv64d|rvdc|rv32dc|compress-rv32d|double')),
+    # C + D（Zcd）：llvm-mc 开了 C 把能压的 fld / fsd 都压掉
+    'dc': (STD + ',+c,+d', re.compile(r'rvdc|rv32dc|compress-rv32d')),
+}
 
 
 def mc(mattr):
@@ -73,9 +80,25 @@ def keep(out):
 for d in (OUT, OUT_XTHEAD, OUT_C):
     os.makedirs(d, exist_ok=True)
 kept = dropped = xt = nc = 0
-# ONLY=c：只重新生成 mc-c
-only_c = os.environ.get('ONLY') == 'c'
+# ONLY=c：只重新生成 mc-c；ONLY=<扩展>（a …）：只重新生成 mc-<扩展>
+only = os.environ.get('ONLY')
+only_c = only == 'c'
+ext_n = {}
+for e in EXTS:
+    if only in (None, e):
+        d = os.path.join(ROOT, f'tests/fixtures/mc-{e}')
+        os.makedirs(d, exist_ok=True)
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
 for stem, text in sources():
+    for e, (mattr, pick) in EXTS.items():
+        if only in (None, e) and pick.search(stem.lower()):
+            out = clean(text, mattr)
+            if keep(out):
+                open(os.path.join(ROOT, f'tests/fixtures/mc-{e}', stem + '.s'), 'w').write(out)
+                ext_n[e] = ext_n.get(e, 0) + 1
+    if only in EXTS:
+        continue
     out = clean(text, C, SCOPE_C)
     if keep(out):
         open(os.path.join(OUT_C, stem + '.s'), 'w').write(out)
@@ -93,4 +116,4 @@ for stem, text in sources():
         if keep(out):
             open(os.path.join(OUT_XTHEAD, stem + '.s'), 'w').write(out)
             xt += 1
-print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}；玄铁 {xt} 份 ⇒ {OUT_XTHEAD}；C {nc} 份 ⇒ {OUT_C}')
+print(f'mc fixtures: 留 {kept} 份、丢 {dropped} 份 ⇒ {OUT}；玄铁 {xt} 份 ⇒ {OUT_XTHEAD}；C {nc} 份 ⇒ {OUT_C}；扩展 {ext_n}')

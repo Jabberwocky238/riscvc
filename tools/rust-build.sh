@@ -9,6 +9,8 @@
 # 启动代码：设栈、`call <入口>`、`ebreak`（入口的返回值留在 a0）。
 # 运行时：tests/rust/rt（单核裸机的 __atomic_*：没有 A 扩展时 core 的原子操作调它们），同样经 riscvc 编。
 # 用法：tools/rust-build.sh <Cargo.toml> <入口函数> <输出.elf> [O0|O2]（缺省 O2）
+#   MARCH=rv32imaf_zicsr（缺省 rv32imf_zicsr）：rustc 的 target-feature 与 riscvc 的 --march 同一个串；目标 riscv32imafc 里没在串里的 a / c 关掉；
+#   带 d（rv32imfd_zicsr）⇒ 自定义 target JSON（+d、ilp32d）
 #   例：tools/rust-build.sh tests/rust/examples/selfcheck/Cargo.toml check /tmp/selfcheck.elf
 # 环境：RISCVC（缺省 target/release/riscvc）、LLVM_BIN（mlir-translate / mlir-opt，缺省 ../llvm-project/build/bin）
 set -euo pipefail
@@ -23,11 +25,26 @@ have=$(rustc +stable --version | awk '{print $2}')
 WORK=$(mktemp -d)
 trap "[ -n \"${KEEP:-}\" ] || rm -rf $WORK" EXIT
 prof=$([ "$LV" = O2 ] && echo release || echo debug)
-# 去掉 a、c：riscvc 缺省的 rv32imf + zicsr，ilp32f
+MARCH=${MARCH:-rv32imf_zicsr}
+# riscv32imafc 里 MARCH 没有的（a、c）关掉：缺省 = riscvc 缺省的 rv32imf + zicsr，ilp32f
+letters=$(echo "${MARCH#rv32}" | cut -d_ -f1)
+OFF=$(for e in a c; do case $letters in *$e*) ;; *) printf -- "-%s," $e ;; esac; done)
+# D（ilp32d）：rustc 没有 riscv32 带 D 的内置目标 ⇒ 照 riscv32imafc-unknown-none-elf 的规格写一份 target JSON，
+# 加 +d、换 llvm-abiname；产物目录跟着 JSON 的文件名。⚠ 名字要带 `-none`：cargo 据此给 compiler_builtins 开 mem（memset …）
+SPEC=$TARGET
+case $letters in
+  *d*)
+    TARGET=riscv32imafdc-unknown-none-elf
+    SPEC=$WORK/$TARGET.json
+    RUSTC_BOOTSTRAP=1 rustc +stable -Z unstable-options --print target-spec-json --target riscv32imafc-unknown-none-elf \
+      | sed -e 's/"features": "+m,+a,+c,+f"/"features": "+m,+a,+c,+f,+d"/' -e 's/"llvm-abiname": "ilp32f"/"llvm-abiname": "ilp32d"/' > "$SPEC"
+    grep -q '+d"' "$SPEC" && grep -q ilp32d "$SPEC" || { echo "改不出带 D 的 target JSON" >&2; exit 1; }
+    ;;
+esac
 build() {
-  RUSTC_BOOTSTRAP=1 RUSTFLAGS="-C target-feature=-a,-c --emit=llvm-ir,link -C codegen-units=1" \
-    cargo +stable build --manifest-path "$1" --target-dir "$2" --target $TARGET \
-      $([ "$prof" = release ] && echo --release) -Zbuild-std=core -q
+  RUSTC_BOOTSTRAP=1 RUSTFLAGS="-C target-feature=${OFF%,} --emit=llvm-ir,link -C codegen-units=1" \
+    cargo +stable build --manifest-path "$1" --target-dir "$2" --target "$SPEC" \
+      $([ "$prof" = release ] && echo --release) -Zbuild-std=core $([ "$SPEC" = "$TARGET" ] || echo -Zjson-target-spec) -q
 }
 build "$MANIFEST" "$WORK/t"
 # 运行时单独编（它自己也带一份 core，只取 rvrt 本身）
@@ -44,7 +61,7 @@ for ll in "$WORK/t/$TARGET/$prof/deps/"*.ll; do
   fi
   "$BIN/mlir-translate" --import-llvm "$ll" | "$BIN/mlir-opt" --mlir-print-op-generic -o "$WORK/mlir/$stem.mlir"
 done
-"$RISCVC" llc "$WORK/mlir/"*.mlir -o "$WORK/o"
+"$RISCVC" llc --march "$MARCH" "$WORK/mlir/"*.mlir -o "$WORK/o"
 cat > "$WORK/crt.s" <<CRT
     .section .text.start, "ax"
     .globl _start
@@ -54,7 +71,7 @@ _start:
     call $ENTRY
     ebreak
 CRT
-"$RISCVC" as "$WORK/crt.s" -o "$WORK/crt.o"
+"$RISCVC" as --march "$MARCH" "$WORK/crt.s" -o "$WORK/crt.o"
 cat > "$WORK/link.ld" <<'LD'
 ENTRY(_start)
 SECTIONS {

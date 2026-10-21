@@ -1,4 +1,5 @@
-//! 浮点：`float` 用 F 扩展（`f` feature 没开就同 double 走软浮点）；`double` 没有硬件（FLEN = 32），全走 compiler-rt。
+//! 浮点：`float` 用 F 扩展（没开就走软浮点）；`double` 开了 D 用 D 扩展（同一套代码，按类型换成双精度那条，见 [`Isel::fp`]），
+//! 没开（FLEN = 32）全走 compiler-rt。
 //! 比较的软化同 LLVM 的 `softenSetCCOperands`：无序版本借有序函数对 NaN 的返回值。
 //!
 //! half / bfloat（同 LLVM 的 SoftPromoteHalf）：平时是整数寄存器里零扩展的 16 位；运算、比较、与整数互转都先提升到
@@ -9,7 +10,7 @@
 use super::{Error, Isel, Part, R};
 use crate::codegen::mir::MOp;
 use crate::ir::{BinOp, CastOp, FPred, Kind, Ty, Types, ValId};
-use crate::feature::{Float};
+use crate::feature::{Double, Float};
 use crate::isa::{Opcode, Rv32i as IOp, Rm};
 
 const PAIR: [Part; 2] = [Part::Lo, Part::Hi];
@@ -20,6 +21,13 @@ impl Isel<'_> {
         let op: Opcode = op.into();
         let d = self.fr();
         self.emit(MOp::Reg(op, rm as u8), &[d], &[a, b]);
+        d
+    }
+
+    /// `op fd, a`（一个源：`fcvt.s.d` 一类）。
+    fn ff1(&mut self, op: Opcode, a: R, rm: Rm) -> R {
+        let d = self.fr();
+        self.emit(MOp::Reg(op, rm as u8), &[d], &[a]);
         d
     }
 
@@ -172,19 +180,22 @@ impl Isel<'_> {
             let ps = self.parts(t)?;
             return self.libcall(&name, &[(x, ps.clone()), (y, ps.clone())], &ps);
         }
-        if !matches!(self.kind(t), Kind::Float) {
+        if !matches!(self.kind(t), Kind::Float | Kind::Double) {
             return Self::bad(format!("浮点运算不支持 {:?}", self.kind(t)));
         }
-        let (x, y) = (x[0], y[0]);
         let iop = match op {
             BinOp::FAdd => Float::FaddS,
             BinOp::FSub => Float::FsubS,
             BinOp::FMul => Float::FmulS,
             BinOp::FDiv => Float::FdivS,
-            BinOp::FRem => return self.libcall("fmodf", &[(vec![x], vec![Part::F]), (vec![y], vec![Part::F])], &[Part::F]),
+            BinOp::FRem => {
+                let (name, ps) = (if matches!(self.kind(t), Kind::Double) { "fmod" } else { "fmodf" }, self.parts(t)?);
+                return self.libcall(name, &[(x, ps.clone()), (y, ps.clone())], &ps);
+            }
             _ => return Self::bad(format!("float 不支持 {op:?}")),
         };
-        Ok(vec![self.ff(iop, x, y, Rm::Dyn)])
+        let iop = self.fp(t, iop);
+        Ok(vec![self.ff(iop, x[0], y[0], Rm::Dyn)])
     }
 
     pub(super) fn fneg(&mut self, a: ValId) -> Result<Vec<R>, Error> {
@@ -202,7 +213,8 @@ impl Isel<'_> {
             return Ok(x);
         }
         let x = self.get1(a)?;
-        Ok(vec![self.ff(Float::FsgnjnS, x, x, Rm::Rne)])
+        let op = self.fp(self.ty(a), Float::FsgnjnS);
+        Ok(vec![self.ff(op, x, x, Rm::Rne)])
     }
 
     /// 浮点比较 ⇒ 0 / 1。
@@ -230,42 +242,43 @@ impl Isel<'_> {
         let (x, y) = (x[0], y[0]);
         let not = |s: &mut Self, r: R| s.ri(IOp::Xori, r, 1);
         let rne = Rm::Rne;
+        let (feq, flt, fle) = (self.fp(t, Float::FeqS), self.fp(t, Float::FltS), self.fp(t, Float::FleS));
         Ok(match p {
-            FPred::Oeq => self.fx(Float::FeqS, vec![x, y], rne),
-            FPred::Olt => self.fx(Float::FltS, vec![x, y], rne),
-            FPred::Ole => self.fx(Float::FleS, vec![x, y], rne),
-            FPred::Ogt => self.fx(Float::FltS, vec![y, x], rne),
-            FPred::Oge => self.fx(Float::FleS, vec![y, x], rne),
+            FPred::Oeq => self.fx(feq, vec![x, y], rne),
+            FPred::Olt => self.fx(flt, vec![x, y], rne),
+            FPred::Ole => self.fx(fle, vec![x, y], rne),
+            FPred::Ogt => self.fx(flt, vec![y, x], rne),
+            FPred::Oge => self.fx(fle, vec![y, x], rne),
             FPred::One | FPred::Ueq => {
-                let l = self.fx(Float::FltS, vec![x, y], rne);
-                let g = self.fx(Float::FltS, vec![y, x], rne);
+                let l = self.fx(flt, vec![x, y], rne);
+                let g = self.fx(flt, vec![y, x], rne);
                 let one = self.rr(IOp::Or, l, g);
                 if p == FPred::One { one } else { not(self, one) }
             }
             FPred::Ord | FPred::Uno => {
-                let ea = self.fx(Float::FeqS, vec![x, x], rne);
-                let eb = self.fx(Float::FeqS, vec![y, y], rne);
+                let ea = self.fx(feq, vec![x, x], rne);
+                let eb = self.fx(feq, vec![y, y], rne);
                 let ord = self.rr(IOp::And, ea, eb);
                 if p == FPred::Ord { ord } else { not(self, ord) }
             }
             FPred::Une => {
-                let e = self.fx(Float::FeqS, vec![x, y], rne);
+                let e = self.fx(feq, vec![x, y], rne);
                 not(self, e)
             }
             FPred::Ugt => {
-                let t = self.fx(Float::FleS, vec![x, y], rne);
+                let t = self.fx(fle, vec![x, y], rne);
                 not(self, t)
             }
             FPred::Uge => {
-                let t = self.fx(Float::FltS, vec![x, y], rne);
+                let t = self.fx(flt, vec![x, y], rne);
                 not(self, t)
             }
             FPred::Ult => {
-                let t = self.fx(Float::FleS, vec![y, x], rne);
+                let t = self.fx(fle, vec![y, x], rne);
                 not(self, t)
             }
             FPred::Ule => {
-                let t = self.fx(Float::FltS, vec![y, x], rne);
+                let t = self.fx(flt, vec![y, x], rne);
                 not(self, t)
             }
             FPred::False | FPred::True => unreachable!(),
@@ -331,6 +344,14 @@ impl Isel<'_> {
             }
             _ => {}
         }
+        // 有 D：float ⇄ double 是一条 fcvt
+        if self.double() {
+            match (op, self.kind(from), self.kind(to)) {
+                (CastOp::FpTrunc, Kind::Double, Kind::Float) => return Ok(vec![self.ff1(Double::FcvtSD.into(), x[0], Rm::Dyn)]),
+                (CastOp::FpExt, Kind::Float, Kind::Double) => return Ok(vec![self.ff1(Double::FcvtDS.into(), x[0], Rm::Rne)]),
+                _ => {}
+            }
+        }
         Ok(match op {
             // float / double / fp128 之间：`__trunc{从}{到}2`、`__extend{从}{到}2`
             CastOp::FpTrunc => self.libcall(&format!("__trunc{}{}2", self.fsuffix(from), self.fsuffix(to)), &[(x, pf)], &pt)?,
@@ -357,8 +378,12 @@ impl Isel<'_> {
         let u = if signed { "" } else { "uns" };
         let (size, words, pt) = Self::conv_width(w)?;
         let r = match (self.soft(from), words) {
-            (None, 1) => vec![self.fx(if signed { Float::FcvtWS } else { Float::FcvtWuS }, x, Rm::Rtz)],
-            (sfx, _) => self.libcall(&format!("__fix{u}{}{size}", sfx.unwrap_or("sf")), &[(x, pf)], &pt)?,
+            (None, 1) => {
+                let op = self.fp(from, if signed { Float::FcvtWS } else { Float::FcvtWuS });
+                vec![self.fx(op, x, Rm::Rtz)]
+            }
+            // 名字里的类型后缀按 `from` 取（有 D 的 double 不是软浮点，但 i64 的转换照样调 `__fixdfdi`）
+            (_, _) => self.libcall(&format!("__fix{u}{}{size}", self.fsuffix(from)), &[(x, pf)], &pt)?,
         };
         Ok(self.int_cast(CastOp::Trunc, &r, 32 * words, w))
     }
@@ -373,10 +398,13 @@ impl Isel<'_> {
         Ok(match (self.soft(to), words) {
             (None, 1) => {
                 let d = self.fr();
-                self.emit(MOp::Reg(if signed { Float::FcvtSW } else { Float::FcvtSWu }.into(), Rm::Dyn as u8), &[d], &src);
+                let op = self.fp(to, if signed { Float::FcvtSW } else { Float::FcvtSWu });
+                // int ⇒ double 是精确的：舍入模式 rne（同 llc）
+                let rm = if matches!(op, Opcode::D(_)) { Rm::Rne } else { Rm::Dyn };
+                self.emit(MOp::Reg(op, rm as u8), &[d], &src);
                 vec![d]
             }
-            (sfx, _) => self.libcall(&format!("__float{u}{size}{}", sfx.unwrap_or("sf")), &[(src, pf)], &pt)?,
+            (_, _) => self.libcall(&format!("__float{u}{size}{}", self.fsuffix(to)), &[(src, pf)], &pt)?,
         })
     }
 }

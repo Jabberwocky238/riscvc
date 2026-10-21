@@ -1,11 +1,12 @@
 //! 函数级对拍：同一个函数两份目标代码（riscvc 的、llc 的），各自链成镜像，在解释器里用同样的实参调用，
 //! 比停机方式、返回值、指针实参指向的内存、全局数据对象。只测标量签名（整数 ≤ 64 位 / 指针 / float / double，
-//! 实参全在寄存器里，ilp32f）。
+//! 实参全在寄存器里，ilp32f；镜像按 ilp32d 链的（[`Image::link_on`] 给了带 D 的目标）double 进 fa 寄存器）。
 //!
 //! 两边链同一份库（[`Lib`]：桩 + riscvc 编的 compiler-rt builtins，按需挑），两边都没有的符号解析成 0（调到就陷入）。
 //! ⚠ 两个镜像的布局不同：返回的指针按「符号 + 偏移」比；任何一边跑到步数上限 ⇒ 这个函数后面的调用都不比了
 //! （快慢不算结果；实参决定循环次数的函数，一次到顶往往次次到顶）。
 use object::{Object, ObjectSection, ObjectSymbol, SymbolKind};
+use riscvc::feature::Target;
 use riscvc::ir::{Function, Kind, Module, Ty, Types};
 use riscvc::sim::{Cpu, Stop};
 use super::Rng;
@@ -40,13 +41,23 @@ impl Arg {
         })
     }
 
-    /// 占几个整数寄存器。
-    const fn xregs(self) -> usize {
+    /// 占几个整数寄存器（`double`：ilp32d 下 double 进 fa 寄存器）。
+    const fn xregs(self, double: bool) -> usize {
         match self {
             Self::Int(w, ..) if w > 32 => 2,
+            Self::Double if double => 0,
             Self::Double => 2,
             Self::Float => 0,
             _ => 1,
+        }
+    }
+
+    /// 占几个浮点寄存器。
+    const fn fregs(self, double: bool) -> usize {
+        match self {
+            Self::Float => 1,
+            Self::Double if double => 1,
+            _ => 0,
         }
     }
 }
@@ -72,14 +83,19 @@ pub struct Sig {
 }
 
 impl Sig {
-    /// 标量、实参全在寄存器里、有定义、全局可见 ⇒ 可测。
+    /// 标量、实参全在寄存器里、有定义、全局可见 ⇒ 可测（ilp32f）。
     pub fn of(m: &Module, f: &Function) -> Option<Self> {
+        Self::of_on(m, f, false)
+    }
+
+    /// 同 [`Self::of`]；`double`：ilp32d（double 占 fa 寄存器）。
+    pub fn of_on(m: &Module, f: &Function, double: bool) -> Option<Self> {
         if f.blocks.is_empty() || f.linkage.local() || f.varargs {
             return None;
         }
         let args: Vec<Arg> = f.params.iter().map(|p| Arg::of(&m.types, p.ty, p.attrs.signext, p.attrs.zeroext)).collect::<Option<_>>()?;
         let ret = if f.ret == Types::VOID { None } else { Some(Arg::of(&m.types, f.ret, f.ret_attrs.signext, f.ret_attrs.zeroext)?) };
-        let fits = args.iter().map(|a| a.xregs()).sum::<usize>() <= 8 && args.iter().filter(|a| matches!(a, Arg::Float)).count() <= 8;
+        let fits = args.iter().map(|a| a.xregs(double)).sum::<usize>() <= 8 && args.iter().map(|a| a.fregs(double)).sum::<usize>() <= 8;
         fits.then(|| Self { name: f.name.clone(), args, ret })
     }
 }
@@ -155,6 +171,8 @@ pub struct Image {
     data: Vec<(u32, u32, String, bool)>,
     /// 只读节的范围：没有符号的只读常量（llc 的 `.Lalloc_…` 链接后不留符号）按内容认。
     rodata: Vec<(u32, u32)>,
+    /// ilp32d：double 的实参 / 返回值在 fa 寄存器里。
+    double: bool,
 }
 
 impl Outcome {
@@ -183,13 +201,18 @@ struct Outcome {
 
 impl Image {
     pub fn link(lib: &Lib, name: &str, obj: &[u8]) -> Result<Self, String> {
+        Self::link_on(lib, name, obj, &Target::default())
+    }
+
+    /// 同 [`Self::link`]，按 `target` 链（模拟器按它认扩展指令、桩按它汇编；带 D ⇒ ilp32d 的调用约定）。
+    pub fn link_on(lib: &Lib, name: &str, obj: &[u8], target: &Target<'static>) -> Result<Self, String> {
         let mut inputs = lib.with(name, obj);
         // 谁都没定义的函数（libm 一类：llc 可能把 floorf 之类内联掉，riscvc 照样调）⇒ 桩：调到就陷入 unimp。
         // ⛔ 解析成 0：跳到 0 地址跑进镜像开头的代码，死循环到步数上限，和「慢」混在一起。
-        let stub = Self::stubs(&inputs);
+        let stub = Self::stubs(&inputs, target);
         inputs.push(("stubs.o", &stub));
         let elf = riscvc::link::Linker::link(riscvc::link::Options { script: Some(String::from(SCRIPT)), allow_undefined: true, ..Default::default() }, &inputs).map_err(|e| format!("链接：{e}"))?;
-        let mut cpu = Cpu::default();
+        let mut cpu = Cpu { target: target.clone(), ..Cpu::default() };
         cpu.load(&elf).map_err(|e| format!("装载：{e}"))?;
         let file = object::File::parse(elf.as_slice()).unwrap();
         let funcs = file.symbols().filter(|s| s.is_global() && s.is_definition()).map(|s| (String::from(s.name().unwrap()), u32::try_from(s.address()).unwrap())).collect();
@@ -204,7 +227,7 @@ impl Image {
             .collect();
         data.sort();
         let rodata = file.sections().filter(|s| s.name().is_ok_and(|n| n.starts_with(".rodata") || n.starts_with(".srodata"))).map(|s| (u32::try_from(s.address()).unwrap(), u32::try_from(s.size()).unwrap())).collect();
-        Ok(Self { cpu, funcs, code, data, rodata })
+        Ok(Self { cpu, funcs, code, data, rodata, double: target.double() })
     }
 
     /// 直接按寄存器调（诊断用）：回 (停机方式, a0, a1)。
@@ -217,7 +240,7 @@ impl Image {
     }
 
     /// 输入里引用了、谁都没定义的全局符号 ⇒ 每个一条 `unimp` 的目标文件。
-    fn stubs(inputs: &[(&str, &[u8])]) -> Vec<u8> {
+    fn stubs(inputs: &[(&str, &[u8])], target: &Target<'static>) -> Vec<u8> {
         let (mut defs, mut used) = (BTreeSet::new(), BTreeSet::new());
         for (_, obj) in inputs {
             let (d, u) = Lib::symbols(obj);
@@ -225,7 +248,7 @@ impl Image {
             used.extend(u);
         }
         let asm: String = used.difference(&defs).map(|n| format!("    .globl {n}\n{n}:\n    unimp\n")).collect();
-        riscvc::asm::Assembler::new().assemble(&format!("    .text\n{asm}")).unwrap()
+        riscvc::asm::Assembler::new().target(target.clone()).assemble(&format!("    .text\n{asm}")).unwrap()
     }
 
     /// 地址 ⇒ 「符号+偏移」（落在实参缓冲区里 ⇒ `buf+偏移`）。
@@ -265,7 +288,7 @@ impl Image {
     }
 
     #[allow(clippy::too_many_arguments, reason = "一次调用的全部输入")]
-    fn call(&self, entry: u32, sig: &Sig, xs: &[u32], fs: &[u32], bufs: &[(u32, Vec<u8>)], common: &BTreeSet<&str>, steps: u64) -> Option<Outcome> {
+    fn call(&self, entry: u32, sig: &Sig, xs: &[u32], fs: &[u64], bufs: &[(u32, Vec<u8>)], common: &BTreeSet<&str>, steps: u64) -> Option<Outcome> {
         let mut cpu = self.cpu.clone();
         for (addr, data) in bufs {
             cpu.mem.write(*addr, data);
@@ -282,7 +305,8 @@ impl Image {
             (Some(Arg::Int(_, true, _) | Arg::Int(_, _, true)), _) => format!("{:#x}", cpu.x[10]),
             (Some(Arg::Int(w, ..)), _) => format!("{:#x}", u64::from(cpu.x[10]) & ((1u64 << w) - 1)),
             (Some(Arg::Ptr), _) => self.place(cpu.x[10]),
-            (Some(Arg::Float), _) => format!("{:#x}", cpu.f[10]),
+            (Some(Arg::Float), _) => format!("{:#x}", cpu.f[10] as u32),
+            (Some(Arg::Double), _) if self.double => format!("{:#x}", cpu.f[10]),
             (Some(Arg::Double), _) => format!("{:#x}", u64::from(cpu.x[10]) | u64::from(cpu.x[11]) << 32),
         };
         let read = |at: u32, n: u32| {
@@ -339,12 +363,17 @@ impl<'i> Pair<'i> {
                     Arg::Float => {
                         let v = if domain == Domain::Small { ((rng.next() % 200) as f32 - 100.0).to_bits() } else { rng.float() };
                         shown.push(format!("{}", f32::from_bits(v)));
-                        fs.push(v);
+                        // NaN-box 进 64 位的 fa
+                        fs.push(0xffff_ffff_0000_0000 | u64::from(v));
                     }
                     Arg::Double => {
                         let v = if domain == Domain::Small { ((rng.next() % 200) as f64 - 100.0).to_bits() } else { rng.double() };
                         shown.push(format!("{}", f64::from_bits(v)));
-                        xs.extend([v as u32, (v >> 32) as u32]);
+                        if self.ours.double {
+                            fs.push(v);
+                        } else {
+                            xs.extend([v as u32, (v >> 32) as u32]);
+                        }
                     }
                 }
             }

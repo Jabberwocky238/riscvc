@@ -59,8 +59,17 @@ impl Isel<'_> {
         let mut inst = MInst::new(MOp::Call(target), &[], &[]);
         let ret_regs = Abi::returns(ret).ok_or_else(|| Error::Select(String::from("返回值放不进寄存器：调用方先给返回区（sret_slot）")))?;
         for a in actuals {
-            let locs = assign.parts(&a.parts, a.variadic);
-            for ((r, part), loc) in a.regs.into_iter().zip(a.parts).zip(locs) {
+            let locs = assign.split(&a.parts, a.variadic);
+            for ((r, part), locs) in a.regs.into_iter().zip(a.parts).zip(locs) {
+                // fa 用完了 / 可变参数的 double：经栈拆成一对整数，按 i64 的位置放（同 llc）
+                let pieces: Vec<(R, Part, Loc)> = match locs[..] {
+                    [lo, hi] => {
+                        let (l, h) = self.d_split(r);
+                        vec![(l, Part::X, lo), (h, Part::X, hi)]
+                    }
+                    _ => vec![(r, part, locs[0])],
+                };
+                for (r, part, loc) in pieces {
                 match loc {
                     Loc::Reg(p) => {
                         let v = self.virt(r);
@@ -78,6 +87,7 @@ impl Isel<'_> {
                         let op = if part == Part::F { Opcode::from(Float::Fsw) } else { Opcode::from(IOp::Sw) };
                         self.emit(MOp::Store(op, Base::Outgoing, off), &[], &[r]);
                     }
+                }
                 }
             }
         }
@@ -251,6 +261,9 @@ impl Isel<'_> {
 
     /// 没有 A 扩展：原子读同 LLVM 走 `__atomic_load_N(指针, 内存序)`。
     pub(super) fn atomic_load(&mut self, t: Ty, p: ValId, order: u8) -> Result<Vec<R>, Error> {
+        if self.amo_fits(t) {
+            return self.amo_load(t, p, order);
+        }
         let n = self.types().size(t);
         let ptr = self.get1(p)?;
         let o = self.li(i32::from(order));
@@ -261,6 +274,9 @@ impl Isel<'_> {
     /// 原子写：`__atomic_store_N(指针, 值, 内存序)`。
     pub(super) fn atomic_store(&mut self, v: ValId, p: ValId, order: u8) -> Result<(), Error> {
         let t = self.ty(v);
+        if self.amo_fits(t) {
+            return self.amo_store(v, p, order);
+        }
         let n = self.types().size(t);
         let ptr = self.get1(p)?;
         let val = self.get(v)?;
@@ -270,41 +286,58 @@ impl Isel<'_> {
         Ok(())
     }
 
-    /// 原子库函数收 / 回的是同宽的整数：float 的部件先换成位型（⛔ 放进 fa 寄存器，库函数从 a 寄存器读）。
-    fn atomic_bits(&mut self, parts: &[R]) -> Vec<R> {
-        parts
-            .iter()
-            .map(|&r| match r {
-                R::V(v) if v.class() == crate::regalloc::RegClass::Float => {
+    /// 原子库函数收 / 回的是同宽的整数：float 的部件先换成位型（⛔ 放进 fa 寄存器，库函数从 a 寄存器读）；
+    /// 有 D 的 double 经栈拆成两个字。
+    pub(super) fn atomic_bits(&mut self, t: Ty, parts: &[R]) -> Result<Vec<R>, Error> {
+        let kinds = self.parts(t)?;
+        let mut out = Vec::new();
+        for (&r, p) in parts.iter().zip(kinds) {
+            match p {
+                Part::F => {
                     let x = self.xr();
                     self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[r]);
-                    x
+                    out.push(x);
                 }
-                r => r,
-            })
-            .collect()
+                Part::D => {
+                    let (lo, hi) = self.d_split(r);
+                    out.extend([lo, hi]);
+                }
+                _ => out.push(r),
+            }
+        }
+        Ok(out)
     }
 
     /// [`Self::atomic_bits`] 的反向：位型 ⇒ 类型 `t` 的部件。
-    fn atomic_unbits(&mut self, t: Ty, bits: Vec<R>) -> Result<Vec<R>, Error> {
-        let parts = self.parts(t)?;
-        Ok(bits
-            .into_iter()
-            .zip(parts)
-            .map(|(r, p)| {
-                if p != Part::F {
-                    return r;
+    pub(super) fn atomic_unbits(&mut self, t: Ty, bits: Vec<R>) -> Result<Vec<R>, Error> {
+        let mut bits = bits.into_iter();
+        let mut out = Vec::new();
+        for p in self.parts(t)? {
+            let r = bits.next().ok_or_else(|| Error::Select(String::from("原子操作的位型少了字")))?;
+            out.push(match p {
+                Part::F => {
+                    let f = self.fr();
+                    self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[f], &[r]);
+                    f
                 }
-                let f = self.fr();
-                self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[f], &[r]);
-                f
-            })
-            .collect())
+                Part::D => {
+                    let hi = bits.next().ok_or_else(|| Error::Select(String::from("double 的位型少了高字")))?;
+                    self.d_join(r, hi)
+                }
+                _ => r,
+            });
+        }
+        Ok(out)
     }
 
     /// 没有 A 扩展：`atomicrmw` 走 `__atomic_*` 库函数；库里没有的（大小、浮点）同 LLVM 的 AtomicExpand 展开成 CAS 循环。
     pub(super) fn atomic_rmw(&mut self, op: RmwOp, p: ValId, v: ValId, order: u8) -> Result<Vec<R>, Error> {
         let t = self.ty(v);
+        if self.amo_fits(t)
+            && let Some(r) = self.amo_rmw(op, p, v, order)?
+        {
+            return Ok(r);
+        }
         let n = self.types().size(t);
         let name = match op {
             RmwOp::Xchg => "exchange",
@@ -318,7 +351,7 @@ impl Isel<'_> {
         };
         let ptr = self.get1(p)?;
         let val = self.get(v)?;
-        let val = self.atomic_bits(&val);
+        let val = self.atomic_bits(t, &val)?;
         let ints = vec![Part::X; val.len()];
         let order = self.li(i32::from(order));
         let r = self.libcall(&format!("__atomic_{name}_{n}"), &[(vec![ptr], vec![Part::X]), (val, ints.clone()), (vec![order], vec![Part::X])], &ints)?;
@@ -332,10 +365,10 @@ impl Isel<'_> {
 
     /// `__atomic_compare_exchange_N(ptr, &槽, 新值, 成功序, 失败序)`：槽里放着期望值，失败时库函数把读到的写回槽。
     /// 回成功 0 / 1。
-    fn cas(&mut self, ptr: R, obj: u32, new: &[R], n: u64, order: (u8, u8)) -> Result<R, Error> {
+    fn cas(&mut self, t: Ty, ptr: R, obj: u32, new: &[R], n: u64, order: (u8, u8)) -> Result<R, Error> {
         let slot = self.xr();
         self.emit(MOp::Addr(Base::Frame(obj), 0), &[slot], &[]);
-        let new = self.atomic_bits(new);
+        let new = self.atomic_bits(t, new)?;
         let (s, f) = (self.li(i32::from(order.0)), self.li(i32::from(order.1)));
         let args = [(vec![ptr], vec![Part::X]), (vec![slot], vec![Part::X]), (new.clone(), vec![Part::X; new.len()]), (vec![s], vec![Part::X]), (vec![f], vec![Part::X])];
         let ok = self.libcall(&format!("__atomic_compare_exchange_{n}"), &args, &[Part::X])?;
@@ -346,11 +379,14 @@ impl Isel<'_> {
     /// `cmpxchg p, c, v` ⇒（读到的值的部件…, 成功 0 / 1）。`order`：（成功序, 失败序），C 内存序编码。
     pub(super) fn cmpxchg(&mut self, p: ValId, c: ValId, v: ValId, order: (u8, u8)) -> Result<Vec<R>, Error> {
         let t = self.ty(c);
+        if self.amo_fits(t) {
+            return self.amo_cmpxchg(p, c, v, order);
+        }
         let n = self.types().size(t);
         let (ptr, cmp, new) = (self.get1(p)?, self.get(c)?, self.get(v)?);
         let obj = self.atomic_slot(n);
         self.store_leaf(t, &cmp, Base::Frame(obj), 0, n)?;
-        let ok = self.cas(ptr, obj, &new, n, order)?;
+        let ok = self.cas(t, ptr, obj, &new, n, order)?;
         let ok = self.rr(IOp::Sltu, R::ZERO, ok);
         let mut out = self.load_leaf(t, Base::Frame(obj), 0, n)?;
         out.push(ok);
@@ -409,9 +445,15 @@ impl Isel<'_> {
             }
             _ => return Self::bad(format!("atomicrmw {op:?} 还没做")),
         };
-        self.store_leaf(t, &old, Base::Frame(obj), 0, n)?;
-        let ok = self.cas(ptr, obj, &new, n, (order, order))?;
-        let cur = self.load_leaf(t, Base::Frame(obj), 0, n)?;
+        let (ok, cur) = if self.amo_fits(t) {
+            let (o, nw) = (self.atomic_bits(t, &old)?[0], self.atomic_bits(t, &new)?[0]);
+            let (got, ok) = self.amo_cas(t, ptr, o, nw, order);
+            (ok, self.atomic_unbits(t, vec![got])?)
+        } else {
+            self.store_leaf(t, &old, Base::Frame(obj), 0, n)?;
+            let ok = self.cas(t, ptr, obj, &new, n, (order, order))?;
+            (ok, self.load_leaf(t, Base::Frame(obj), 0, n)?)
+        };
         // 出边带实参 ⇒ 各切一个中转块（⛔ 关键边）
         let (to_done, to_loop) = (self.new_block(), self.new_block());
         self.branch(IOp::Bne, ok, R::ZERO, to_done, to_loop);

@@ -178,3 +178,26 @@ fn c_fixtures() {
 fn c_fixtures_relax() {
     corpus("tests/fixtures/mc-c", "tools/fixtures.py", true, &Target::default().with(&builtin::C));
 }
+
+/// A：`tests/fixtures/mc-a`（LLVM 的 Zaamo / Zalrsc / A 别名 fixture 开 +a 过 llvm-mc；目标 = 缺省 + A）。
+#[test]
+fn a_fixtures() {
+    corpus("tests/fixtures/mc-a", "tools/fixtures.py", false, &Target::default().with(&builtin::A));
+}
+
+/// D：`tests/fixtures/mc-d`（LLVM 的 D fixture 开 +d 过 llvm-mc；目标 = 缺省 + D）。
+#[test]
+fn d_fixtures() {
+    corpus("tests/fixtures/mc-d", "tools/fixtures.py", false, &Target::default().with(&builtin::D));
+}
+
+/// C + D：`tests/fixtures/mc-dc`（Zcd：c.fld / c.fsd …，汇编器的自动压缩）。
+#[test]
+fn dc_fixtures() {
+    corpus("tests/fixtures/mc-dc", "tools/fixtures.py", false, &Target::default().with(&builtin::C).with(&builtin::D));
+}
+
+#[test]
+fn dc_fixtures_relax() {
+    corpus("tests/fixtures/mc-dc", "tools/fixtures.py", true, &Target::default().with(&builtin::C).with(&builtin::D));
+}

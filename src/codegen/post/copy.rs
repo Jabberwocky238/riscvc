@@ -21,7 +21,7 @@
 //! ⛔ 正确性全压在 [`shape`] 上：认不出的指令一律当屏障（读写全部），宁可不优化。
 use super::{PFunc, PInst, Term};
 use super::super::abi::Abi;
-use crate::feature::{FForm, Float};
+use crate::feature::{Double, FForm, Float};
 use crate::isa::{Base, F, Inst, Opcode, Rv32i as IOp, X};
 use smallvec::SmallVec;
 
@@ -97,18 +97,26 @@ fn shape(x: &Inst, clob: Set) -> Option<Shape> {
             Base::Fixed => None,
         },
         Opcode::M(_) | Opcode::Zmmul(_) => plain(d(rd), true, &[(Slot::Rs1, xr(rs1)), (Slot::Rs2, xr(rs2))]),
-        Opcode::F(o) => match o.form() {
+        Opcode::F(o) => fshape(o.form(), rd, rs1, rs2, rs3),
+        Opcode::D(o) => fshape(o.form(), rd, rs1, rs2, rs3),
+        // CSR：读写状态；原子指令：读写内存、保留集 ⇒ ⛔ 当屏障
+        Opcode::Zicsr(_) | Opcode::A(_) => None,
+    }
+}
+
+/// 浮点指令（F / D 同格式）读写哪些寄存器。
+fn fshape(form: FForm, rd: u8, rs1: u8, rs2: u8, rs3: u8) -> Option<Shape> {
+    let d = |r: u8| (r != 0).then_some(xr(r));
+    let plain = |def, renamable, uses: &[(Slot, Reg)]| Some(Shape { def, renamable, uses: SmallVec::from_slice(uses), clobbers: 0 });
+    match form {
             FForm::FLoad => plain(Some(fr(rd)), true, &[(Slot::Rs1, xr(rs1))]),
             FForm::FStore => plain(None, false, &[(Slot::Rs1, xr(rs1)), (Slot::Rs2, fr(rs2))]),
             FForm::FR | FForm::FRrm => plain(Some(fr(rd)), true, &[(Slot::Rs1, fr(rs1)), (Slot::Rs2, fr(rs2))]),
-            FForm::FR1rm => plain(Some(fr(rd)), true, &[(Slot::Rs1, fr(rs1))]),
+            FForm::FR1rm | FForm::FR1Exact => plain(Some(fr(rd)), true, &[(Slot::Rs1, fr(rs1))]),
             FForm::FCmp => plain(d(rd), true, &[(Slot::Rs1, fr(rs1)), (Slot::Rs2, fr(rs2))]),
             FForm::FToX | FForm::FCvtXF => plain(d(rd), true, &[(Slot::Rs1, fr(rs1))]),
-            FForm::XToF | FForm::FCvtFX => plain(Some(fr(rd)), true, &[(Slot::Rs1, xr(rs1))]),
+            FForm::XToF | FForm::FCvtFX | FForm::FCvtFXExact => plain(Some(fr(rd)), true, &[(Slot::Rs1, xr(rs1))]),
             FForm::R4 => plain(Some(fr(rd)), true, &[(Slot::Rs1, fr(rs1)), (Slot::Rs2, fr(rs2)), (Slot::Rs3, fr(rs3))]),
-        },
-        // CSR：读写状态
-        Opcode::Zicsr(_) => None,
     }
 }
 
@@ -130,7 +138,7 @@ fn copy_of(i: &PInst) -> Option<(Reg, Reg)> {
     let PInst::I(x) = i else { return None };
     match x.op {
         Opcode::I(IOp::Addi) if x.imm == 0 && x.rd != 0 && x.rs1 != 0 => Some((xr(x.rd), xr(x.rs1))),
-        Opcode::F(Float::FsgnjS) if x.rs1 == x.rs2 => Some((fr(x.rd), fr(x.rs1))),
+        Opcode::F(Float::FsgnjS) | Opcode::D(Double::FsgnjD) if x.rs1 == x.rs2 => Some((fr(x.rd), fr(x.rs1))),
         _ => None,
     }
 }

@@ -63,12 +63,14 @@ impl Memory {
 #[derive(Clone, Default)]
 pub struct Cpu {
     pub x: [u32; 32],
-    /// 浮点寄存器的位型。
-    pub f: [u32; 32],
+    /// 浮点寄存器的位型（FLEN = 64：单精度的值 NaN-box 在低 32 位，高 32 位全 1）。
+    pub f: [u64; 32],
     pub pc: u32,
     pub mem: Memory,
     pub csr: HashMap<u16, u32>,
     pub steps: u64,
+    /// `lr.w` 留下的保留地址（`sc.w` 消耗它）。
+    pub reservation: Option<u32>,
     /// ⭐ 目标：执行时认哪些内置扩展（缺省 `rv32imf_zicsr_zmmul`）。外部扩展包另由 [`Self::step_on`] 给。
     pub target: crate::feature::Target<'static>,
 }

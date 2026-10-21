@@ -91,12 +91,12 @@ impl Module {
             }
             let mut sel = isel::Isel::select(self, f, opts.modules, &opts.target)?;
             sel.optimize();
-            let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs);
+            let mf = mir::MFunc::new(sel.blocks.clone(), sel.vregs, sel.double);
             if !mf.well_formed() {
                 return Err(Error::Select(format!("{}：机器块没有以终结指令收尾", f.name)));
             }
             let ra = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
-            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp, &opts.registers), &ra).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
+            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp, sel.double, &opts.registers), &ra).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
             let mut multi: Vec<(&'static str, usize, usize)> = Vec::new();
             if obs.wants_shape() {
                 // 一个 vreg 在第 `i` 条之后还活着：之后还有指令读它，或它被跳转当实参传出去。

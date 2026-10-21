@@ -3,7 +3,7 @@
 use super::{Error, Isel, R};
 use crate::codegen::mir::{Base, MOp};
 use crate::ir::{Const, Index, Kind, Ty, ValId};
-use crate::feature::{Zmmul, Float};
+use crate::feature::{Double, Float, Zmmul};
 use crate::isa::{Base as IForm, Opcode, Rv32i as IOp};
 
 /// 一个标量叶子：类型与它在聚合里的字节偏移。
@@ -173,6 +173,9 @@ impl Isel<'_> {
                 self.emit(MOp::Reg(Float::FmvWX.into(), 7), &[d], &[words[0]]);
                 return Ok(vec![d]);
             }
+            if matches!(self.kind(t), Kind::Double) && self.double() {
+                return Ok(vec![self.d_join(words[0], words[1])]);
+            }
             return Ok(words);
         }
         let one = |s: &mut Self, op: Opcode, float: bool, at: i64| {
@@ -199,6 +202,7 @@ impl Isel<'_> {
                     acc
                 })
                 .collect(),
+            Kind::Double if self.double() => vec![one(self, Double::Fld.into(), true, off)],
             Kind::Double => vec![one(self, IOp::Lw.into(), false, off), one(self, IOp::Lw.into(), false, off + 4)],
             Kind::Fp128 => (0..4).map(|k| one(self, IOp::Lw.into(), false, off + 4 * k)).collect(),
             Kind::Ptr => vec![one(self, IOp::Lw.into(), false, off)],
@@ -253,6 +257,9 @@ impl Isel<'_> {
                 let x = self.xr();
                 self.emit(MOp::Reg(Float::FmvXW.into(), 7), &[x], &[parts[0]]);
                 vec![x]
+            } else if matches!(self.kind(t), Kind::Double) && self.double() {
+                let (lo, hi) = self.d_split(parts[0]);
+                vec![lo, hi]
             } else {
                 parts.to_vec()
             };
@@ -281,6 +288,7 @@ impl Isel<'_> {
                     }
                 }
             }
+            Kind::Double if self.double() => one(self, Double::Fsd.into(), parts[0], off),
             Kind::Double | Kind::Fp128 => {
                 for (k, &r) in parts.iter().enumerate() {
                     one(self, IOp::Sw.into(), r, off + 4 * k as i64);

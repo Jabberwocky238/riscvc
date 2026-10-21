@@ -174,6 +174,10 @@ impl Exec<'_, '_> {
 
 /// 规范 NaN（同硬件）。
 const NAN: u32 = 0x7fc0_0000;
+/// 双精度的规范 NaN。
+const DNAN: u64 = 0x7ff8_0000_0000_0000;
+/// NaN-box：单精度的值放进 64 位寄存器时高 32 位全 1。
+const BOX: u64 = 0xffff_ffff_0000_0000;
 
 impl<'c, 'd> Exec<'c, 'd> {
     #[must_use]
@@ -194,10 +198,11 @@ impl<'c, 'd> Exec<'c, 'd> {
         }
     }
 
-    /// 浮点寄存器的位型。
+    /// 浮点寄存器当单精度读的位型：⚠ 没有 NaN-box（高 32 位不全是 1，比如放着一个 double）⇒ 规范 NaN（同规范）。
     #[must_use]
     pub fn f(&self, r: u8) -> u32 {
-        self.cpu.f[usize::from(r)]
+        let v = self.cpu.f[usize::from(r)];
+        if v & BOX == BOX { v as u32 } else { NAN }
     }
 
     #[must_use]
@@ -205,9 +210,30 @@ impl<'c, 'd> Exec<'c, 'd> {
         f32::from_bits(self.f(r))
     }
 
-    /// 写浮点寄存器的位型（原样）。
+    /// 写单精度的位型（原样，NaN-box 进 64 位）。
     pub fn fset_bits(&mut self, r: u8, v: u32) {
+        self.cpu.f[usize::from(r)] = BOX | u64::from(v);
+    }
+
+    /// 浮点寄存器的 64 位位型（双精度）。
+    #[must_use]
+    pub fn d(&self, r: u8) -> u64 {
+        self.cpu.f[usize::from(r)]
+    }
+
+    #[must_use]
+    pub fn dv(&self, r: u8) -> f64 {
+        f64::from_bits(self.d(r))
+    }
+
+    /// 写 64 位位型（原样）。
+    pub fn dset_bits(&mut self, r: u8, v: u64) {
         self.cpu.f[usize::from(r)] = v;
+    }
+
+    /// 写双精度结果（NaN 规范成 `0x7ff8…`，同硬件）。
+    pub fn dset(&mut self, r: u8, v: f64) {
+        self.dset_bits(r, if v.is_nan() { DNAN } else { v.to_bits() });
     }
 
     /// 写浮点结果（NaN 规范成 `0x7fc00000`，同硬件）。
