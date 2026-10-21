@@ -2,6 +2,7 @@
 //!
 //! ⛔ 不手搓 CFG：手搓的那几个形状恰好是最容易想对的，真实语料里的不可达块、自环、
 //! 多重边才是出错的地方。
+mod par;
 use riscvc::opt::{Dom, Preds};
 use riscvc::plugin::Registry;
 use std::fs;
@@ -30,11 +31,11 @@ fn invariants_on_lit_corpus() {
         return;
     }
     files.sort();
-    let reg = Registry::default();
-    let (mut funcs, mut blocks, mut bad) = (0usize, 0usize, Vec::new());
-    for f in &files {
-        let Ok(text) = fs::read_to_string(f) else { continue };
-        let Ok(m) = reg.parse(&text) else { continue };
+    // 每份语料各算各的（并行，见 tests/par）：（函数数, 块数, 违例）
+    let per = par::map(&files, |_, f| {
+        let (mut funcs, mut blocks, mut bad) = (0usize, 0usize, Vec::new());
+        let Ok(text) = fs::read_to_string(f) else { return (funcs, blocks, bad) };
+        let Ok(m) = Registry::default().parse(&text) else { return (funcs, blocks, bad) };
         for func in &m.functions {
             if func.blocks.is_empty() {
                 continue;
@@ -93,7 +94,10 @@ fn invariants_on_lit_corpus() {
                 }
             }
         }
-    }
+        (funcs, blocks, bad)
+    });
+    let (funcs, blocks) = per.iter().fold((0, 0), |(f, b), p| (f + p.0, b + p.1));
+    let bad: Vec<String> = per.into_iter().flat_map(|p| p.2).take(20).collect();
     eprintln!("{} 份、{funcs} 个函数、{blocks} 个块", files.len());
     assert!(bad.is_empty(), "支配不变式违例 {} 处：\n{}", bad.len(), bad.join("\n"));
 }

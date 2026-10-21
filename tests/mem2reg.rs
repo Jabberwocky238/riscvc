@@ -3,6 +3,7 @@
 //! ⭐ 这个 IR 没有 phi：提升一个槽位要同时「给块加参数」和「给**每个**前驱补实参」。
 //! 两件事但凡漏一半，个数就对不上——这条不变式比任何单点用例都值钱，所以拿入库的
 //! lit 语料整批压。⛔ 不手搓 CFG：真实语料里的不可达块、自环、多重边才是出错的地方。
+mod par;
 use riscvc::ir::Function;
 use riscvc::opt::{MEM2REG, Pass, SCCP};
 use riscvc::plugin::Registry;
@@ -46,18 +47,18 @@ fn block_params_and_jump_args_still_line_up() {
         return;
     }
     files.sort();
-    let reg = Registry::default();
-    let (mut funcs, mut before, mut bad) = (0usize, 0usize, Vec::new());
-    for path in &files {
-        let Ok(text) = fs::read_to_string(path) else { continue };
-        let Ok(mut m) = reg.parse(&text) else { continue };
+    // 每份语料各算各的（并行，见 tests/par）：（函数数, 语料本身对不上的处数, 跑完对不上的）
+    let per = par::map(&files, |_, path| {
+        let (mut funcs, mut before, mut bad) = (0usize, 0usize, Vec::new());
+        let Ok(text) = fs::read_to_string(path) else { return (funcs, before, bad) };
+        let Ok(mut m) = Registry::default().parse(&text) else { return (funcs, before, bad) };
         // 先验语料本身是对的，不然分不清是谁坏的。
         for func in &m.functions {
             before += mismatched(func).len();
         }
         // 任何 pass 跑完这条都得成立，所以把会动 CFG 的 sccp 也压进来。
         if MEM2REG.run(&mut m).is_err() || SCCP.run(&mut m).is_err() {
-            continue;
+            return (funcs, before, bad);
         }
         for func in &m.functions {
             if func.blocks.is_empty() {
@@ -66,7 +67,10 @@ fn block_params_and_jump_args_still_line_up() {
             funcs += 1;
             bad.extend(mismatched(func).into_iter().map(|e| format!("{}：{e}", path.display())));
         }
-    }
+        (funcs, before, bad)
+    });
+    let (funcs, before) = per.iter().fold((0, 0), |(f, b), p| (f + p.0, b + p.1));
+    let bad: Vec<String> = per.into_iter().flat_map(|p| p.2).collect();
     assert_eq!(before, 0, "语料本身就对不上，先查解析");
     println!("{} 份、{funcs} 个函数 …… 跑完 mem2reg 仍对得上", files.len());
     assert!(bad.is_empty(), "{} 处对不上：\n{}", bad.len(), bad.iter().take(20).cloned().collect::<Vec<_>>().join("\n"));

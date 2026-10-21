@@ -3,8 +3,8 @@
 #   <crate>.<档>.mlir   llvm 方言通用形式（riscvc 的输入）
 #   <crate>.<档>.o      llc 编出的目标文件（对照，⛔ 测试时不要 LLVM）
 #   crate：rvprobe（tests/rust/src/lib.rs，对拍入口全是 extern "C" 标量签名）、core、compiler_builtins；档：O0 / O2。
-# core / compiler_builtins 由 -Zbuild-std 编，源码是 rustup 的 rust-src（cargo 只认它）；正本是超级仓的子模块
-# jw238/rust（tag 1.98.1），先逐文件核对两份 library/ 相同，⛔ 不同就停。
+# core / compiler_builtins 由 -Zbuild-std 编，源码是 rustup 的 rust-src（cargo 只认它）；正本是相邻的 rust-lang/rust
+# 检出（缺省 ../rust，`RUST_SRC` 可改；要在 tag 1.98.1 上），先逐文件核对两份 library/ 相同，⛔ 不同就停。
 # 三个目标（panic = abort，⛔ C），一个一套 fixture：
 #   rust     riscv32imafc-unknown-none-elf 去掉 a、c（= riscvc 缺省的 rv32imf + zicsr，ilp32f）
 #   rust-a   同上但留着 a（core / rvprobe 的原子操作出 amo / LR-SC）
@@ -14,17 +14,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=$(realpath "${1:-../llvm-project/build/bin}")
-SRC=$(realpath ../rust)
+SRC=$(realpath "${RUST_SRC:-../rust}")
 OUTS=tests/fixtures
 WORK=$(realpath -m target/rust)
 TARGET=riscv32imafc-unknown-none-elf
 want=1.98.1
 have=$(rustc +stable --version | awk '{print $2}')
 [ "$have" = "$want" ] || { echo "要 rustc $want（LLVM 22.1.8），现在是 $have" >&2; exit 1; }
-[ -d "$SRC/library/core" ] || { echo "没有 $SRC/library（git submodule update --init jw238/rust）" >&2; exit 1; }
+[ -d "$SRC/library/core" ] || { echo "没有 $SRC/library（检出 rust-lang/rust 的 tag 1.98.1，或设 RUST_SRC）" >&2; exit 1; }
 RSRC=$(rustc +stable --print sysroot)/lib/rustlib/src/rust/library
 for c in core compiler-builtins; do
-  diff -rq --exclude=.gitignore "$RSRC/$c" "$SRC/library/$c" >/dev/null || { echo "rust-src 的 $c 与子模块 jw238/rust 不同" >&2; exit 1; }
+  diff -rq --exclude=.gitignore "$RSRC/$c" "$SRC/library/$c" >/dev/null || { echo "rust-src 的 $c 与 $SRC（要 tag 1.98.1）不同" >&2; exit 1; }
 done
 rm -rf "$WORK"
 mkdir -p "$WORK"

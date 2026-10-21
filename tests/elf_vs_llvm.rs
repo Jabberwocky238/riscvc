@@ -9,6 +9,7 @@
 //! 有的测试要 libm）落到共用的桩：一条 `ebreak` 停机。
 //! 没有对照用的 LLVM（llc、ld.lld）就 SKIP。
 mod llvm;
+mod par;
 use object::{Object, ObjectSymbol};
 use riscvc::feature::Target;
 use riscvc::sim::{Cpu, Stop};
@@ -24,8 +25,8 @@ const SCOPE: &[&str] = &["powitf2_test", "powixf2_test"];
 /// 一侧工具链：一组目标文件 ⇒ ELF ⇒ 从 main 跑。
 struct Side {
     objs: Vec<(String, Vec<u8>)>,
-    /// 模拟器按它认扩展指令。
-    target: Target<'static>,
+    /// 模拟器按它认扩展指令（march 串：`Target` 装着 `&dyn Module`，⛔ 跨线程共享，各线程现解析）。
+    march: String,
 }
 
 impl Side {
@@ -34,7 +35,7 @@ impl Side {
         let mut objs = self.objs.clone();
         objs.extend_from_slice(extra);
         let elf = elf(&objs);
-        let mut cpu = Cpu { target: self.target.clone(), ..Cpu::default() };
+        let mut cpu = Cpu { target: Target::parse(&self.march).unwrap(), ..Cpu::default() };
         cpu.load(&elf).unwrap();
         let file = object::File::parse(elf.as_slice()).unwrap();
         let main = file.symbols().find(|s| s.name() == Ok("main")).map(|s| u32::try_from(s.address()).unwrap())?;
@@ -94,17 +95,25 @@ fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)]) {
     let support: Vec<(String, Vec<u8>)> = ["support.o", "mulsi3.o"].iter().map(|n| (String::from(*n), std::fs::read(root.join("support").join(target.abi()).join(n)).unwrap())).collect();
     eprintln!("目标：{}（{}）", target.march(), target.abi());
     // builtins：O2，两边各编各的
-    let (mut ours, mut theirs) = (Side { objs: support.clone(), target: target.clone() }, Side { objs: support, target: target.clone() });
+    let (mut ours, mut theirs) = (Side { objs: support.clone(), march: target.march() }, Side { objs: support, march: target.march() });
     let mut builtins: Vec<_> = builtins.map(|e| e.unwrap().path()).filter(|p| p.to_str().unwrap().ends_with(".O2.mlir")).collect();
     builtins.sort();
-    for m in &builtins {
+    // 两边各编各的（并行，见 tests/par；llc 的输出按序号各写一份）
+    let march = target.march();
+    let objs = par::map(&builtins, |k, m| {
+        let target = &Target::parse(&march).unwrap();
         let stem = m.file_stem().unwrap().to_str().unwrap();
-        ours.objs.push((format!("{stem}.o"), riscvc_obj(m, target).unwrap_or_else(|e| panic!("{stem}: {e}"))));
-        theirs.objs.push((format!("{stem}.o"), llc_obj(&llvm, &root.join(format!("builtins/{stem}.ll")), &tmp.join("b.o"), target)));
+        let ours = riscvc_obj(m, target).unwrap_or_else(|e| panic!("{stem}: {e}"));
+        let theirs = llc_obj(&llvm, &root.join(format!("builtins/{stem}.ll")), &tmp.join(format!("b{k}.o")), target);
+        (format!("{stem}.o"), ours, theirs)
+    });
+    for (name, o, t) in objs {
+        ours.objs.push((name.clone(), o));
+        theirs.objs.push((name, t));
     }
-    let lld = |objs: &[(String, Vec<u8>)]| -> Vec<u8> {
-        let dir = tmp.join("lld");
-        std::fs::create_dir_all(&dir).unwrap();
+    // ld.lld 的工作目录按程序的序号各一个（并行的程序 ⛔ 共用）
+    let lld = |dir: &Path, objs: &[(String, Vec<u8>)]| -> Vec<u8> {
+        std::fs::create_dir_all(dir).unwrap();
         let mut args = vec![String::from("-T"), dir.join("link.ld").display().to_string(), String::from("--unresolved-symbols=ignore-all"), String::from("-o"), dir.join("a.elf").display().to_string()];
         std::fs::write(dir.join("link.ld"), SCRIPT).unwrap();
         for (n, b) in objs {
@@ -128,40 +137,50 @@ fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)]) {
         ps.sort();
         progs.extend(ps.into_iter().map(|p| (dir, selfcheck, p)));
     }
-    let (mut bad, mut broken, mut n) = (Vec::new(), Vec::new(), 0);
-    for (dir, selfcheck, m) in &progs {
+    /// 一个程序的结论。
+    enum Verdict {
+        /// 范围外 / 没有 main：不算数。
+        Skip(Option<String>),
+        /// 比了：（不一致的说明, 对照自己没过的说明）。
+        Ran(Option<String>, Option<String>),
+    }
+    // 每个程序：两边编、链、跑、比（并行）
+    let verdicts = par::map(&progs, |k, (dir, selfcheck, m)| {
+        let target = &Target::parse(&march).unwrap();
         let stem = m.file_stem().unwrap().to_str().unwrap();
         if SCOPE.iter().any(|p| stem.starts_with(&format!("{p}."))) {
-            eprintln!("SKIP（范围外：fp128）：{stem}");
-            continue;
+            return Verdict::Skip(Some(format!("SKIP（范围外：fp128）：{stem}")));
         }
-        let theirs_obj = (String::from("test.o"), llc_obj(&llvm, &root.join(format!("{dir}/{stem}.ll")), &tmp.join("t.o"), target));
+        let theirs_obj = (String::from("test.o"), llc_obj(&llvm, &root.join(format!("{dir}/{stem}.ll")), &tmp.join(format!("t{k}.o")), target));
         // 没有 main（源里被 `#if` 掉了）的跳过
         if !object::File::parse(theirs_obj.1.as_slice()).unwrap().symbols().any(|s| s.name() == Ok("main") && s.is_definition()) {
-            continue;
+            return Verdict::Skip(None);
         }
-        n += 1;
         // 对照自己没过（测试本身在这个目标上不成立）的，记下来照比
-        let got = match riscvc_obj(m, target) {
-            Ok(obj) => {
-                let all = ours.objs.iter().chain(&theirs.objs).map(|(_, b)| b.as_slice());
-                let stub = missing(all.chain([obj.as_slice(), theirs_obj.1.as_slice()]), target);
-                let expect = theirs.run(&[theirs_obj.clone(), stub.clone()], lld).expect("有 main");
-                if *selfcheck && expect != (Stop::Returned, String::from("0x0")) {
-                    broken.push(format!("{stem} {expect:?}"));
-                }
-                // 扩展的程序（programs-<扩展>）不调库函数：llc 那边都没正常返回（停在桩上）⇒ 两边一致也不算数
-                assert!(!dir.starts_with("programs-") || expect.0 == Stop::Returned, "{stem}：llc 那边没有返回（{expect:?}）");
-                (ours.run(&[(String::from("test.o"), obj), stub], ld).expect("llvm 那边有 main"), expect)
-            }
-            Err(e) => {
-                bad.push(format!("{stem}: {e}"));
-                continue;
-            }
+        let obj = match riscvc_obj(m, target) {
+            Ok(obj) => obj,
+            Err(e) => return Verdict::Ran(Some(format!("{stem}: {e}")), None),
         };
-        let (got, expect) = got;
-        if got != expect {
-            bad.push(format!("{stem}: riscvc {got:?} ≠ llvm {expect:?}"));
+        let all = ours.objs.iter().chain(&theirs.objs).map(|(_, b)| b.as_slice());
+        let stub = missing(all.chain([obj.as_slice(), theirs_obj.1.as_slice()]), target);
+        let dir_k = tmp.join(format!("lld{k}"));
+        let expect = theirs.run(&[theirs_obj.clone(), stub.clone()], |o| lld(&dir_k, o)).expect("有 main");
+        let broken = (*selfcheck && expect != (Stop::Returned, String::from("0x0"))).then(|| format!("{stem} {expect:?}"));
+        // 扩展的程序（programs-<扩展>）不调库函数：llc 那边都没正常返回（停在桩上）⇒ 两边一致也不算数
+        assert!(!dir.starts_with("programs-") || expect.0 == Stop::Returned, "{stem}：llc 那边没有返回（{expect:?}）");
+        let got = ours.run(&[(String::from("test.o"), obj), stub], ld).expect("llvm 那边有 main");
+        Verdict::Ran((got != expect).then(|| format!("{stem}: riscvc {got:?} ≠ llvm {expect:?}")), broken)
+    });
+    let (mut bad, mut broken, mut n) = (Vec::new(), Vec::new(), 0);
+    for v in verdicts {
+        match v {
+            Verdict::Skip(Some(why)) => eprintln!("{why}"),
+            Verdict::Skip(None) => {}
+            Verdict::Ran(b, k) => {
+                n += 1;
+                bad.extend(b);
+                broken.extend(k);
+            }
         }
     }
     std::fs::remove_dir_all(&tmp).ok();

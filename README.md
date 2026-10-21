@@ -132,8 +132,9 @@ tools/rust-build.sh path/to/Cargo.toml <entry function> app.elf [O0|O2]
   compiles that one crate with `llc` instead (for bisecting).
 - Not supported from Rust: inline assembly other than the empty `asm!("")` that `core::hint::black_box` uses,
   `global_asm!`, unwinding (`panic = "unwind"`), `std`.
-- The upstream sources are pinned as the super-repository submodule `jw238/rust` (tag `1.98.1`); the scripts check
-  that rustup's `rust-src` is identical to it.
+- The upstream sources are pinned as a sibling checkout `../rust` of rust-lang/rust at tag `1.98.1` (`RUST_SRC`
+  overrides the path); `tools/rust.sh` checks that rustup's `rust-src` is identical to it before regenerating fixtures.
+  The LLVM used for cross-checking is a sibling build tree `../llvm-project/build/bin` (`RISCVC_LLVM_BIN` overrides).
 
 ## Quick start (command line)
 

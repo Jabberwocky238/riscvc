@@ -10,6 +10,7 @@
 //! compiler_builtins 两边共用 llc 那份，查问题时用）。
 //! 对拍的是 rvprobe 的全部 `extern "C"` 入口（标量签名）；⛔ 预期失败：一律要和 llc 一致。
 mod llvm;
+mod par;
 use llvm::call::{Domain, Image, Lib, Pair, Sig};
 use riscvc::feature::{builtin, Target};
 use riscvc::ir::Module;
@@ -37,9 +38,13 @@ fn level(lv: &str, set: &str, target: &Target<'static>) {
     };
     let read = |p: &Path| std::fs::read(p).unwrap_or_else(|e| panic!("{}：{e}", p.display()));
     let builtins_theirs = read(&file("compiler_builtins", "o"));
-    let builtins_ours = if BUILTINS_OURS { ours(&file("compiler_builtins", "mlir"), target).unwrap().1 } else { builtins_theirs.clone() };
-    let (m, probe) = ours(&file("rvprobe", "mlir"), target).unwrap();
-    let (_, core) = ours(&file("core", "mlir"), target).unwrap();
+    // riscvc 编三个 crate（并行，见 tests/par；`Target` 装着 `&dyn Module`，⛔ 跨线程共享，各线程按 march 现解析）
+    let crates: Vec<&str> = if BUILTINS_OURS { vec!["rvprobe", "core", "compiler_builtins"] } else { vec!["rvprobe", "core"] };
+    let march = target.march();
+    let mut built = par::map(&crates, |_, c| ours(&file(c, "mlir"), &Target::parse(&march).unwrap()).unwrap()).into_iter();
+    let (m, probe) = built.next().unwrap();
+    let (_, core) = built.next().unwrap();
+    let builtins_ours = built.next().map_or_else(|| builtins_theirs.clone(), |b| b.1);
     let lib_ours = Lib::of(vec![(String::from("core.o"), core), (String::from("compiler_builtins.o"), builtins_ours)], true);
     let lib_theirs = Lib::of(vec![(String::from("core.o"), read(&file("core", "o"))), (String::from("compiler_builtins.o"), builtins_theirs)], true);
     let (a, b) = (Image::link_on(&lib_ours, "rvprobe.o", &probe, target).unwrap(), Image::link_on(&lib_theirs, "rvprobe.o", &theirs_probe, target).unwrap());
