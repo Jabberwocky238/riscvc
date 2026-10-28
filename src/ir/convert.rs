@@ -510,7 +510,7 @@ impl Module {
                     let args = params.iter().map(|a| self.ty(a)).collect::<Result<Vec<_>, _>>()?;
                     self.types.get(Kind::Func(r, args, vararg))
                 }
-                LlvmType::Token | LlvmType::Label | LlvmType::Metadata => return Err(bad()),
+                LlvmType::Token | LlvmType::Label | LlvmType::Metadata | LlvmType::X86Amx | LlvmType::PpcFp128 => return Err(bad()),
             },
             _ => return Err(bad()),
         })
