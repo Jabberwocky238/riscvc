@@ -178,6 +178,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -191,9 +197,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mlirformat"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8e07ef17cb2372db2bc9a819cc97af7538e2b1b90e95a90165496f81c3e9248"
+checksum = "5a3eea1fd4795e452ea111af8a830a36d216ba613738e07a5b0da7856300f51c"
 dependencies = [
  "mlirformat-macros",
  "serde",
@@ -202,9 +208,9 @@ dependencies = [
 
 [[package]]
 name = "mlirformat-macros"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e2cf4b3ca09b8f124c843960e31ea42bc7c155c4d9b03a12f2bcac9f5a162ac"
+checksum = "68ce21d084835015c80bfc51f9f6037c132e1578913e24c9f1fbba34ad6ec023"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -213,10 +219,11 @@ dependencies = [
 
 [[package]]
 name = "mlirpass"
-version = "0.1.0"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a424e251d7342a84940ea55568c6798442824ae3a9ade237b4b1f2e0e05eee21"
+checksum = "26e5f6ebfb2b6700cc0b17a4b383d0d785c97c22627a3a0ff0cc9d55bc74b762"
 dependencies = [
+ "libm",
  "mlirformat",
  "mlirpass-macros",
  "serde",
@@ -225,9 +232,9 @@ dependencies = [
 
 [[package]]
 name = "mlirpass-macros"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba9b35c6c79a7d300f97a2216746fe45e8c3a028fa72e936daa64667a7be9463"
+checksum = "2e585a0894ea4e979d710850e61d5ce2c0b5b47615b004f6bf924f1095839c00"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -286,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "riscvc"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "clap",
  "mlirformat",

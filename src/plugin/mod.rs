@@ -146,10 +146,10 @@ impl<'p> Registry<'p> {
 
     /// ⭐ `m` 交给 mlirpass：要下降就先跑 [`Registry::lowering`]，再跑 [`Registry::optimizing`]（有的话）；
     /// 嵌套在 `llvm.func(…)` 里的按函数在线程池上并行。
-    pub fn mlirpass<'a>(&self, opt: &'a MlirOpt, m: &mlirformat::Module<'a>, lower: bool) -> Result<mlirformat::Module<'a>, Error> {
+    pub fn mlirpass<'a>(&self, ctx: mlirpass::Ctx<'a>, m: &mlirformat::Module<'a>, lower: bool) -> Result<mlirformat::Module<'a>, Error> {
         let fail = |e: mlirpass::mlirformat::Error| Error::Parse(format!("mlirpass：{e}"));
         let passes = mlirpass::Passes::upstream();
-        let mut body = mlirpass::Body::import(opt, m).map_err(fail)?;
+        let mut body = mlirpass::Body::import(ctx, m).map_err(fail)?;
         let root = body.root;
         for p in lower.then_some(self.lowering).into_iter().chain(self.optimizing) {
             mlirpass::PassManager::parse(&passes, p).map_err(fail)?.run_on(&mut body, root, &mlirpass::ThreadPool::default()).map_err(fail)?;

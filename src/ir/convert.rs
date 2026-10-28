@@ -24,10 +24,11 @@ impl Module {
     /// MLIR 文本 ⇒ 内部 IR，op 交给 `reg` 里注册的方言。
     pub(crate) fn parse_with(text: &str, reg: &Registry<'_>) -> Result<Self, Error> {
         let opt = reg.opt();
+        let interfaces = mlirpass::Interfaces::upstream();
         let mut parsed = opt.parse(text).map_err(|e| Error::Parse(e.to_string()))?;
         let lower = parsed.items.iter().any(|i| matches!(i, Item::Op(op) if reg.needs_lowering(op)));
         if lower || reg.optimizes() {
-            parsed = reg.mlirpass(&opt, &parsed, lower)?;
+            parsed = reg.mlirpass(mlirpass::Ctx::new(&opt, &interfaces), &parsed, lower)?;
         }
         let mut m = Self::default();
         for item in &parsed.items {
