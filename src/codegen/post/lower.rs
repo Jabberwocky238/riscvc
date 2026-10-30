@@ -3,7 +3,7 @@
 use super::frame::Frame;
 use super::{PBlock, PFunc, PInst, Selected, Term};
 use crate::codegen::mir::{Base, Loop, MFunc, MInst, MOp, R};
-use crate::feature::{Atomic, Double, Float};
+use crate::feature::{Atomic, Double, Float, Zicsr};
 use crate::ir::RmwOp;
 use crate::isa::{Inst, Opcode, Rv32i as IOp, X};
 use crate::regalloc::{Allocation, Block, Edit, InstOrEdit, Output, PReg, RegClass};
@@ -346,7 +346,23 @@ impl<'a> Lower<'a> {
             MOp::SpSave => self.mov(d[0], X::SP.0, false),
             MOp::SpRestore => self.mov(X::SP.0, u[0], false),
             MOp::LrSc(l, lr, sc) => self.lrsc(*l, *lr, *sc, &d, &u),
+            MOp::Counter(csr) => self.counter(*csr, &d),
         }
+    }
+
+    /// 64 位计数器（[`MOp::Counter`]）：`head: csrr hi, h; csrr lo, l; csrr t, h; bne hi, t, head`（高半进位时重读）。
+    fn counter(&mut self, csr: u16, d: &[u8]) {
+        let head = self.fresh();
+        self.blocks[self.cur].term = Term::Jump(head);
+        self.layout.push(head);
+        self.cur = head;
+        for (r, c) in [(d[1], csr + 0x80), (d[0], csr), (d[2], csr + 0x80)] {
+            self.real(Inst { csr: c, ..Inst::new(Zicsr::Csrrs).x(r, 0, 0) });
+        }
+        let rest = self.fresh();
+        self.blocks[head].term = Term::Branch { op: IOp::Bne, a: d[1], b: d[2], t: head, f: rest, long: false };
+        self.layout.push(rest);
+        self.cur = rest;
     }
 
     /// ⭐ LR/SC 循环（[`MOp::LrSc`]）展开：`head` 里 `lr`、算新字、`sc`，`sc` 失败回 `head`；之后接着本块剩下的指令。

@@ -407,6 +407,8 @@ fn intrinsic(name: &str, op: &Operation<'_>) -> Option<Intr> {
         "vastart" => Intr::VaStart,
         "vaend" => Intr::VaEnd,
         "vacopy" => Intr::VaCopy,
+        "readcyclecounter" => Intr::CycleCounter,
+        "readsteadycounter" => Intr::SteadyCounter,
         "expect" | "expect.with.probability" => Intr::Expect,
         "floor" | "ceil" | "trunc" | "round" | "rint" | "nearbyint" | "pow" | "exp" | "exp2" | "log" | "log2" | "log10" | "sin" | "cos" | "tan" | "roundeven" => {
             libm(name)

@@ -106,6 +106,9 @@ pub enum Intr {
     VaStart,
     VaEnd,
     VaCopy,
+    /// `readcyclecounter` / `readsteadycounter`：64 位计数（`cycle` / `time` 两半 CSR）。
+    CycleCounter,
+    SteadyCounter,
     /// 不出代码：lifetime / assume / expect（expect 回第一个实参）…
     Nop,
     Expect,

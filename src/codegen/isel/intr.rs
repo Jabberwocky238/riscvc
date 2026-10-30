@@ -748,6 +748,11 @@ impl Isel<'_> {
                 self.emit(if *i == Intr::Trap { MOp::Trap } else { MOp::Break }, &[], &[]);
                 Vec::new()
             }
+            Intr::CycleCounter | Intr::SteadyCounter => {
+                let (lo, hi, t) = (self.xr(), self.xr(), self.xr());
+                self.emit(MOp::Counter(if *i == Intr::CycleCounter { 0xc00 } else { 0xc01 }), &[lo, hi, t], &[]);
+                vec![lo, hi]
+            }
             Intr::StackSave => {
                 self.dynamic_sp = true;
                 let d = self.xr();

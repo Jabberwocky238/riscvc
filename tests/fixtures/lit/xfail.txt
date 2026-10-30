@@ -145,7 +145,6 @@ codegen/option-pic 解析：`llvm.inline_asm`：get_symbol：不支持的 op `ll
 codegen/option-relax 解析：`llvm.inline_asm`：bar：不支持的 op `llvm.inline_asm`
 codegen/option-rvc 解析：`llvm.inline_asm`：add：不支持的 op `llvm.inline_asm`
 codegen/or-is-add/test7 结果：【poison：or disjoint 的两边有重叠位】test7(0x3)：riscvc Returned 0x3  ≠  llc Returned 0x4
-codegen/pei-crash 解析：`llvm.call_intrinsic`：a：不支持的 op `llvm.call_intrinsic`
 codegen/poison-legalization/PromoteHalf 结果：【poison：store poison】PromoteHalf(ptr0)：指针实参指向的内存不同
 codegen/poison-legalization/SoftenFloat 结果：【poison：store poison】SoftenFloat(ptr0)：指针实参指向的内存不同
 codegen/pr145360/signed 域外：【poison：exact 除法除不尽】signed(0xffffffff, ptr1)：riscvc Returned 0x0  ≠  llc Returned 0xffffffff
@@ -156,8 +155,6 @@ codegen/pr64645/v2f64 编译：指令选择：v2f64：整数运算不支持 Vect
 codegen/pr92193 解析：`llvm.insertelement`：foo：不支持的 op `llvm.insertelement`
 codegen/pr94265/PR94265 编译：指令选择：PR94265：整数运算不支持 Vector(8, Ty(4))（Bin(SDiv, ValId(0), ValId(1))）
 codegen/push-pop-popret 解析：`llvm.func`：foo_with_irq：函数属性 `interrupt` 不支持
-codegen/readcyclecounter 解析：`llvm.call_intrinsic`：test_builtin_readcyclecounter：不支持的 op `llvm.call_intrinsic`
-codegen/readsteadycounter 解析：`llvm.call_intrinsic`：test_builtin_readsteadycounter：不支持的 op `llvm.call_intrinsic`
 codegen/reduction-formation 解析：`llvm.extractelement`：reduce_sum_4xi32：不支持的 op `llvm.extractelement`
 codegen/relative-reloc 解析：MLIR：初值里的 Sub 不支持
 codegen/repeated-fp-divisors/two_fdivs 结果：【允许的差异：contract 融合乘加 / arcp 倒数近似，舍入不同】two_fdivs(-2240998814143733100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

@@ -100,6 +100,9 @@ pub enum MOp {
     /// （一次访存就可能弄丢保留，同 LLVM 的 RISCVExpandAtomicPseudo）。`lr` / `sc` 已带上序位。
     /// 定义全是早定义（[`Rule::Early`]）：循环里一直要读使用，⛔ 与它们共用寄存器。
     LrSc(Loop, Atomic, Atomic),
+    /// 读 64 位计数器（低半 CSR 号；高半 = 它 + 0x80）：分配之后展开成「`csrr` 高、低、高，两次高不等回头」
+    /// （同 llc 的 ReadCounterWide）。defs `[lo, hi, t]`。
+    Counter(u16),
 }
 
 /// [`MOp::LrSc`] 的循环体。`old` 是 `lr` 读到的整字，`t` 是要写回的整字。
@@ -251,6 +254,7 @@ impl MInst {
             MOp::SpSave => "SpSave",
             MOp::SpRestore => "SpRestore",
             MOp::LrSc(..) => "LrSc",
+            MOp::Counter(_) => "Counter",
         }
     }
 
