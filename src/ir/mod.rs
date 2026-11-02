@@ -16,6 +16,13 @@ pub enum Error {
     Op { op: String, why: String },
 }
 
+impl From<mlirpass::mlirformat::Error> for Error {
+    /// mlirpass（解析、pass 流水线）报的错。
+    fn from(e: mlirpass::mlirformat::Error) -> Self {
+        Self::Parse(format!("mlirpass：{e}"))
+    }
+}
+
 /// 函数内的块下标。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);

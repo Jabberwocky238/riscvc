@@ -30,6 +30,11 @@ impl Module {
         if lower || reg.optimizes() {
             parsed = reg.mlirpass(mlirpass::Ctx::new(&opt, &interfaces), &parsed, lower)?;
         }
+        Self::convert(&parsed, reg)
+    }
+
+    /// 已经下降好的 mlirformat 模块（只剩 `llvm` / `builtin` / 插件方言）⇒ 内部 IR。
+    pub(crate) fn convert(parsed: &mlirformat::Module<'_>, reg: &Registry<'_>) -> Result<Self, Error> {
         let mut m = Self::default();
         for item in &parsed.items {
             let Item::Op(op) = item else { continue };
@@ -112,6 +117,22 @@ impl<'a> Lowering<'_, 'a> {
     /// 出一条指令。
     pub fn emit(&mut self, result: Option<ValId>, op: Op) {
         self.insts.push(Inst { result, op });
+    }
+
+    /// ⭐ 这条 op 原样落成一条 [`Op::Custom`]：名字、操作数、整数属性（properties 与属性字典）、至多一个结果；
+    /// 选指令交给认这个名字的扩展模块（[`crate::ext::Module::select`]）。扩展指令的插件方言多半就这一句。
+    pub fn custom(&mut self) -> Result<(), Error> {
+        let int = |n: &NamedAttr<'_>| Some((String::from(&*n.name), i64::try_from(n.value.as_ref()?.int().ok()?).ok()?));
+        let props = self.op.properties.iter().flat_map(|p| if let Attribute::Dict(v) = p { v.as_slice() } else { &[] });
+        let attrs = props.chain(&self.op.attributes).filter_map(int).collect();
+        let args = self.operands()?;
+        let result = match self.results()?[..] {
+            [] => None,
+            [r] => Some(r),
+            _ => return Err(Error::Op { op: self.op.name.to_string(), why: String::from("扩展指令至多一个结果") }),
+        };
+        self.emit(result, Op::Custom { name: self.op.name.to_string(), args, attrs });
+        Ok(())
     }
 
     /// 内置 `llvm` 方言：一条 op ⇒ 一条指令（几个 intrinsic 用已有指令展开成几条，见 [`Self::expand`]）。

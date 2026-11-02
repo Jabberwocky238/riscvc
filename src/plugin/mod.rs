@@ -6,6 +6,7 @@
 //!   .pass(&MyPass)                    pass：在内部 IR 上做变换
 //! reg.parse(text)?                    MLIR 文本 ⇒ ir::Module（函数体里的 op 按命名空间交给方言）；
 //!                                     有 llvm / builtin / 插件方言以外的 op ⇒ 先经 mlirpass 按 [`LOWERING`] 下降
+//! reg.import(&mut body)?              mlirpass 的 IR ⇒ ir::Module（⛔ 经文本）：上游自己的 pass 跑完，接着在同一个 body 上下降
 //!   .lowering("builtin.module(…)")    换掉那条下降流水线（mlir-opt 的 `--pass-pipeline` 写法）
 //! reg.run(&mut module, &["dce", …])?   按名字跑一串 pass
 //! ```
@@ -41,6 +42,24 @@ impl Dialect for Llvm {
 
     fn lower(&self, cx: &mut Lowering<'_, '_>) -> Result<(), Error> {
         cx.llvm()
+    }
+}
+
+/// ⭐ 内置扩展的官方插件方言：命名空间 = 扩展名（`xtheadsync`、`xtheadcmo`、`m` …），op = `<扩展名>.<助记符>`
+/// （`xtheadsync.th.sync.i`、`xtheadcmo.th.dcache.ipa %line`），⛔ 表里没有的助记符；下降成 [`Op::Custom`](crate::ir::Op::Custom)，
+/// 选指令走同一个模块（[`crate::ext::Module::select`]）。用法：`reg.dialect(&builtin::XTHEADSYNC)`，并把模块挂进目标。
+impl<T: crate::ext::Semantics> Dialect for crate::ext::Std<T> {
+    fn namespace(&self) -> &str {
+        crate::ext::Module::name(self)
+    }
+
+    fn lower(&self, cx: &mut Lowering<'_, '_>) -> Result<(), Error> {
+        let name = &*cx.op().name;
+        let known = name.strip_prefix(self.namespace()).and_then(|m| m.strip_prefix('.')).is_some_and(|m| m.parse::<T>().is_ok());
+        if !known {
+            return Err(Error::Op { op: String::from(name), why: format!("`{}` 扩展里没有这条指令", self.namespace()) });
+        }
+        cx.custom()
     }
 }
 
@@ -137,29 +156,48 @@ impl<'p> Registry<'p> {
         opt
     }
 
+    /// 这个名字的 op 要不要先经 mlirpass 下降：`llvm` / `builtin` / 注册的插件方言之外的。
+    fn foreign(&self, name: &str) -> bool {
+        let ns = name.split_once('.').map_or(name, |(ns, _)| ns);
+        ns != "builtin" && self.find_dialect(ns).is_none()
+    }
+
     /// 要不要先经 mlirpass 下降：有 `llvm` / `builtin` / 注册的插件方言之外的 op。
     #[must_use]
     pub fn needs_lowering(&self, op: &mlirformat::Operation<'_>) -> bool {
-        let ns = op.name.split_once('.').map_or(&*op.name, |(ns, _)| ns);
-        (ns != "builtin" && self.find_dialect(ns).is_none()) || op.regions.iter().flat_map(|r| &r.blocks).flat_map(|b| &b.ops).any(|o| self.needs_lowering(o))
+        self.foreign(&op.name) || op.regions.iter().flat_map(|r| &r.blocks).flat_map(|b| &b.ops).any(|o| self.needs_lowering(o))
     }
 
     /// ⭐ `m` 交给 mlirpass：要下降就先跑 [`Registry::lowering`]，再跑 [`Registry::optimizing`]（有的话）；
     /// 嵌套在 `llvm.func(…)` 里的按函数在线程池上并行。
     pub fn mlirpass<'a>(&self, ctx: mlirpass::Ctx<'a>, m: &mlirformat::Module<'a>, lower: bool) -> Result<mlirformat::Module<'a>, Error> {
-        let fail = |e: mlirpass::mlirformat::Error| Error::Parse(format!("mlirpass：{e}"));
+        let mut body = mlirpass::Body::import(ctx, m).map_err(Error::from)?;
+        self.passes_on(&mut body, lower)?;
+        Ok(mlirformat::Module::from(&body))
+    }
+
+    /// 在 `body` 上原地跑 [`Registry::lowering`]（`lower` 时）与 [`Registry::optimizing`]（有的话）。
+    fn passes_on(&self, body: &mut mlirpass::Body<'_>, lower: bool) -> Result<(), Error> {
         let passes = mlirpass::Passes::upstream();
-        let mut body = mlirpass::Body::import(ctx, m).map_err(fail)?;
         let root = body.root;
         for p in lower.then_some(self.lowering).into_iter().chain(self.optimizing) {
-            mlirpass::PassManager::parse(&passes, p).map_err(fail)?.run_on(&mut body, root, &mlirpass::ThreadPool::default()).map_err(fail)?;
+            mlirpass::PassManager::parse(&passes, p).and_then(|pm| pm.run_on(body, root, &mlirpass::ThreadPool::default())).map_err(Error::from)?;
         }
-        Ok(mlirformat::Module::from(&body))
+        Ok(())
     }
 
     /// ⭐ MLIR 文本 ⇒ 内部 IR。
     pub fn parse(&self, text: &str) -> Result<Module, Error> {
         Module::parse_with(text, self)
+    }
+
+    /// ⭐ mlirpass 的 IR ⇒ 内部 IR，⛔ 经文本：上游在 `body` 上跑完自己的 pass，这里接着原地跑
+    /// [`Registry::lowering`]（有 `llvm` / `builtin` / 插件方言之外的 op 时）与 [`Registry::optimizing`]，再转内部 IR。
+    /// 插件方言的 op 不用在 `body.ctx` 里注册语法：这里不解析文本。
+    pub fn import(&self, body: &mut mlirpass::Body<'_>) -> Result<Module, Error> {
+        let lower = body.ops_in(body.root).into_iter().any(|o| self.foreign(&body[o].name));
+        self.passes_on(body, lower)?;
+        Module::convert(&mlirformat::Module::from(&*body), self)
     }
 
     /// ⭐ 按名字依次跑 pass（同 `mlir-opt --pass-pipeline`）。

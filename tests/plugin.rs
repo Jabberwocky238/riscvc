@@ -397,3 +397,49 @@ fn the_host_can_reserve_registers() {
     }
     eprintln!("不独占时用到 {hit:?}，独占后都不见了");
 }
+
+/// `Registry::import`：mlirpass 的 IR 直接进来（⛔ 经文本），与同一份文本经 `parse` 编出的汇编逐字相同；
+/// 高层方言（`func` / `arith`）在 body 上原地下降。
+#[test]
+fn import_from_mlirpass_body_matches_parse() {
+    let src = r#"
+"func.func"() <{function_type = (i32, i32, i32) -> i32, sym_name = "mac"}> ({
+^bb0(%a: i32, %b: i32, %c: i32):
+  %s = "arith.addi"(%a, %b) : (i32, i32) -> i32
+  %r = "demo.mac"(%s, %b, %c) : (i32, i32, i32) -> i32
+  "func.return"(%r) : (i32) -> ()
+}) : () -> ()
+"#;
+    let mut reg = Registry::default();
+    reg.dialect(&Demo);
+    let parsed = reg.parse(src).unwrap();
+    let opt = reg.opt();
+    let interfaces = mlirpass::Interfaces::upstream();
+    let mut body = mlirpass::Body::parse(mlirpass::Ctx::new(&opt, &interfaces), src).unwrap();
+    let imported = reg.import(&mut body).unwrap();
+    assert_eq!(imported.compile().unwrap(), parsed.compile().unwrap());
+    assert_eq!(run(&imported, &[2, 3, 4]), (2 + 3) * 3 + 4);
+}
+
+/// 内置扩展的官方插件方言：`xtheadsync.th.sync.i` / `xtheadcmo.th.dcache.ipa` 落成那条指令；表里没有的助记符点名拒。
+#[test]
+fn builtin_extension_dialects() {
+    use riscvc::feature::builtin::{XTHEADCMO, XTHEADSYNC};
+    let src = r#"
+"llvm.func"() <{function_type = !llvm.func<void (i32)>, linkage = #llvm.linkage<external>, sym_name = "flush"}> ({
+^bb0(%line: i32):
+  "xtheadsync.th.sync.i"() : () -> ()
+  "xtheadcmo.th.dcache.ipa"(%line) : (i32) -> ()
+  "llvm.return"() : () -> ()
+}) : () -> ()
+"#;
+    let mut reg = Registry::default();
+    reg.dialect(&XTHEADSYNC).dialect(&XTHEADCMO);
+    let target = riscvc::feature::Target::default().with_all(&[&XTHEADCMO, &XTHEADSYNC]);
+    let opts = riscvc::codegen::Options { target, ..Default::default() };
+    let asm = reg.parse(src).unwrap().compile_with(&opts).unwrap();
+    assert!(asm.contains("th.sync.i"), "{asm}");
+    assert!(asm.contains("th.dcache.ipa\tx10"), "{asm}");
+    let bad = src.replace("th.sync.i", "th.sync.nope");
+    assert!(reg.parse(&bad).is_err());
+}

@@ -384,10 +384,18 @@ reg.dialect(&Demo);                     // .pass(&MyPass) for passes
 let mut m = reg.parse(text)?;           // ops inside function bodies go to the dialect owning their namespace
 reg.run(&mut m, &["dce"])?;             // passes are selected by name
 let asm = m.compile()?;
+
+// From mlirpass IR, no text in between: after your own PassManager pipeline on `body`,
+// `import` lowers higher-level dialects on the same body (LOWERING) and converts it.
+let m = reg.import(&mut body)?;         // body: mlirpass::Body
 ```
 
 - `Dialect::register` may register custom assembly formats with mlirformat (by default only the generic form is
   parsed); `Dialect::lower` emits internal-IR instructions (any number, temporaries allowed).
+- Every built-in extension is also an official dialect plugin: `reg.dialect(&builtin::XTHEADSYNC)` accepts
+  `xtheadsync.th.sync.i`, `xtheadcmo.th.dcache.ipa %line`, … (`<extension>.<mnemonic>`, operands and result in integer
+  registers), rejects mnemonics the table does not have, and selects them through the same module (attach it to the
+  target too). For your own extension, `Lowering::custom` lowers an op as it is (name, operands, integer attributes).
 - A dialect only handles ops inside function bodies; top-level ops (functions, globals) stay in the `llvm` dialect.
 - `Pass::run(&self, &mut Module)` transforms the internal IR; `Pass::summary` is shown by `--list-plugins`.
 - Full working example (compile, link and execute): [`tests/plugin.rs`](tests/plugin.rs).
