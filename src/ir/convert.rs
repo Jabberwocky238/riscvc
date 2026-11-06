@@ -21,14 +21,14 @@ impl TryFrom<&str> for Module {
 }
 
 impl Module {
-    /// MLIR 文本 ⇒ 内部 IR，op 交给 `reg` 里注册的方言。
-    pub(crate) fn parse_with(text: &str, reg: &Registry<'_>) -> Result<Self, Error> {
+    /// MLIR 文本 ⇒ 内部 IR，op 交给 `reg` 里注册的方言，解析与 pass 在 `x` 上并行。
+    pub(crate) fn parse_with<X: moremath::Executor + Sync>(text: &str, reg: &Registry<'_>, x: &X) -> Result<Self, Error> {
         let opt = reg.opt();
         let interfaces = mlirpass::Interfaces::upstream();
-        let mut parsed = opt.parse(text).map_err(|e| Error::Parse(e.to_string()))?;
+        let mut parsed = opt.parse_in(text, x).map_err(|e| Error::Parse(e.to_string()))?;
         let lower = parsed.items.iter().any(|i| matches!(i, Item::Op(op) if reg.needs_lowering(op)));
         if lower || reg.optimizes() {
-            parsed = reg.mlirpass(mlirpass::Ctx::new(&opt, &interfaces), &parsed, lower)?;
+            parsed = reg.mlirpass(mlirpass::Ctx::new(&opt, &interfaces), parsed, lower, x)?;
         }
         Self::convert(&parsed, reg)
     }

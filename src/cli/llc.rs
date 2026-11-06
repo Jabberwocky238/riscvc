@@ -7,9 +7,10 @@
 //!                                         全局 / 别名只给最后一段 ⇒ 各段的汇编按次序拼起来 = 串行编的（逐字节）
 //! 各输入     拼汇编 + 汇编 + 写出           一个输入一个任务
 //! ```
-use super::Jobs;
+use super::Each;
 use crate::ir::{Block, Module, Ty};
 use crate::plugin::Registry;
+use moremath::{Executor, ThreadMulti};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -75,10 +76,11 @@ impl Llc {
             return Ok(());
         }
         let Some(output) = &self.output else { return Err(String::from("要 -o")) };
-        let jobs = self.jobs.map_or_else(Jobs::default, Jobs);
+        // ⭐ 一个池：各输入、各输入里的解析与 pass（嵌套的任务也进这个池）、各分段
+        let pool = self.jobs.map_or_else(ThreadMulti::default, ThreadMulti::from);
         let outputs = self.outputs(output)?;
-        let modules = jobs.map(&self.inputs, |input| self.parse(input)).into_iter().collect::<Result<Vec<_>, _>>()?;
-        let per = jobs.0.get().div_ceil(modules.len()).max(1);
+        let modules = pool.each(&self.inputs, &|input: &PathBuf| self.parse(input, &pool)).into_iter().collect::<Result<Vec<_>, _>>()?;
+        let per = pool.threads().div_ceil(modules.len()).max(1);
         let shards: Vec<Shard> = modules.into_iter().enumerate().flat_map(|(input, m)| Self::split(m, per).into_iter().map(move |module| Shard { input, module })).collect();
         // 目标（模块引用不跨线程 ⇒ 各线程自己按 `--march` 再取一份）
         super::target(self.march.as_deref())?;
@@ -86,7 +88,7 @@ impl Llc {
             let target = super::target(self.march.as_deref())?;
             m.compile_with(&crate::codegen::Options { target, ..Default::default() }).map_err(|e| e.to_string())
         };
-        let asm = jobs.map(&shards, |s| compile(&s.module).map_err(|e| format!("{}：{e}", self.inputs[s.input].display())));
+        let asm = pool.each(&shards, &|s: &Shard| compile(&s.module).map_err(|e| format!("{}：{e}", self.inputs[s.input].display())));
         // 拼：每个输入的各段按次序接起来，第一段之后去掉段头（空模块编出来的那几行属性）
         let head = compile(&Module::default())?;
         let mut texts = vec![String::new(); self.inputs.len()];
@@ -96,7 +98,7 @@ impl Llc {
             out.push_str(if out.is_empty() { &text } else { text.strip_prefix(head.as_str()).unwrap_or(&text) });
         }
         let work: Vec<(usize, String)> = texts.into_iter().enumerate().collect();
-        jobs.map(&work, |(i, asm)| self.finish(&self.inputs[*i], &outputs[*i], asm)).into_iter().collect()
+        pool.each(&work, &|(i, asm): &(usize, String)| self.finish(&self.inputs[*i], &outputs[*i], asm)).into_iter().collect()
     }
 
     /// 各输入的输出路径与出什么。
@@ -124,13 +126,13 @@ impl Llc {
     }
 
     /// 读 + 解析 + pass（每个任务自己一份注册表：插件不要求 `Sync`）。
-    fn parse(&self, input: &Path) -> Result<Module, String> {
+    fn parse(&self, input: &Path, pool: &ThreadMulti) -> Result<Module, String> {
         let mut reg = Registry::default();
         if let Some(p) = &self.lowering {
             reg.lowering(p);
         }
         let text = String::from_utf8(super::read(input)?).map_err(|e| format!("{}：{e}", input.display()))?;
-        let mut module = reg.parse(&text).map_err(|e| format!("{}：{e}", input.display()))?;
+        let mut module = reg.parse_in(&text, pool).map_err(|e| format!("{}：{e}", input.display()))?;
         let pipeline: Vec<&str> = match (self.no_opt, self.passes.is_empty()) {
             (true, _) => Vec::new(),
             // 缺省这一串：mem2reg 把 alloca 提成 SSA 值，gvn 吃掉它暴露出来的冗余计算，

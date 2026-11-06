@@ -63,41 +63,12 @@ fn write(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("{}：{e}", path.display()))
 }
 
-/// 并行的线程数（`-j`）。
-#[derive(Clone, Copy)]
-struct Jobs(std::num::NonZeroUsize);
-
-impl Default for Jobs {
-    /// CPU 数。
-    fn default() -> Self {
-        Self(std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN))
+/// ⭐ 对每一项并行做 `f`，结果按原次序：交给 moremath 的执行器（`-j` 的那个 `ThreadMulti`，解析 / pass 也用它），
+/// 每个工作线程取下一项（大小不一的任务也配得平）。
+trait Each: moremath::Executor {
+    fn each<'t, T: Sync, R: Send + 't>(&self, items: &'t [T], f: &'t (impl Fn(&T) -> R + Sync)) -> Vec<R> {
+        self.execute(items.iter().map(|item| move || f(item)).collect())
     }
 }
 
-impl Jobs {
-    /// ⭐ 对每一项并行做 `f`，结果按原次序。线程从一个计数器取下一项（大小不一的任务也配得平）；一项或一个线程就不开线程。
-    fn map<T: Sync, R: Send>(self, items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-        let n = self.0.get().min(items.len());
-        if n <= 1 {
-            return items.iter().map(f).collect();
-        }
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
-            let workers: Vec<_> = (0..n)
-                .map(|_| {
-                    s.spawn(|| {
-                        let mut done = Vec::new();
-                        loop {
-                            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some(item) = items.get(i) else { break done };
-                            done.push((i, f(item)));
-                        }
-                    })
-                })
-                .collect();
-            workers.into_iter().flat_map(|w| w.join().expect("工作线程 panic")).collect()
-        });
-        out.sort_unstable_by_key(|(i, _)| *i);
-        out.into_iter().map(|(_, r)| r).collect()
-    }
-}
+impl<X: moremath::Executor> Each for X {}

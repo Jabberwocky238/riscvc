@@ -291,7 +291,9 @@ riscvc llc [OPTIONS] -o <OUTPUT> <INPUTS>...
 
 Built-in plugins: dialect `llvm`; pass `dce` (removes side-effect-free instructions whose results are unused).
 
-Parallelism: inputs are parsed in parallel, and each module is split into contiguous runs of functions (balanced by
+Parallelism: one `moremath::ThreadMulti` pool of `-j` threads runs everything — the inputs, the MLIR parsing,
+mlirpass import and lowering passes inside each input (nested tasks join the same pool), and the code generation
+shards. Each module is split into contiguous runs of functions (balanced by
 instruction count) that are compiled in parallel and concatenated in order, so the output is **byte-identical** to a
 serial (`-j 1`) build (checked by `tests/cli.rs`). Functions outside a run are kept as declarations, globals go
 with the last run. Measured on a 16-thread machine under load: 656 input files 0.37 s → 0.15 s (`-j 1` → `-j 16`);
@@ -382,12 +384,13 @@ impl Dialect for Demo {
 let mut reg = Registry::default();      // built-in: llvm dialect, dce pass
 reg.dialect(&Demo);                     // .pass(&MyPass) for passes
 let mut m = reg.parse(text)?;           // ops inside function bodies go to the dialect owning their namespace
+// reg.parse_in(text, &pool)            // parsing, mlirpass import and passes on a moremath executor (ThreadMulti)
 reg.run(&mut m, &["dce"])?;             // passes are selected by name
 let asm = m.compile()?;
 
 // From mlirpass IR, no text in between: after your own PassManager pipeline on `body`,
 // `import` lowers higher-level dialects on the same body (LOWERING) and converts it.
-let m = reg.import(&mut body)?;         // body: mlirpass::Body
+let m = reg.import(&mut body)?;         // body: mlirpass::Body; import_in(&mut body, &pool) runs the passes on a pool
 ```
 
 - `Dialect::register` may register custom assembly formats with mlirformat (by default only the generic form is
@@ -528,8 +531,10 @@ remaining code-size gap against llc mostly comes from.
 
 ## Building and testing
 
-mlirformat 0.4 and mlirpass 0.1 come from crates.io (mlirpass depends on mlirformat ^0.4, so both resolve to one
-mlirformat — modules pass between them in memory). No sibling checkouts are needed.
+mlirformat 0.5.5, mlirpass 0.5 and moremath 0.2.1 must resolve to one copy each (modules pass between mlirformat and
+mlirpass in memory; one moremath executor is handed to both). Until the executor APIs (`parse_in`, `import_in`, …)
+are released, `[patch]` in `Cargo.toml` points mlirformat and mlirpass at sibling checkouts `../mlirformat` and
+`../mlirpass`.
 
 ```bash
 cargo build --release

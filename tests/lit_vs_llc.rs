@@ -158,23 +158,8 @@ fn llvm_tests() {
     // panic 由 catch_unwind 记成失败，⛔ 不刷屏
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    // 各份并行：线程从计数器取下一份
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let results: Vec<(usize, Fails)> = std::thread::scope(|s| {
-        let workers: Vec<_> = (0..threads)
-            .map(|_| {
-                s.spawn(|| {
-                    let mut out = Vec::new();
-                    while let Some(c) = cases.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
-                        out.push(c.run());
-                    }
-                    out
-                })
-            })
-            .collect();
-        workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
-    });
+    // 各份并行：moremath 的 ThreadMulti，每个工作线程取下一份
+    let results: Vec<(usize, Fails)> = moremath::Executor::execute(&moremath::ThreadMulti::default(), cases.iter().map(|c| move || c.run()).collect());
     std::panic::set_hook(hook);
     let runs: usize = results.iter().map(|(n, _)| n).sum();
     let fails: Fails = results.into_iter().flat_map(|(_, f)| f).collect();
