@@ -197,7 +197,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mlirformat"
-version = "0.5.5"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89356052c855b3a20a576a223a1968ab5ae2fe4873abe5e8d1651410a2310f08"
 dependencies = [
  "mlirformat-macros",
  "moremath",
@@ -208,7 +210,9 @@ dependencies = [
 
 [[package]]
 name = "mlirformat-macros"
-version = "0.5.5"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fee2db27c80c825949f13d69fd6802d686892e81da2250d8f2712aeace6d97d6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -217,7 +221,9 @@ dependencies = [
 
 [[package]]
 name = "mlirpass"
-version = "0.5.0"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06af2961c57c99d1a408b8c688d4f958921f349c63814f29954c4c808d54a4ce"
 dependencies = [
  "libm",
  "mlirformat",
@@ -229,7 +235,9 @@ dependencies = [
 
 [[package]]
 name = "mlirpass-macros"
-version = "0.4.0"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd6e8e5cafc4b7b31073ceeb73c052ef8411beb9be8503a7331d0f2f8fce2263"
 dependencies = [
  "proc-macro2",
  "quote",
