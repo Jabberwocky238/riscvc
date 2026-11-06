@@ -346,6 +346,7 @@ Main entry points:
 | `riscvc::ir::Module::compile` | internal IR → RV32 assembly text |
 | `riscvc::asm::Assembler` | assembly text → ELF object (`Options`: float ABI, preprocessing, defines, include dirs, attributes, relax); `.extensions(&[…])` adds custom instructions |
 | `riscvc::link::Linker::link` | `(name, bytes)` objects → executable ELF (`Options`: script, entry, strip, allow-undefined, no-relax) |
+| `riscvc::builtins::Builtin` | runtime functions the code generator calls that riscvc ships itself (compiler-rt names and ABI): `I64_DIVMOD` = `__udivdi3` / `__divdi3` / `__umoddi3` / `__moddi3` for i64 division on RV32 (RV32I only); `text` is GNU assembly, `.object(target)` assembles it. Soft-float, atomics and mul / div without M still need compiler-rt / `compiler_builtins` |
 | `riscvc::ext::Disasm` | iterator of disassembled lines over a code buffer, with optional extensions and a print `Style` |
 | `riscvc::sim::Cpu` | RV32 interpreter: `load` an ELF, `run` / `step`, or `run_on` / `step_on` with custom extensions and MMIO `Device`s; registers `x`, `f`, `pc`, `csr`, sparse `mem` |
 | `riscvc::ext::{Extension, Device}` | traits for custom instructions and memory-mapped devices |

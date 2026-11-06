@@ -15,6 +15,9 @@ pub use regalloc2 as regalloc;
 
 #[cfg(feature = "std")]
 pub mod asm;
+/// 自带的运行时函数（compiler-rt 同名同 ABI）：代码生成会落成调用的 i64 除 / 余。
+#[cfg(feature = "std")]
+pub mod builtins;
 #[cfg(feature = "std")]
 pub mod cli;
 #[cfg(feature = "std")]
