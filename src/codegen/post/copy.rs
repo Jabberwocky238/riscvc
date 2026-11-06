@@ -27,7 +27,7 @@ use smallvec::SmallVec;
 
 /// 物理寄存器编号：整数 `0..32`，浮点 `32..64`。
 type Reg = u8;
-type Set = u64;
+pub(super) type Set = u64;
 
 const fn xr(n: u8) -> Reg {
     n
@@ -121,7 +121,7 @@ fn fshape(form: FForm, rd: u8, rs1: u8, rs2: u8, rs3: u8) -> Option<Shape> {
 }
 
 /// 一条 [`PInst`] 的读集与写集；`None` ⇒ 屏障。
-fn eff(i: &PInst, clob: Set) -> Option<(Set, Set)> {
+pub(super) fn eff(i: &PInst, clob: Set) -> Option<(Set, Set)> {
     let args = mask((10..=17u8).map(xr).chain((10..=17u8).map(fr)));
     match i {
         PInst::Li(rd, _) | PInst::La(rd, ..) => Some((0, if *rd == 0 { 0 } else { bit(xr(*rd)) })),
@@ -192,9 +192,14 @@ impl PFunc {
         }
     }
 
+    /// 调用破坏的物理寄存器（调用方保存集）。
+    pub(super) fn clobbered() -> Set {
+        mask((0..32u8).filter(|&n| Abi::caller_saved().contains(X(n).preg())).map(xr).chain((0..32u8).filter(|&n| Abi::caller_saved().contains(F(n).preg())).map(fr)))
+    }
+
     /// ⭐ 分配后的拷贝消除；返回删掉的条数。
     pub(super) fn propagate_copies(&mut self) -> usize {
-        let clob = mask((0..32u8).filter(|&n| Abi::caller_saved().contains(X(n).preg())).map(xr).chain((0..32u8).filter(|&n| Abi::caller_saved().contains(F(n).preg())).map(fr)));
+        let clob = Self::clobbered();
         let live_out = self.live_out(clob);
         (0..self.blocks.len()).map(|b| self.block_copies(b, live_out[b], clob)).sum()
     }

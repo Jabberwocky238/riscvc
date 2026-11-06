@@ -337,7 +337,7 @@ impl<'a> Lower<'a> {
                     text.push_str(itoa(*r).as_str());
                     text.push_str(rest);
                 }
-                self.push(PInst::Ext(text, *bytes));
+                self.push(PInst::Ext(text, *bytes, !d.is_empty()));
             }
             MOp::SpAlloc => {
                 self.rrr(IOp::Sub, X::SP.0, X::SP.0, u[0]);

@@ -6,6 +6,7 @@
 //! branch   分支折叠：穿过空块、两边同目标的条件跳转变无条件、删走不到的块；
 //!          之后重排块布局，让跳转尽量落成「下一块」（同 LLVM MachineBlockPlacement）
 //! copy     分配后的拷贝消除（同 LLVM MachineCopyPropagation；⭐ regalloc2 自己没有这一步）
+//! near     要两条才能装的常量，块里另有寄存器此刻装着相差 ±2047 以内的常量 ⇒ 一条 `addi rd, rs, 差`
 //! relax    分支松弛：按真实字节数算距离，够不着 ±4 KiB 的条件跳转改长形式（同 LLVM 的 BranchRelaxation）
 //! print    ⇒ 汇编文本（落到布局里下一块的跳转不出；真分支落在下一块就反过来跳）
 //! ```
@@ -13,6 +14,7 @@ mod branch;
 mod copy;
 mod frame;
 mod lower;
+mod near;
 mod print;
 mod relax;
 
@@ -34,8 +36,9 @@ pub enum PInst {
     Call(String),
     /// `unimp`
     Trap,
-    /// ⭐ 扩展包的指令：整行汇编文本（由 [`crate::codegen::Sel::emit`] 的模板填出来）。
-    Ext(String, u32),
+    /// ⭐ 扩展包的指令：整行汇编文本（由 [`crate::codegen::Sel::emit`] 的模板填出来）、字节数、写不写寄存器（有没有定义）。
+    /// 这一层不知道它读写哪些寄存器；不写寄存器的（加速器的发射字一类）分配后的 pass 可以跨过去看。
+    Ext(String, u32, bool),
 }
 
 /// 块的结尾。
@@ -100,6 +103,7 @@ impl PFunc {
         let mut f = lower::Lower::new(sel, mf, out, id).run();
         f.fold_branches();
         f.propagate_copies();
+        f.near_constants();
         f.fold_branches();
         f.place();
         f.relax();
