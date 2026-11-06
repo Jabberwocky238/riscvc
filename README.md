@@ -532,7 +532,7 @@ remaining code-size gap against llc mostly comes from.
 
 ## Building and testing
 
-mlirformat 0.6.0, mlirpass 0.6 and moremath 0.2.1 must resolve to one copy each (modules pass between mlirformat and
+mlirformat 0.6.0, mlirpass 0.7 and moremath 0.2.1 must resolve to one copy each (modules pass between mlirformat and
 mlirpass in memory; one moremath executor is handed to both). All three come from crates.io; no sibling
 checkouts are needed.
 

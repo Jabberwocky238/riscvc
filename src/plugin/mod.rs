@@ -16,7 +16,8 @@
 pub use crate::ir::Lowering;
 use crate::ir::{Error, Module};
 use mlirformat::MlirOpt;
-use mlirpass::{PassManager, Threads};
+use mlirpass::PassManager;
+use moremath::{Executor, ThreadSingle};
 pub use crate::opt::{DCE, Dce, GVN, Gvn, LICM, Licm, MEM2REG, Mem2Reg, Pass, SCCP, SIMPLIFY, Sccp, Simplify};
 
 /// ⭐ 方言插件。
@@ -171,14 +172,14 @@ impl<'p> Registry<'p> {
 
     /// ⭐ `m` 交给 mlirpass：要下降就先跑 [`Registry::lowering`]，再跑 [`Registry::optimizing`]（有的话）；
     /// 导入与嵌套在 `llvm.func(…)` 里的 pass 按函数在 `x` 上并行。
-    pub fn mlirpass<'a>(&self, ctx: mlirpass::Ctx<'a>, m: mlirformat::Module<'a>, lower: bool, x: &Threads) -> Result<mlirformat::Module<'a>, Error> {
+    pub fn mlirpass<'a, X: Executor + Sync>(&self, ctx: mlirpass::Ctx<'a>, m: mlirformat::Module<'a>, lower: bool, x: &X) -> Result<mlirformat::Module<'a>, Error> {
         let mut body = mlirpass::Body::import_in(ctx, m, x).map_err(Error::from)?;
         self.passes_on(&mut body, lower, x)?;
         Ok(mlirformat::Module::from(&body))
     }
 
     /// 在 `body` 上原地跑 [`Registry::lowering`]（`lower` 时）与 [`Registry::optimizing`]（有的话），任务交给 `x`。
-    fn passes_on(&self, body: &mut mlirpass::Body<'_>, lower: bool, x: &Threads) -> Result<(), Error> {
+    fn passes_on<X: Executor + Sync>(&self, body: &mut mlirpass::Body<'_>, lower: bool, x: &X) -> Result<(), Error> {
         let passes = mlirpass::Passes::upstream();
         let root = body.root;
         for p in lower.then_some(self.lowering).into_iter().chain(self.optimizing) {
@@ -187,13 +188,13 @@ impl<'p> Registry<'p> {
         Ok(())
     }
 
-    /// ⭐ MLIR 文本 ⇒ 内部 IR，单线程（一个线程的池，不起线程）；要并行用 [`Registry::parse_in`]。
+    /// ⭐ MLIR 文本 ⇒ 内部 IR，单线程（[`ThreadSingle`]）；要并行用 [`Registry::parse_in`]。
     pub fn parse(&self, text: &str) -> Result<Module, Error> {
-        self.parse_in(text, &PassManager::one_thread())
+        self.parse_in(text, &ThreadSingle)
     }
 
-    /// ⭐ MLIR 文本 ⇒ 内部 IR：解析、导入 mlirpass、pass 都在池 `x`（`ThreadMulti`）上并行，结果与单线程的相同。
-    pub fn parse_in(&self, text: &str, x: &Threads) -> Result<Module, Error> {
+    /// ⭐ MLIR 文本 ⇒ 内部 IR：解析、导入 mlirpass、pass 都在 moremath 执行器 `x`（通常是一个 `ThreadMulti`）上并行，结果与单线程的相同。
+    pub fn parse_in<X: Executor + Sync>(&self, text: &str, x: &X) -> Result<Module, Error> {
         Module::parse_with(text, self, x)
     }
 
@@ -201,11 +202,11 @@ impl<'p> Registry<'p> {
     /// [`Registry::lowering`]（有 `llvm` / `builtin` / 插件方言之外的 op 时）与 [`Registry::optimizing`]，再转内部 IR。
     /// 插件方言的 op 不用在 `body.ctx` 里注册语法：这里不解析文本。
     pub fn import(&self, body: &mut mlirpass::Body<'_>) -> Result<Module, Error> {
-        self.import_in(body, &PassManager::one_thread())
+        self.import_in(body, &ThreadSingle)
     }
 
     /// [`Registry::import`]，pass 在 `x` 上并行。
-    pub fn import_in(&self, body: &mut mlirpass::Body<'_>, x: &Threads) -> Result<Module, Error> {
+    pub fn import_in<X: Executor + Sync>(&self, body: &mut mlirpass::Body<'_>, x: &X) -> Result<Module, Error> {
         let lower = body.ops_in(body.root).into_iter().any(|o| self.foreign(&body[o].name));
         self.passes_on(body, lower, x)?;
         Module::convert(&mlirformat::Module::from(&*body), self)
