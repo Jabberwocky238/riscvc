@@ -530,6 +530,23 @@ copy coalescing, plus llc's lowering of `cttz` (de Bruijn table). The register a
 no move hints, no rematerialization and coalesces only two-address operands and block parameters, which is where the
 remaining code-size gap against llc mostly comes from.
 
+Two opt-in register-map options in `codegen::Options` (off by default; built for docc, whose issue streams need
+thousands of distinct 32-bit constants and almost never touch the FPU):
+
+- `pool: &[u8]` — base registers for a module-wide constant pool in `.rodata` (docc passes `gp`, `tp`; each base
+  reaches 1024 words). Two-instruction constants left after the near-constant pass become one `lw rd, off(base)`, the
+  most-used values first. Bases are removed from the allocatable set. Every function that uses the pool loads the bases
+  on entry, and every function in the module reloads them after calling outside the module (or through a pointer, or
+  a same-module function that tail-calls out), so inside the module a base always holds this module's pool. The host
+  must make sure no other code relies on those registers.
+- `fpr_spill: bool` — integer spill slots go into FPRs the function does not use (`fmv.w.x` / `fmv.x.w` instead of
+  `sw` / `lw`). Leaf functions use caller-saved FPRs first; functions that make calls use only callee-saved ones,
+  which the prologue saves. Hottest slots first.
+
+`tests/elf_vs_llvm.rs` `o0_regmap` / `o2_regmap` / `d_o0_regmap` run the same programs with both options on (the
+builtins are separate modules, which exercises the cross-module reload). On docc's qwen3_8b ccu0 they cut
+95,626 ⇒ 87,734 instructions and 9,021 ⇒ 4,271 stack accesses.
+
 ## Building and testing
 
 mlirformat 0.6.0, mlirpass 0.7 and moremath 0.2.1 must resolve to one copy each (modules pass between mlirformat and

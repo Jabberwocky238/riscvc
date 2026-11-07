@@ -7,14 +7,19 @@
 //!          之后重排块布局，让跳转尽量落成「下一块」（同 LLVM MachineBlockPlacement）
 //! copy     分配后的拷贝消除（同 LLVM MachineCopyPropagation；⭐ regalloc2 自己没有这一步）
 //! near     要两条才能装的常量，块里另有寄存器此刻装着相差 ±2047 以内的常量 ⇒ 一条 `addi rd, rs, 差`
+//! fslot    （选项）整数溢出槽放进本函数没用到的浮点寄存器（`fmv.w.x` / `fmv.x.w`，⛔ 访存）
+//! pool     （选项，模块级）剩下要两条的常量进常量池 ⇒ 一条 `lw rd, 偏移(基址)`
 //! relax    分支松弛：按真实字节数算距离，够不着 ±4 KiB 的条件跳转改长形式（同 LLVM 的 BranchRelaxation）
 //! print    ⇒ 汇编文本（落到布局里下一块的跳转不出；真分支落在下一块就反过来跳）
 //! ```
 mod branch;
 mod copy;
 mod frame;
+mod fslot;
 mod lower;
 mod near;
+mod pool;
+pub use pool::Pool;
 mod print;
 mod relax;
 
@@ -99,8 +104,9 @@ pub struct PFunc {
 impl PFunc {
     /// ⭐ 一个函数：分配结果 ⇒ PFunc ⇒ 分支折叠 ⇒ 分支松弛（之后用 `to_string` 出汇编）。
     #[must_use]
-    pub fn new(sel: &Selected, mf: &MFunc, out: &Output, id: usize) -> Self {
-        let mut f = lower::Lower::new(sel, mf, out, id).run();
+    /// `fpr_spill`：整数溢出槽放进空着的浮点寄存器（见 [`fslot`]）。
+    pub fn new(sel: &Selected, mf: &MFunc, out: &Output, id: usize, fpr_spill: bool) -> Self {
+        let mut f = lower::Lower::new(sel, mf, out, id, fpr_spill).run();
         f.fold_branches();
         f.propagate_copies();
         f.near_constants();

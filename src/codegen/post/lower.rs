@@ -1,6 +1,7 @@
 //! 机器 IR + 分配结果 ⇒ [`PFunc`]：序言 / 尾声、regalloc2 的搬运、虚拟寄存器换成分到的物理寄存器、
 //! 帧里的地址落成 `sp` / `s0` 加偏移，`select` 切成「条件跳转 + 搬运块」。
 use super::frame::Frame;
+use super::fslot::FSlots;
 use super::{PBlock, PFunc, PInst, Selected, Term};
 use crate::codegen::mir::{Base, Loop, MFunc, MInst, MOp, R};
 use crate::feature::{Atomic, Double, Float, Zicsr};
@@ -28,6 +29,8 @@ pub struct Lower<'a> {
     out: &'a Output,
     id: usize,
     frame: Frame,
+    /// 放进浮点寄存器的溢出槽。
+    fslots: FSlots,
     blocks: Vec<PBlock>,
     layout: Vec<usize>,
     cur: usize,
@@ -40,9 +43,11 @@ fn itoa(n: u8) -> String {
 
 impl<'a> Lower<'a> {
     #[must_use]
-    pub fn new(sel: &'a Selected, mf: &'a MFunc, out: &'a Output, id: usize) -> Self {
+    pub fn new(sel: &'a Selected, mf: &'a MFunc, out: &'a Output, id: usize, fpr_spill: bool) -> Self {
         let empty = PBlock { insts: Vec::new(), term: Term::Unreachable };
-        Self { sel, mf, out, id, frame: Frame::new(sel, out), blocks: vec![empty; mf.blocks.len()], layout: Vec::new(), cur: 0 }
+        let fslots = FSlots::new(sel, out, fpr_spill);
+        let frame = Frame::new(sel, out, fslots.saved());
+        Self { sel, mf, out, id, frame, fslots, blocks: vec![empty; mf.blocks.len()], layout: Vec::new(), cur: 0 }
     }
 
     /// ⭐ 按布局逐块落：入口块先放序言。
@@ -188,6 +193,25 @@ impl<'a> Lower<'a> {
         let float = from.as_reg().or(to.as_reg()).is_some_and(|p| p.class() == RegClass::Float);
         match (from.as_reg(), to.as_reg(), from.as_stack(), to.as_stack()) {
             (Some(a), Some(b), ..) => self.mov(Self::hw(b), Self::hw(a), float),
+            // 放在浮点寄存器里的槽：fmv.x.w / fmv.w.x；槽到槽经 t6（两头都在浮点寄存器就直接 fmv）
+            (None, Some(b), Some(s), _) if let Some(f) = self.fslots.get(s.index()) => self.rrr(Float::FmvXW, Self::hw(b), f, 0),
+            (Some(a), None, _, Some(s)) if let Some(f) = self.fslots.get(s.index()) => self.rrr(Float::FmvWX, f, Self::hw(a), 0),
+            (None, None, Some(s), Some(t)) if self.fslots.get(s.index()).is_some() || self.fslots.get(t.index()).is_some() => {
+                match (self.fslots.get(s.index()), self.fslots.get(t.index())) {
+                    (Some(fs), Some(ft)) => self.mov(ft, fs, true),
+                    (Some(fs), None) => {
+                        self.rrr(Float::FmvXW, SCRATCH, fs, 0);
+                        let (base, off) = self.frame.spill(t.index());
+                        self.store(IOp::Sw, SCRATCH, base, off);
+                    }
+                    (None, Some(ft)) => {
+                        let (base, off) = self.frame.spill(s.index());
+                        self.load(IOp::Lw, SCRATCH, base, off);
+                        self.rrr(Float::FmvWX, ft, SCRATCH, 0);
+                    }
+                    (None, None) => unreachable!(),
+                }
+            }
             (None, Some(b), Some(s), _) => {
                 let (base, off) = self.frame.spill(s.index());
                 self.load(self.word_ops(b.class()).0, Self::hw(b), base, off);

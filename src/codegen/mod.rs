@@ -46,6 +46,11 @@ pub struct Options<'a> {
     /// 可分配的寄存器。宿主要独占某几个（比如扩展包把常量钉在 `x5…x10`）就写
     /// `Allocatable::default().without_int(&[5, 6, 7, 8, 9, 10])`。
     pub registers: Allocatable,
+    /// 常量池的基址寄存器（缺省空 ⇒ 不用常量池）。要两条才能装的常量改成一条 `lw`，每个基址够 1024 个字；
+    /// 基址寄存器从可分配里拿掉。⚠ 宿主要保证模块外的代码不动它们（`gp` / `tp` 这类 ABI 不分配的最合适）。
+    pub pool: &'a [u8],
+    /// 整数溢出槽放进本函数没用到的浮点寄存器（`fmv.w.x` / `fmv.x.w`，⛔ 访存）。要有 F。
+    pub fpr_spill: bool,
 }
 
 /// 代码生成的旁路观察者：每个函数分配完寄存器之后收到一次分配器的回执。
@@ -85,6 +90,9 @@ impl Module {
 
     fn compile_all(&self, obs: &mut impl Observer, opts: &Options<'_>) -> Result<String, Error> {
         let mut text = format!("\t.attribute\t4, 16\n\t.attribute\t5, \"{}\"\n", opts.target.march());
+        let registers = opts.registers.clone().without_int(opts.pool);
+        let fpr_spill = opts.fpr_spill && opts.target.float();
+        let mut bodies: Vec<(usize, post::PFunc)> = Vec::new();
         for (id, f) in self.functions.iter().enumerate() {
             if f.blocks.is_empty() {
                 continue;
@@ -96,7 +104,7 @@ impl Module {
                 return Err(Error::Select(format!("{}：机器块没有以终结指令收尾", f.name)));
             }
             let ra = crate::regalloc::RegallocOptions { verbose_log: false, validate_ssa: cfg!(debug_assertions), ..Default::default() };
-            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp, sel.double, &opts.registers), &ra).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
+            let out = crate::regalloc::run(&mf, &abi::Abi::machine_env(sel.dynamic_sp, sel.double, &registers), &ra).map_err(|e| Error::Regalloc(format!("{}：{e:?}", f.name)))?;
             let mut multi: Vec<(&'static str, usize, usize)> = Vec::new();
             if obs.wants_shape() {
                 // 一个 vreg 在第 `i` 条之后还活着：之后还有指令读它，或它被跳转当实参传出去。
@@ -123,7 +131,14 @@ impl Module {
                 }
             }
             obs.allocated(&f.name, Shape { insts: mf.insts.len(), multi_fixed: &multi }, &out);
-            let body = post::PFunc::new(&sel, &mf, &out, id).to_string();
+            bodies.push((id, post::PFunc::new(&sel, &mf, &out, id, fpr_spill)));
+        }
+        let named: Vec<(&str, &post::PFunc)> = bodies.iter().map(|(id, b)| (self.functions[*id].name.as_str(), b)).collect();
+        let pool = post::Pool::new(&named, opts.pool);
+        for (id, mut body) in bodies {
+            let f = &self.functions[id];
+            pool.apply(&mut body);
+            let body = body.to_string();
             let section = f.section.as_deref().map_or_else(|| String::from("\t.text"), |s| format!("\t.section\t{s},\"ax\",@progbits"));
             let _ = writeln!(text, "{section}");
             Self::binding(&mut text, &f.name, f.linkage, f.hidden);
@@ -132,6 +147,7 @@ impl Module {
             text.push_str(&body);
             let _ = writeln!(text, ".Lfunc_end{id}:\n\t.size\t{}, .Lfunc_end{id}-{}\n", f.name, f.name);
         }
+        text.push_str(&pool.data());
         for g in &self.globals {
             self.global_asm(g, &mut text);
         }

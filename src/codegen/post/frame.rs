@@ -31,7 +31,8 @@ impl Frame {
     }
 
     #[must_use]
-    pub fn new(sel: &Selected, out: &Output) -> Self {
+    /// `extra`：分配结果之外还要保存的被调方保存寄存器（[`super::fslot::FSlots::saved`]）。
+    pub fn new(sel: &Selected, out: &Output, extra: impl IntoIterator<Item = PReg>) -> Self {
         let fp = sel.dynamic_sp;
         // 用到的被调方保存寄存器
         let mut used: Vec<PReg> = Vec::new();
@@ -48,6 +49,11 @@ impl Frame {
         for (_, Edit::Move { from, to }) in &out.edits {
             note(*from);
             note(*to);
+        }
+        for p in extra {
+            if !used.contains(&p) {
+                used.push(p);
+            }
         }
         let mut save_regs: Vec<PReg> = Vec::new();
         if sel.calls {

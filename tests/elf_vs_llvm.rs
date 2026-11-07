@@ -65,10 +65,11 @@ fn missing<'a>(objs: impl Iterator<Item = &'a [u8]>, target: &Target<'static>) -
     (String::from("missing.o"), riscvc::asm::Assembler::new().target(target.clone()).assemble(&format!("    .text\n{asm}")).unwrap())
 }
 
-fn riscvc_obj(mlir: &Path, target: &Target<'static>) -> Result<Vec<u8>, String> {
+/// `map`：docc 的寄存器地图（gp / tp 常量池 + 整数溢出槽进浮点寄存器）。
+fn riscvc_obj(mlir: &Path, target: &Target<'static>, map: bool) -> Result<Vec<u8>, String> {
     let text = std::fs::read_to_string(mlir).map_err(|e| e.to_string())?;
     let m = riscvc::ir::Module::try_from(text.as_str()).map_err(|e| format!("转换：{e}"))?;
-    let asm = m.compile_with(&riscvc::codegen::Options { target: target.clone(), ..Default::default() }).map_err(|e| format!("代码生成：{e}"))?;
+    let asm = m.compile_with(&riscvc::codegen::Options { target: target.clone(), pool: if map { &[3, 4] } else { &[] }, fpr_spill: map, ..Default::default() }).map_err(|e| format!("代码生成：{e}"))?;
     riscvc::asm::Assembler::new().target(target.clone()).assemble(&asm).map_err(|e| format!("汇编：{e}"))
 }
 
@@ -84,12 +85,12 @@ fn llc_obj(llvm: &llvm::Llvm, ll: &Path, out: &Path, target: &Target<'static>) -
     std::fs::read(out).unwrap()
 }
 
-/// `name`：档（O0 / O2）；`target`：两边都按它编（builtins 也是）；`dirs`：（fixture 目录, 自检）。
-fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)]) {
+/// `name`：档（O0 / O2）；`target`：两边都按它编（builtins 也是）；`dirs`：（fixture 目录, 自检）；`map`：riscvc 这边开寄存器地图（见 [`riscvc_obj`]）。
+fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)], map: bool) {
     let Some(llvm) = llvm::Llvm::locate() else { return };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let builtins = std::fs::read_dir(root.join("builtins")).unwrap();
-    let tmp = std::env::temp_dir().join(format!("riscvc-elf-{name}-{}-{}", target.march(), std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("riscvc-elf-{name}-{}{}-{}", target.march(), if map { "-regmap" } else { "" }, std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // 桩：按调用约定选
     let support: Vec<(String, Vec<u8>)> = ["support.o", "mulsi3.o"].iter().map(|n| (String::from(*n), std::fs::read(root.join("support").join(target.abi()).join(n)).unwrap())).collect();
@@ -103,7 +104,7 @@ fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)]) {
     let objs = par::map(&builtins, |k, m| {
         let target = &Target::parse(&march).unwrap();
         let stem = m.file_stem().unwrap().to_str().unwrap();
-        let ours = riscvc_obj(m, target).unwrap_or_else(|e| panic!("{stem}: {e}"));
+        let ours = riscvc_obj(m, target, map).unwrap_or_else(|e| panic!("{stem}: {e}"));
         let theirs = llc_obj(&llvm, &root.join(format!("builtins/{stem}.ll")), &tmp.join(format!("b{k}.o")), target);
         (format!("{stem}.o"), ours, theirs)
     });
@@ -157,7 +158,7 @@ fn level(name: &str, target: &Target<'static>, dirs: &[(&str, bool)]) {
             return Verdict::Skip(None);
         }
         // 对照自己没过（测试本身在这个目标上不成立）的，记下来照比
-        let obj = match riscvc_obj(m, target) {
+        let obj = match riscvc_obj(m, target, map) {
             Ok(obj) => obj,
             Err(e) => return Verdict::Ran(Some(format!("{stem}: {e}")), None),
         };
@@ -199,12 +200,24 @@ const DEFAULT: &[(&str, bool)] = &[("unit", true), ("programs", false)];
 
 #[test]
 fn o2() {
-    level("O2", &Target::default(), DEFAULT);
+    level("O2", &Target::default(), DEFAULT, false);
 }
 
 #[test]
 fn o0() {
-    level("O0", &Target::default(), DEFAULT);
+    level("O0", &Target::default(), DEFAULT, false);
+}
+
+/// docc 的寄存器地图（常量池 gp / tp + 溢出槽进浮点寄存器）：同两组；builtins 各是一个模块，跨模块调用之后要重装基址。
+#[test]
+fn o2_regmap() {
+    level("O2", &Target::default(), DEFAULT, true);
+}
+
+/// O0 溢出最多：浮点寄存器当溢出槽的主要考场。
+#[test]
+fn o0_regmap() {
+    level("O0", &Target::default(), DEFAULT, true);
 }
 
 /// A 扩展（rv32imaf）：`tests/programs-a`（原子操作）两边都开 +a。
@@ -214,12 +227,12 @@ fn a() -> Target<'static> {
 
 #[test]
 fn a_o2() {
-    level("O2", &a(), &[("programs-a", false)]);
+    level("O2", &a(), &[("programs-a", false)], false);
 }
 
 #[test]
 fn a_o0() {
-    level("O0", &a(), &[("programs-a", false)]);
+    level("O0", &a(), &[("programs-a", false)], false);
 }
 
 /// D 扩展（rv32imfd，ilp32d）：`tests/programs-d`（double），外加缺省的两组整个按 D 再比一遍（builtins 也按 D 编）。
@@ -229,16 +242,22 @@ fn d() -> Target<'static> {
 
 #[test]
 fn d_o2() {
-    level("O2", &d(), &[("programs-d", false), ("unit", true), ("programs", false)]);
+    level("O2", &d(), &[("programs-d", false), ("unit", true), ("programs", false)], false);
 }
 
 #[test]
 fn d_o0() {
-    level("O0", &d(), &[("programs-d", false), ("unit", true), ("programs", false)]);
+    level("O0", &d(), &[("programs-d", false), ("unit", true), ("programs", false)], false);
+}
+
+/// 有 D：浮点寄存器 64 位、`ft11` 留给成环的搬运，溢出槽进浮点寄存器照样对。
+#[test]
+fn d_o0_regmap() {
+    level("O0", &d(), &[("programs-d", false), ("unit", true), ("programs", false)], true);
 }
 
 /// C + D：同一组 double 程序，开 C（汇编器自动压缩，含 Zcd 的 c.fld / c.fsd）。
 #[test]
 fn dc_o2() {
-    level("O2", &d().with(&riscvc::feature::builtin::C), &[("programs-d", false), ("programs", false)]);
+    level("O2", &d().with(&riscvc::feature::builtin::C), &[("programs-d", false), ("programs", false)], false);
 }
